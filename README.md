@@ -2,7 +2,7 @@
 
 MusicArk is a cross-platform application for preserving and restoring a personal music collection.
 
-This repository currently contains the `v0.5-download-system` stage:
+This repository currently contains the `v0.6-yandex-download` stage:
 
 - Python package skeleton;
 - core configuration and error model;
@@ -12,6 +12,7 @@ This repository currently contains the `v0.5-download-system` stage:
 - Yandex Music provider scan pipeline with normalized models and raw responses;
 - local library recursive scan with local audio indexing;
 - universal download-system with queue, task statuses and local import provider;
+- yandex download provider integrated into download-system (single and batch tasks);
 - CLI commands:
   - `musicark health-check`
   - `musicark db-init`
@@ -27,6 +28,8 @@ This repository currently contains the `v0.5-download-system` stage:
   - `musicark download queue`
   - `musicark download run --id "<task_id>"`
   - `musicark import file "<file>"`
+  - `musicark yandex download-track --id "<track_id>" --quality best`
+  - `musicark yandex download-likes --limit 10 --quality best`
 
 Yandex dependency is pinned in `requirements-yandex.txt`:
 

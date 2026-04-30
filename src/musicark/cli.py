@@ -18,6 +18,7 @@ from musicark.providers.yandex_music_provider import (
 )
 from musicark.providers.local_library import LocalLibraryError, LocalLibraryProvider
 from musicark.download.provider import LocalImportProvider
+from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.download.system import DownloadSystem
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
 
@@ -42,6 +43,34 @@ def build_parser() -> argparse.ArgumentParser:
     yandex_subparsers.add_parser("scan-likes", help="Scan liked tracks only.")
     yandex_subparsers.add_parser("scan-playlists", help="Scan playlists only.")
     yandex_subparsers.add_parser("scan-all", help="Scan account, likes and playlists.")
+    yandex_download_track = yandex_subparsers.add_parser(
+        "download-track", help="Download one Yandex track by id."
+    )
+    yandex_download_track.add_argument("--id", required=True, help="Yandex track id.")
+    yandex_download_track.add_argument(
+        "--quality",
+        default="best",
+        help="Download quality hint: best or bitrate number (e.g. 192, 320).",
+    )
+    yandex_download_track.add_argument(
+        "--target-folder",
+        default=".musicark/downloads/yandex",
+        help="Destination folder for downloaded track.",
+    )
+    yandex_download_likes = yandex_subparsers.add_parser(
+        "download-likes", help="Download liked tracks through download-system."
+    )
+    yandex_download_likes.add_argument("--limit", type=int, default=10, help="Max tracks to enqueue.")
+    yandex_download_likes.add_argument(
+        "--quality",
+        default="best",
+        help="Download quality hint: best or bitrate number.",
+    )
+    yandex_download_likes.add_argument(
+        "--target-folder",
+        default=".musicark/downloads/yandex",
+        help="Destination folder for downloaded tracks.",
+    )
 
     local_parser = subparsers.add_parser("local", help="Run local library commands.")
     local_subparsers = local_parser.add_subparsers(dest="local_command", required=True)
@@ -109,6 +138,9 @@ def main() -> int:
 
     if args.command == "yandex":
         provider = YandexMusicProvider(base_dir=base_dir)
+        download_system = DownloadSystem(app.db_init())
+        download_system.register_provider(LocalImportProvider())
+        download_system.register_provider(YandexMusicDownloadProvider(base_dir=base_dir))
         try:
             if args.yandex_command == "auth-check":
                 print(json.dumps(provider.auth_check(), ensure_ascii=False, indent=2))
@@ -135,6 +167,40 @@ def main() -> int:
                 db_path = app.db_init()
                 result = provider.scan_all(database_path=db_path)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+            if args.yandex_command == "download-track":
+                task = download_system.create_task(
+                    task_type="yandex_download",
+                    source_id=args.id,
+                    provider_id="yandex_music_download",
+                    target_folder=args.target_folder,
+                )
+                task.raw_payload = {"track_id": args.id, "quality": args.quality}
+                # update payload before execution
+                from musicark.storage.download_storage import DownloadStorageRepository
+
+                DownloadStorageRepository(app.resolve_database_path()).upsert_task(task)
+                result = download_system.run_task(task.id)
+                print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+                return 0
+            if args.yandex_command == "download-likes":
+                tracks = provider.list_tracks()[: max(args.limit, 0)]
+                results = []
+                from musicark.storage.download_storage import DownloadStorageRepository
+
+                task_storage = DownloadStorageRepository(app.resolve_database_path())
+                for track in tracks:
+                    task = download_system.create_task(
+                        task_type="yandex_download",
+                        source_id=track.external_id,
+                        provider_id="yandex_music_download",
+                        target_folder=args.target_folder,
+                    )
+                    task.raw_payload = {"track_id": track.external_id, "quality": args.quality}
+                    task_storage.upsert_task(task)
+                    done = download_system.run_task(task.id)
+                    results.append(asdict(done))
+                print(json.dumps(results, ensure_ascii=False, indent=2))
                 return 0
         except (YandexTokenMissingError, YandexAuthenticationError, YandexMusicError) as exc:
             print(str(exc))
@@ -163,6 +229,7 @@ def main() -> int:
         db_path = app.db_init()
         system = DownloadSystem(db_path)
         system.register_provider(LocalImportProvider())
+        system.register_provider(YandexMusicDownloadProvider(base_dir=base_dir))
 
         if args.command == "download":
             if args.download_command == "task-create":

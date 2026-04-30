@@ -31,3 +31,9 @@
 - интерфейс `DownloadProvider` в `src/musicark/download/provider.py`;
 - `LocalImportProvider` как первый рабочий backend через общий download-system;
 - отсутствие привязки к Яндекс и torrent backend на этом этапе.
+
+## Расширение v0.6
+
+- добавлен `YandexMusicDownloadProvider` для скачивания треков Яндекс Музыки;
+- используется тот же `DownloadTask` lifecycle и queue;
+- batch-запуск реализован через CLI `yandex download-likes --limit ...`.

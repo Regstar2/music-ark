@@ -90,12 +90,12 @@ class DownloadSystem:
             local_id = self._local_storage.upsert_local_audio_file_and_return_id(local_audio_file)
             source = TrackSource(
                 track_id=f"local:{local_audio_file.sha256}",
-                source_type="local_file",
-                provider_id="local_library",
-                external_id=local_audio_file.path,
+                source_type="local_file" if task.provider_id == "local_import" else "yandex_music",
+                provider_id="local_library" if task.provider_id == "local_import" else "yandex_music",
+                external_id=local_audio_file.path if task.provider_id == "local_import" else task.source_id,
                 url=local_audio_file.path,
                 availability="available",
-                raw_data={"origin_task_id": task.id},
+                raw_data={"origin_task_id": task.id, "download_provider_id": task.provider_id},
             )
             self._local_storage.upsert_track_source(source)
 

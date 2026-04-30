@@ -63,3 +63,8 @@ Download-system добавляет события:
 - `download_task_created`;
 - `download_task_completed`;
 - `download_task_failed`.
+
+## Расширение v0.6
+
+Yandex download tasks используют те же события `download_task_*`, что и local import,
+поэтому ошибки и успешные загрузки треков Яндекс Музыки видны в общем журнале.

@@ -6,6 +6,12 @@ from pathlib import Path
 
 from .config import AppConfig, load_config
 from musicark.storage.database import initialize_database
+from musicark.providers import (
+    LocalLibraryProviderStub,
+    ProviderRegistry,
+    YandexMusicProviderStub,
+)
+from musicark.storage.provider_storage import ProviderStorageRepository
 
 
 class MusicArkApp:
@@ -14,6 +20,13 @@ class MusicArkApp:
     def __init__(self, base_dir: Path | None = None) -> None:
         self._base_dir = base_dir
         self.config = load_config(base_dir)
+        self.provider_registry = ProviderRegistry()
+        self._register_default_providers()
+
+    def _register_default_providers(self) -> None:
+        """Register architecture stubs without coupling core to service API calls."""
+        self.provider_registry.register(YandexMusicProviderStub())
+        self.provider_registry.register(LocalLibraryProviderStub())
 
     def resolve_database_path(self) -> Path:
         """Resolve configured DB path relative to base directory/home."""
@@ -30,10 +43,14 @@ class MusicArkApp:
             "status": "ok",
             "database_exists": db_path.exists(),
             "database_path": str(db_path),
+            "providers": self.provider_registry.list_ids(),
         }
 
     def db_init(self) -> Path:
         """Initialize storage schema and return DB path."""
         db_path = self.resolve_database_path()
         initialize_database(db_path)
+        provider_storage = ProviderStorageRepository(db_path)
+        for provider in self.provider_registry.list_providers():
+            provider_storage.upsert_provider(provider)
         return db_path

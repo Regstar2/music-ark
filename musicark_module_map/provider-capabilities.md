@@ -31,3 +31,12 @@
 - [[provider-capabilities]] -> [[future-providers]]
 - [[provider-capabilities]] -> [[ui]]
 - [[provider-capabilities]] -> [[sync-planner]]
+
+## Реализация v0.2
+
+`ProviderCapabilities` реализован как универсальная dataclass-модель в
+`src/musicark/providers/models.py` и используется:
+
+- в `MusicProvider.capabilities`;
+- в `ProviderRegistry`;
+- при сохранении provider metadata в [[storage]].

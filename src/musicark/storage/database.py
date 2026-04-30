@@ -17,6 +17,31 @@ SCHEMA_STATEMENTS = (
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS providers (
+        provider_id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS track_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        track_id TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        url TEXT,
+        availability TEXT,
+        raw_data_json TEXT,
+        first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(provider_id, external_id)
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
@@ -41,7 +66,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.1.0')
+                    VALUES('schema_version', '0.2.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

@@ -35,3 +35,11 @@
 - инициализация SQLite схемы (`app_metadata`, `audit_log`);
 - минимальный репозиторий для записи событий в [[history-audit-log]];
 - отсутствие зависимости от provider-specific таблиц.
+
+## Расширение v0.2
+
+`v0.2-provider-architecture` расширяет [[storage]]:
+
+- таблица `providers` для сохранения capabilities и metadata провайдеров;
+- таблица `track_sources` для универсальных источников треков;
+- `ProviderStorageRepository` для upsert-операций metadata.

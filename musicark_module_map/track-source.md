@@ -36,3 +36,8 @@
 ## Примечания
 
 Примеры source_type: yandex_music, local_file, torrent, manual_import, http, future_provider.
+
+## Реализация v0.2
+
+`TrackSource` реализован в `src/musicark/providers/models.py` и сохраняется в
+SQLite таблице `track_sources` через `ProviderStorageRepository`.

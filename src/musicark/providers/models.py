@@ -32,7 +32,13 @@ class ProviderTrack:
     external_id: str
     title: str
     artists: tuple[str, ...]
+    album_external_id: str | None = None
+    album_title: str | None = None
     duration_seconds: int | None = None
+    explicit: bool | None = None
+    availability: str | None = None
+    source_type: str = "provider"
+    raw_payload_ref: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -44,6 +50,10 @@ class ProviderPlaylist:
     external_id: str
     title: str
     track_external_ids: tuple[str, ...]
+    owner_name: str | None = None
+    visibility: str | None = None
+    source_type: str = "provider"
+    raw_payload_ref: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
 
 

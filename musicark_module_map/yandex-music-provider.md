@@ -32,3 +32,14 @@
 ## Правила
 
 Яндекс Музыка — первый сценарий, но не центр вселенной. Архитектурно это просто один из [[providers]].
+
+## Реализация v0.3
+
+В `v0.3-yandex-scan` провайдер реализован в `src/musicark/providers/yandex_music_provider.py`:
+
+- токен берётся из `YANDEX_MUSIC_TOKEN` или локального `local.properties`;
+- auth-check реализован без логирования токена;
+- лайки и плейлисты сканируются через `yandex-music==3.0.0`;
+- данные маппятся в универсальные `ProviderTrack` / `ProviderPlaylist` / `TrackSource`;
+- raw responses и scan event сохраняются в [[storage]] и [[history-audit-log]];
+- объекты библиотеки `yandex-music` не выходят за границы этого модуля.

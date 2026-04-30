@@ -43,3 +43,12 @@
 - таблица `providers` для сохранения capabilities и metadata провайдеров;
 - таблица `track_sources` для универсальных источников треков;
 - `ProviderStorageRepository` для upsert-операций metadata.
+
+## Расширение v0.3
+
+`v0.3-yandex-scan` добавляет provider scan-хранилище:
+
+- `provider_tracks` для нормализованных provider track payload;
+- `provider_playlists` для нормализованных provider playlist payload;
+- `provider_raw_responses` для безопасного raw-представления scan ответа;
+- upsert и insert методы в `ProviderStorageRepository`.

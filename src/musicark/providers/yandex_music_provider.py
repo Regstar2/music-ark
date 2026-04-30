@@ -1,16 +1,40 @@
-"""Yandex Music provider stub for architecture validation."""
+"""Real Yandex Music provider adapter for v0.3 scanner tasks."""
 
 from __future__ import annotations
 
+from dataclasses import asdict
+from datetime import UTC, datetime
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+from musicark.core.errors import MusicArkError
+from musicark.storage.audit_log import AuditEvent, AuditLogRepository
+from musicark.storage.provider_storage import ProviderStorageRepository
+
 from .base import MusicProvider
 from .models import ProviderCapabilities, ProviderPlaylist, ProviderTrack
+from .yandex_mapper import map_track_source, map_yandex_playlist, map_yandex_track
 
 
-class YandexMusicProviderStub(MusicProvider):
-    """Provider stub without network calls.
+class YandexMusicError(MusicArkError):
+    """Base error for Yandex provider operations."""
 
-    TODO(v0.3-yandex-scan): replace stub methods with real scan implementation.
-    """
+
+class YandexTokenMissingError(YandexMusicError):
+    """Raised when Yandex token is missing from local config."""
+
+
+class YandexAuthenticationError(YandexMusicError):
+    """Raised when Yandex token authentication fails."""
+
+
+class YandexMusicProvider(MusicProvider):
+    """Provider implementation that keeps yandex-music DTOs inside this module."""
+
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._base_dir = base_dir
 
     @property
     def provider_id(self) -> str:
@@ -18,14 +42,14 @@ class YandexMusicProviderStub(MusicProvider):
 
     @property
     def display_name(self) -> str:
-        return "Yandex Music (stub)"
+        return "Yandex Music"
 
     @property
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
             can_authenticate=True,
-            can_scan_library=False,
-            can_scan_playlists=False,
+            can_scan_library=True,
+            can_scan_playlists=True,
             can_download_tracks=False,
             can_upload_tracks=False,
             can_create_playlists=False,
@@ -35,10 +59,138 @@ class YandexMusicProviderStub(MusicProvider):
         )
 
     def health_check(self) -> dict[str, str]:
-        return {"status": "ok", "mode": "stub"}
+        self._build_client()
+        return {"status": "ok", "provider": "yandex_music"}
 
     def list_tracks(self) -> list[ProviderTrack]:
-        return []
+        payload = self._fetch_liked_tracks_payload()
+        return [map_yandex_track(item) for item in payload]
 
     def list_playlists(self) -> list[ProviderPlaylist]:
-        return []
+        payload = self._fetch_playlists_payload()
+        return [map_yandex_playlist(item) for item in payload]
+
+    def auth_check(self) -> dict[str, Any]:
+        client = self._build_client()
+        try:
+            account = client.me.account.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            raise YandexAuthenticationError("Yandex auth-check failed.") from exc
+        return {
+            "provider": "yandex_music",
+            "providerUserId": str(account.get("uid", "")),
+            "displayName": account.get("display_name") or account.get("login") or "",
+        }
+
+    def scan_all(self, database_path: Path) -> dict[str, Any]:
+        """Scan account, liked tracks and playlists, then persist normalized data."""
+        scanned_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        account = self.auth_check()
+        tracks_payload = self._fetch_liked_tracks_payload()
+        playlists_payload = self._fetch_playlists_payload()
+
+        tracks = [map_yandex_track(item) for item in tracks_payload]
+        playlists = [map_yandex_playlist(item) for item in playlists_payload]
+        track_sources = [map_track_source(track) for track in tracks]
+
+        storage = ProviderStorageRepository(database_path)
+        storage.upsert_provider(self, metadata={"last_scanned_at": scanned_at})
+        for track in tracks:
+            storage.upsert_provider_track(track)
+        for playlist in playlists:
+            storage.upsert_provider_playlist(playlist)
+        for source in track_sources:
+            storage.upsert_track_source(source)
+
+        raw_storage_payload = {
+            "schemaVersion": 1,
+            "provider": "yandex_music",
+            "scannedAt": scanned_at,
+            "account": account,
+            "likedTracks": tracks_payload,
+            "playlists": playlists_payload,
+            "rawResponses": [
+                {"type": "account", "payload": account},
+                {"type": "liked_tracks", "payload": tracks_payload},
+                {"type": "playlists", "payload": playlists_payload},
+            ],
+        }
+        storage.insert_raw_response("yandex_music", "scan_all", raw_storage_payload)
+
+        audit = AuditLogRepository(database_path)
+        audit.append(
+            AuditEvent(
+                event_type="provider_scan",
+                entity_type="provider",
+                entity_id="yandex_music",
+                status="success",
+                details=f"scan_all tracks={len(tracks)} playlists={len(playlists)}",
+            )
+        )
+
+        return {
+            "schemaVersion": 1,
+            "provider": "yandex_music",
+            "scannedAt": scanned_at,
+            "account": account,
+            "likedTracks": [asdict(track) for track in tracks],
+            "playlists": [asdict(playlist) for playlist in playlists],
+            "rawResponses": [
+                {"type": "account", "count": 1},
+                {"type": "liked_tracks", "count": len(tracks_payload)},
+                {"type": "playlists", "count": len(playlists_payload)},
+            ],
+        }
+
+    def _resolve_token(self) -> str:
+        token = os.getenv("YANDEX_MUSIC_TOKEN", "").strip()
+        if token:
+            return token
+
+        if self._base_dir is not None:
+            local_properties = self._base_dir / "local.properties"
+            if local_properties.exists():
+                for line in local_properties.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("YANDEX_MUSIC_TOKEN="):
+                        local_token = line.split("=", 1)[1].strip()
+                        if local_token:
+                            return local_token
+        raise YandexTokenMissingError("YANDEX_MUSIC_TOKEN is not configured.")
+
+    def _build_client(self):  # type: ignore[no-untyped-def]
+        token = self._resolve_token()
+        try:
+            from yandex_music import Client  # type: ignore
+        except ImportError as exc:
+            raise YandexMusicError(
+                "yandex-music dependency is missing. Install requirements-yandex.txt."
+            ) from exc
+        try:
+            return Client(token).init()
+        except Exception as exc:  # noqa: BLE001
+            raise YandexAuthenticationError("Failed to initialize Yandex client.") from exc
+
+    def _fetch_liked_tracks_payload(self) -> list[dict]:
+        client = self._build_client()
+        try:
+            liked = client.users_likes_tracks()
+            short_tracks = liked.fetch_tracks() if liked is not None else []
+            return [json.loads(item.to_json()) for item in (short_tracks or [])]
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError("Failed to scan liked tracks.") from exc
+
+    def _fetch_playlists_payload(self) -> list[dict]:
+        client = self._build_client()
+        try:
+            playlists = client.users_playlists_list() or []
+            payload: list[dict] = []
+            for playlist in playlists:
+                playlist_dict = json.loads(playlist.to_json())
+                tracks = playlist.fetch_tracks() if hasattr(playlist, "fetch_tracks") else []
+                playlist_dict["track_refs"] = [
+                    str(item.id) for item in tracks if getattr(item, "id", None) is not None
+                ]
+                payload.append(playlist_dict)
+            return payload
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError("Failed to scan playlists.") from exc

@@ -4,7 +4,6 @@ from .base import MusicProvider
 from .local_library_provider import LocalLibraryProviderStub
 from .models import ProviderCapabilities, ProviderPlaylist, ProviderTrack, TrackSource
 from .registry import ProviderRegistry, ProviderRegistryError
-from .yandex_music_provider import YandexMusicProviderStub
 
 __all__ = [
     "MusicProvider",
@@ -14,6 +13,5 @@ __all__ = [
     "TrackSource",
     "ProviderRegistry",
     "ProviderRegistryError",
-    "YandexMusicProviderStub",
     "LocalLibraryProviderStub",
 ]

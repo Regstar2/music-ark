@@ -37,3 +37,12 @@
 - репозиторий `AuditLogRepository.append(...)`.
 
 Этого достаточно для первых операций ядра до появления полноценного [[sync-executor]] и [[metadata-engine]].
+
+## Расширение v0.3
+
+В `v0.3-yandex-scan` каждый запуск `YandexMusicProvider.scan_all(...)` добавляет событие:
+
+- `event_type=provider_scan`
+- `entity_type=provider`
+- `entity_id=yandex_music`
+- `status=success` или ошибка через исключение.

@@ -18,3 +18,11 @@
 - [[account-limits-risk]] -> [[download-system]]
 - [[account-limits-risk]] -> [[sync-executor]]
 - [[account-limits-risk]] -> [[history-audit-log]]
+
+## Реализация v0.3
+
+На `v0.3-yandex-scan` риск лимитов учитывается через:
+
+- отдельный scan-метод с явными этапами (`account`, `likes`, `playlists`);
+- запись scan событий в [[history-audit-log]];
+- безопасный повторный запуск с upsert-моделью в [[storage]] без размножения дублей.

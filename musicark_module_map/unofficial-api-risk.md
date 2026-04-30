@@ -19,3 +19,12 @@
 - [[unofficial-api-risk]] -> [[account-limits-risk]]
 - [[unofficial-api-risk]] -> [[history-audit-log]]
 - [[unofficial-api-risk]] -> [[storage]]
+
+## Реализация v0.3
+
+Для снижения риска в `v0.3-yandex-scan`:
+
+- версия зависимости зафиксирована в `requirements-yandex.txt`;
+- все объекты `yandex-music` изолированы в `yandex_music_provider.py`;
+- raw responses сохраняются для диагностики API-изменений;
+- маппинг вынесен в отдельный модуль `yandex_mapper.py`.

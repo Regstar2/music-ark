@@ -38,6 +38,8 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("tracks", tables)
             self.assertIn("track_links", tables)
             self.assertIn("match_conflicts", tables)
+            self.assertIn("sync_plans", tables)
+            self.assertIn("sync_operations", tables)
 
     def test_audit_log_insert_persists_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

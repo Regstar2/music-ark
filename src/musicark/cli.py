@@ -22,6 +22,7 @@ from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.download.system import DownloadSystem
 from musicark.matching.engine import MatchingEngine
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
+from musicark.sync.planner import SyncPlanner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,6 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
     match_subparsers.add_parser("list-conflicts", help="List unresolved matching conflicts.")
     match_accept = match_subparsers.add_parser("accept", help="Accept conflict manually.")
     match_accept.add_argument("--conflict-id", type=int, required=True, help="Conflict identifier.")
+
+    sync_parser = subparsers.add_parser("sync", help="Sync planning commands.")
+    sync_subparsers = sync_parser.add_subparsers(dest="sync_command", required=True)
+    sync_plan = sync_subparsers.add_parser("plan", help="Build sync plan.")
+    sync_plan.add_argument("--dry-run", action="store_true", help="Build plan without execution (default).")
+    sync_show = sync_subparsers.add_parser("plan-show", help="Show saved sync plan.")
+    sync_show.add_argument("--id", required=True, help="Sync plan id.")
+    sync_cancel = sync_subparsers.add_parser("plan-cancel", help="Cancel saved sync plan.")
+    sync_cancel.add_argument("--id", required=True, help="Sync plan id.")
     return parser
 
 
@@ -291,6 +301,34 @@ def main() -> int:
         if args.match_command == "accept":
             engine.accept(args.conflict_id)
             print(json.dumps({"status": "accepted", "conflict_id": args.conflict_id}, ensure_ascii=False, indent=2))
+            return 0
+
+    if args.command == "sync":
+        db_path = app.db_init()
+        planner = SyncPlanner(db_path)
+        if args.sync_command == "plan":
+            plan = planner.build_plan(dry_run=True if args.dry_run else True)
+            print(
+                json.dumps(
+                    {
+                        "id": plan.id,
+                        "created_at": plan.created_at,
+                        "dry_run": plan.dry_run,
+                        "summary": plan.summary,
+                        "operations_preview": [asdict(op) for op in plan.operations[:20]],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.sync_command == "plan-show":
+            plan = planner.show_plan(args.id)
+            print(json.dumps(asdict(plan), ensure_ascii=False, indent=2))
+            return 0
+        if args.sync_command == "plan-cancel":
+            planner.cancel_plan(args.id)
+            print(json.dumps({"status": "cancelled", "id": args.id}, ensure_ascii=False, indent=2))
             return 0
 
     parser.print_help()

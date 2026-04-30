@@ -76,3 +76,11 @@
 - `tracks`;
 - `track_links`;
 - `match_conflicts`.
+
+## Расширение v0.8
+
+`v0.8-sync-planner` добавляет:
+
+- `sync_plans`;
+- `sync_operations`;
+- `SyncStorageRepository` для сохранения/чтения/отмены SyncPlan.

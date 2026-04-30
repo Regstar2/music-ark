@@ -2,7 +2,7 @@
 
 MusicArk is a cross-platform application for preserving and restoring a personal music collection.
 
-This repository currently contains the `v0.7-matching` stage:
+This repository currently contains the `v0.8-sync-planner` stage:
 
 - Python package skeleton;
 - core configuration and error model;
@@ -14,6 +14,7 @@ This repository currently contains the `v0.7-matching` stage:
 - universal download-system with queue, task statuses and local import provider;
 - yandex download provider integrated into download-system (single and batch tasks);
 - matching-engine with canonical tracks, links and conflict queue;
+- sync-planner with dry-run plans and persisted sync operations;
 - CLI commands:
   - `musicark health-check`
   - `musicark db-init`
@@ -34,6 +35,9 @@ This repository currently contains the `v0.7-matching` stage:
   - `musicark match run`
   - `musicark match list-conflicts`
   - `musicark match accept --conflict-id <id>`
+  - `musicark sync plan --dry-run`
+  - `musicark sync plan-show --id "<plan_id>"`
+  - `musicark sync plan-cancel --id "<plan_id>"`
 
 Yandex dependency is pinned in `requirements-yandex.txt`:
 

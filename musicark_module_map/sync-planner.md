@@ -28,3 +28,18 @@
 ## Правила
 
 [[sync-planner]] не выполняет опасные действия. Он только строит план. Удаление, замена и массовая загрузка — только после подтверждения.
+
+## Реализация v0.8
+
+В `v0.8-sync-planner` реализован `SyncPlanner` в `src/musicark/sync/planner.py`:
+
+- строит `SyncPlan` и `SyncOperation` в режиме dry-run;
+- анализирует remote/local состояние и формирует операции:
+  - `download_track`
+  - `create_download_task`
+  - `link_local`
+  - `needs_review`
+  - `mark_unavailable`
+  - `update_metadata_candidate`
+- сохраняет план в [[storage]];
+- не выполняет опасные действия автоматически.

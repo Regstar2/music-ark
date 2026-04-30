@@ -143,6 +143,27 @@ SCHEMA_STATEMENTS = (
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS sync_plans (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        dry_run INTEGER NOT NULL DEFAULT 1,
+        summary_json TEXT,
+        status TEXT NOT NULL DEFAULT 'planned'
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sync_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id TEXT NOT NULL,
+        operation_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        is_dangerous INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
@@ -167,7 +188,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.7.0')
+                    VALUES('schema_version', '0.8.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

@@ -75,3 +75,10 @@ Matching-engine добавляет события:
 
 - `matching_run`;
 - `matching_conflict_accepted`.
+
+## Расширение v0.8
+
+Sync planner добавляет события:
+
+- `sync_plan_created`;
+- `sync_plan_cancelled`.

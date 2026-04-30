@@ -25,3 +25,13 @@
 ## Примечания
 
 Лучше отправить сомнительное совпадение на ручную проверку, чем уверенно связать не тот трек. Автоматизация с самоуверенностью — это просто баг в костюме фичи.
+
+## Реализация v0.7
+
+В `v0.7-matching` модуль реализован в `src/musicark/matching/`:
+
+- нормализация title/artists;
+- confidence scoring для совпадений source <-> local file;
+- автоматическое создание `Track` и `TrackLink` для сильных совпадений;
+- спорные совпадения в `match_conflicts` для [[conflict-resolver]];
+- CLI `musicark match run/list-conflicts/accept`.

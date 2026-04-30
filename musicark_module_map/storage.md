@@ -68,3 +68,11 @@
 - таблицу `download_tasks`;
 - `DownloadStorageRepository` для очереди download-task;
 - связь `download-task -> local_audio_file` через `result_local_file_id`.
+
+## Расширение v0.7
+
+`v0.7-matching` добавляет таблицы canonical-library:
+
+- `tracks`;
+- `track_links`;
+- `match_conflicts`.

@@ -103,6 +103,46 @@ SCHEMA_STATEMENTS = (
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        artists_json TEXT NOT NULL,
+        album TEXT,
+        duration_seconds REAL,
+        normalized_title TEXT NOT NULL,
+        normalized_artists_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS track_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        track_id INTEGER NOT NULL,
+        source_provider_id TEXT NOT NULL,
+        source_external_id TEXT NOT NULL,
+        local_file_id INTEGER NOT NULL,
+        confidence REAL NOT NULL,
+        match_method TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(source_provider_id, source_external_id, local_file_id)
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS match_conflicts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_provider_id TEXT NOT NULL,
+        source_external_id TEXT NOT NULL,
+        local_file_id INTEGER NOT NULL,
+        confidence REAL NOT NULL,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
@@ -127,7 +167,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.5.0')
+                    VALUES('schema_version', '0.7.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

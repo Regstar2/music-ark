@@ -68,3 +68,10 @@ Download-system добавляет события:
 
 Yandex download tasks используют те же события `download_task_*`, что и local import,
 поэтому ошибки и успешные загрузки треков Яндекс Музыки видны в общем журнале.
+
+## Расширение v0.7
+
+Matching-engine добавляет события:
+
+- `matching_run`;
+- `matching_conflict_accepted`.

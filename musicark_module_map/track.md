@@ -36,3 +36,8 @@
 ## Правила
 
 [[track]] не равен [[local-audio-file]]. Один трек может иметь несколько файлов: разные качества, версии, remaster, explicit/censored.
+
+## Реализация v0.7
+
+В `v0.7-matching` canonical `Track` реализован в `src/musicark/matching/models.py`
+и сохраняется в таблицу `tracks` через matching-engine.

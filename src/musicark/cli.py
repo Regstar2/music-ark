@@ -20,6 +20,7 @@ from musicark.providers.local_library import LocalLibraryError, LocalLibraryProv
 from musicark.download.provider import LocalImportProvider
 from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.download.system import DownloadSystem
+from musicark.matching.engine import MatchingEngine
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
 
 
@@ -110,6 +111,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=".musicark/imported",
         help="Destination folder for imported file.",
     )
+
+    match_parser = subparsers.add_parser("match", help="Run matching engine commands.")
+    match_subparsers = match_parser.add_subparsers(dest="match_command", required=True)
+    match_subparsers.add_parser("run", help="Run automatic matching pass.")
+    match_subparsers.add_parser("list-conflicts", help="List unresolved matching conflicts.")
+    match_accept = match_subparsers.add_parser("accept", help="Accept conflict manually.")
+    match_accept.add_argument("--conflict-id", type=int, required=True, help="Conflict identifier.")
     return parser
 
 
@@ -267,6 +275,22 @@ def main() -> int:
             )
             task = system.run_task(task.id)
             print(json.dumps(asdict(task), ensure_ascii=False, indent=2))
+            return 0
+
+    if args.command == "match":
+        db_path = app.db_init()
+        engine = MatchingEngine(db_path)
+        if args.match_command == "run":
+            result = engine.run()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.match_command == "list-conflicts":
+            conflicts = engine.list_conflicts()
+            print(json.dumps(conflicts, ensure_ascii=False, indent=2))
+            return 0
+        if args.match_command == "accept":
+            engine.accept(args.conflict_id)
+            print(json.dumps({"status": "accepted", "conflict_id": args.conflict_id}, ensure_ascii=False, indent=2))
             return 0
 
     parser.print_help()

@@ -60,3 +60,11 @@
 - таблицу `local_audio_files`;
 - `LocalLibraryStorageRepository` для upsert/list/stats локальных файлов;
 - связь локального скана с `track_sources` (`provider_id=local_library`).
+
+## Расширение v0.5
+
+`v0.5-download-system` добавляет:
+
+- таблицу `download_tasks`;
+- `DownloadStorageRepository` для очереди download-task;
+- связь `download-task -> local_audio_file` через `result_local_file_id`.

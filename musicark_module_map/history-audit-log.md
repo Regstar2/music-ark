@@ -55,3 +55,11 @@
 - `entity_type=provider`
 - `entity_id=local_library`
 - `details` содержит путь скана и счётчики `indexed/failed`.
+
+## Расширение v0.5
+
+Download-system добавляет события:
+
+- `download_task_created`;
+- `download_task_completed`;
+- `download_task_failed`.

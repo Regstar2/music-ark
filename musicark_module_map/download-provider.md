@@ -23,3 +23,11 @@
 - [[download-provider]] -> [[yandex-music-download-provider]]
 - [[download-provider]] -> [[torrent-download-provider]]
 - [[download-provider]] -> [[local-import-provider]]
+
+## Реализация v0.5
+
+В `v0.5-download-system` реализованы:
+
+- интерфейс `DownloadProvider` в `src/musicark/download/provider.py`;
+- `LocalImportProvider` как первый рабочий backend через общий download-system;
+- отсутствие привязки к Яндекс и torrent backend на этом этапе.

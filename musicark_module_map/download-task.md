@@ -41,3 +41,8 @@
 ## Примечания
 
 Статусы: pending, queued, running, paused, completed, failed, cancelled, needs_review.
+
+## Реализация v0.5
+
+`DownloadTask` реализован в `src/musicark/download/models.py` и хранится
+в таблице `download_tasks` через `DownloadStorageRepository`.

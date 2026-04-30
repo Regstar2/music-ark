@@ -27,3 +27,14 @@
 ## Правила
 
 Скачивание из Яндекс Музыки, torrent и локальный импорт должны идти через один слой. Иначе появятся три одинаковые очереди загрузок с тремя разными способами сломаться.
+
+## Реализация v0.5
+
+В `v0.5-download-system` реализованы:
+
+- `DownloadSystem` c очередью задач;
+- `DownloadProviderRegistry`;
+- выполнение `download-task` через `download-provider`;
+- retry/cancel и обработка ошибок;
+- интеграция с [[history-audit-log]];
+- CLI `musicark download ...` и `musicark import file ...`.

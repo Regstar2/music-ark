@@ -86,6 +86,23 @@ SCHEMA_STATEMENTS = (
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS download_tasks (
+        id TEXT PRIMARY KEY,
+        task_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        progress REAL NOT NULL DEFAULT 0,
+        target_folder TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        error_message TEXT,
+        result_local_file_id INTEGER,
+        raw_payload_json TEXT
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
@@ -110,7 +127,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.4.0')
+                    VALUES('schema_version', '0.5.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

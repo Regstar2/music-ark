@@ -47,6 +47,20 @@ class LocalLibraryStorageRepository:
         except sqlite3.Error as exc:
             raise StorageError("Failed to persist local audio file.") from exc
 
+    def upsert_local_audio_file_and_return_id(self, audio_file: LocalAudioFile) -> int:
+        self.upsert_local_audio_file(audio_file)
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                row = conn.execute(
+                    "SELECT id FROM local_audio_files WHERE path=?",
+                    (audio_file.path,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to fetch local audio file id.") from exc
+        if row is None:
+            raise StorageError("Local audio file id was not found after upsert.")
+        return int(row[0])
+
     def upsert_track_source(self, track_source: TrackSource) -> None:
         raw_data_json = json.dumps(track_source.raw_data, ensure_ascii=False)
         try:

@@ -34,6 +34,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("provider_playlists", tables)
             self.assertIn("provider_raw_responses", tables)
             self.assertIn("local_audio_files", tables)
+            self.assertIn("download_tasks", tables)
 
     def test_audit_log_insert_persists_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

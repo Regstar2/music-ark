@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "musicark"
+version = "0.1.0"
+description = "MusicArk core foundation (v0.1)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "MusicArk Team" }]
+dependencies = []
+
+[project.scripts]
+musicark = "musicark.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

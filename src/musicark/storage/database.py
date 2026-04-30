@@ -1,0 +1,49 @@
+"""SQLite storage bootstrap for v0.1 core foundation."""
+
+from __future__ import annotations
+
+from contextlib import closing
+from pathlib import Path
+import sqlite3
+
+from musicark.core.errors import StorageError
+
+
+SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS app_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT,
+        status TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """,
+)
+
+
+def initialize_database(database_path: Path) -> None:
+    """Create SQLite file and minimal schema for core modules."""
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with closing(sqlite3.connect(database_path)) as conn:
+            with conn:
+                for statement in SCHEMA_STATEMENTS:
+                    conn.execute(statement)
+                conn.execute(
+                    """
+                    INSERT INTO app_metadata(key, value)
+                    VALUES('schema_version', '0.1.0')
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+                    """
+                )
+    except sqlite3.Error as exc:
+        raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

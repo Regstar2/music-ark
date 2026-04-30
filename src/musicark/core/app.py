@@ -6,7 +6,8 @@ from pathlib import Path
 
 from .config import AppConfig, load_config
 from musicark.storage.database import initialize_database
-from musicark.providers import LocalLibraryProviderStub, ProviderRegistry
+from musicark.providers import ProviderRegistry
+from musicark.providers.local_library import LocalLibraryProvider
 from musicark.providers.yandex_music_provider import YandexMusicProvider
 from musicark.storage.provider_storage import ProviderStorageRepository
 
@@ -23,7 +24,7 @@ class MusicArkApp:
     def _register_default_providers(self) -> None:
         """Register architecture stubs without coupling core to service API calls."""
         self.provider_registry.register(YandexMusicProvider(base_dir=self._base_dir))
-        self.provider_registry.register(LocalLibraryProviderStub())
+        self.provider_registry.register(LocalLibraryProvider())
 
     def resolve_database_path(self) -> Path:
         """Resolve configured DB path relative to base directory/home."""

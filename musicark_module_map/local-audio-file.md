@@ -38,3 +38,9 @@
 - [[local-audio-file]] -> [[metadata-engine]]
 - [[local-audio-file]] -> [[matching-engine]]
 - [[local-audio-file]] -> [[storage]]
+
+## Реализация v0.4
+
+`LocalAudioFile` реализован как модель в `src/musicark/providers/models.py`,
+а хранение реализовано таблицей `local_audio_files` и репозиторием
+`LocalLibraryStorageRepository`.

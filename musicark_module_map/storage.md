@@ -52,3 +52,11 @@
 - `provider_playlists` для нормализованных provider playlist payload;
 - `provider_raw_responses` для безопасного raw-представления scan ответа;
 - upsert и insert методы в `ProviderStorageRepository`.
+
+## Расширение v0.4
+
+`v0.4-local-library` добавляет:
+
+- таблицу `local_audio_files`;
+- `LocalLibraryStorageRepository` для upsert/list/stats локальных файлов;
+- связь локального скана с `track_sources` (`provider_id=local_library`).

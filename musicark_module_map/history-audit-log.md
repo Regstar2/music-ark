@@ -46,3 +46,12 @@
 - `entity_type=provider`
 - `entity_id=yandex_music`
 - `status=success` или ошибка через исключение.
+
+## Расширение v0.4
+
+Локальный скан добавляет событие:
+
+- `event_type=local_scan`
+- `entity_type=provider`
+- `entity_id=local_library`
+- `details` содержит путь скана и счётчики `indexed/failed`.

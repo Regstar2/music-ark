@@ -68,3 +68,15 @@ class TrackSource:
     url: str | None = None
     availability: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LocalAudioFile:
+    """Physical local audio file indexed from local archive."""
+
+    path: str
+    sha256: str
+    file_size: int
+    duration_seconds: float | None
+    codec: str
+    metadata_json: dict[str, Any] = field(default_factory=dict)

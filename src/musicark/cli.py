@@ -16,6 +16,8 @@ from musicark.providers.yandex_music_provider import (
     YandexMusicProvider,
     YandexTokenMissingError,
 )
+from musicark.providers.local_library import LocalLibraryError, LocalLibraryProvider
+from musicark.storage.local_library_storage import LocalLibraryStorageRepository
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
     yandex_subparsers.add_parser("scan-likes", help="Scan liked tracks only.")
     yandex_subparsers.add_parser("scan-playlists", help="Scan playlists only.")
     yandex_subparsers.add_parser("scan-all", help="Scan account, likes and playlists.")
+
+    local_parser = subparsers.add_parser("local", help="Run local library commands.")
+    local_subparsers = local_parser.add_subparsers(dest="local_command", required=True)
+
+    local_scan = local_subparsers.add_parser("scan", help="Scan local music folder.")
+    local_scan.add_argument("--path", required=True, help="Absolute or relative path to scan.")
+
+    local_subparsers.add_parser("list", help="List indexed local files.")
+    local_subparsers.add_parser("stats", help="Show local library statistics.")
     return parser
 
 
@@ -94,6 +105,25 @@ def main() -> int:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         except (YandexTokenMissingError, YandexAuthenticationError, YandexMusicError) as exc:
+            print(str(exc))
+            return 2
+
+    if args.command == "local":
+        db_path = app.db_init()
+        storage = LocalLibraryStorageRepository(db_path)
+        provider = LocalLibraryProvider()
+        try:
+            if args.local_command == "scan":
+                result = provider.scan(Path(args.path), db_path)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+            if args.local_command == "list":
+                print(json.dumps(storage.list_local_audio_files(), ensure_ascii=False, indent=2))
+                return 0
+            if args.local_command == "stats":
+                print(json.dumps(storage.local_stats(), ensure_ascii=False, indent=2))
+                return 0
+        except LocalLibraryError as exc:
             print(str(exc))
             return 2
 

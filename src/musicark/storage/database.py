@@ -73,6 +73,19 @@ SCHEMA_STATEMENTS = (
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS local_audio_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        sha256 TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        duration_seconds REAL,
+        codec TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
@@ -97,7 +110,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.3.0')
+                    VALUES('schema_version', '0.4.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

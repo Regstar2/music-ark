@@ -17,3 +17,11 @@
 - [[metadata-chaos-risk]] -> [[matching-engine]]
 - [[metadata-chaos-risk]] -> [[conflict-resolver]]
 - [[metadata-chaos-risk]] -> [[local-audio-file]]
+
+## Реализация v0.4
+
+В `v0.4-local-library` риск снижен через:
+
+- best-effort чтение метаданных без их автоматической правки;
+- хранение `sha256` как стабильного признака файла;
+- логирование скана для отслеживания проблемных/битых файлов.

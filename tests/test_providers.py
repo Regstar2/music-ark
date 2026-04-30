@@ -10,13 +10,13 @@ import tempfile
 import unittest
 
 from musicark.providers import (
-    LocalLibraryProviderStub,
     MusicProvider,
     ProviderCapabilities,
     ProviderRegistry,
     ProviderRegistryError,
     TrackSource,
 )
+from musicark.providers.local_library import LocalLibraryProvider
 from musicark.storage.database import initialize_database
 from musicark.storage.provider_storage import ProviderStorageRepository
 
@@ -71,10 +71,10 @@ class ProviderRegistryTests(unittest.TestCase):
             registry.register(self.DummyProvider())
 
     def test_stub_capabilities_are_provider_agnostic(self) -> None:
-        local = LocalLibraryProviderStub()
+        local = LocalLibraryProvider()
 
         self.assertTrue(local.capabilities.supports_user_uploads)
-        self.assertFalse(local.capabilities.can_scan_library)
+        self.assertTrue(local.capabilities.can_scan_library)
 
 
 class ProviderStorageTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class ProviderStorageTests(unittest.TestCase):
             repository = ProviderStorageRepository(db_path)
 
             repository.upsert_provider(
-                LocalLibraryProviderStub(),
+                LocalLibraryProvider(),
                 metadata={"environment": "test", "note": "stub"},
             )
             repository.upsert_track_source(

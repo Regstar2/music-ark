@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
+from typing import Any
 
 from musicark.core.errors import StorageError
 from musicark.matching.models import MatchConflict, MatchMethod, Track, TrackLink
@@ -43,6 +44,26 @@ class MatchingStorageRepository:
                 }
             )
         return candidates
+
+    def list_track_links_for_provider(self, provider_id: str) -> list[dict[str, Any]]:
+        """Expose track_links keyed by catalogue id for sync upload heuristics (v0.11)."""
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT source_external_id, local_file_id, track_id
+                    FROM track_links
+                    WHERE source_provider_id=?
+                    ORDER BY source_external_id
+                    """,
+                    (provider_id,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to list track links for provider.") from exc
+        return [
+            {"source_external_id": row[0], "local_file_id": int(row[1]), "track_id": int(row[2])}
+            for row in rows
+        ]
 
     def list_local_audio_files(self) -> list[dict]:
         try:

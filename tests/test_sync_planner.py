@@ -6,10 +6,14 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from musicark.providers.models import LocalAudioFile, ProviderCapabilities, ProviderTrack, TrackSource
+from musicark.core.config import AppConfig, save_config
+from musicark.matching.models import MatchMethod, Track, TrackLink
+from musicark.providers.models import LocalAudioFile, ProviderCapabilities, ProviderTrack
 from musicark.storage.database import initialize_database
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
+from musicark.storage.matching_storage import MatchingStorageRepository
 from musicark.storage.provider_storage import ProviderStorageRepository
+from musicark.sync.models import SyncOperation, SyncOperationType
 from musicark.sync.planner import SyncPlanner
 
 
@@ -84,6 +88,79 @@ class SyncPlannerTests(unittest.TestCase):
             self.assertIn("create_download_task", types)
             self.assertIn("needs_review", types)
             self.assertGreater(plan.summary["total"], 0)
+
+    def test_experimental_upload_candidates_when_linked_and_remote_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp)
+            db = base_dir / "musicark.db"
+            initialize_database(db)
+            save_config(
+                AppConfig(
+                    experimental_yandex_upload=True,
+                ),
+                base_dir,
+            )
+
+            ProviderStorageRepository(db).upsert_provider(DummyProvider(), metadata={})
+            local_storage = LocalLibraryStorageRepository(db)
+            local_storage.upsert_local_audio_file(
+                LocalAudioFile(
+                    path=str(base_dir / "restore_me.mp3"),
+                    sha256="c" * 64,
+                    file_size=128,
+                    duration_seconds=200.1,
+                    codec="mp3",
+                )
+            )
+            ProviderStorageRepository(db).upsert_provider_track(
+                ProviderTrack(
+                    provider_id="yandex_music",
+                    external_id="999",
+                    title="MissingOnRemote",
+                    artists=("Ghost",),
+                    availability="unavailable",
+                    source_type="yandex_music",
+                )
+            )
+            matching = MatchingStorageRepository(db)
+            canon_id = matching.upsert_track(
+                Track(
+                    title="MissingOnRemote",
+                    artists=("Ghost",),
+                    album=None,
+                    duration_seconds=200.1,
+                    normalized_title="missingonremote",
+                    normalized_artists=("ghost",),
+                )
+            )
+            matching.upsert_track_link(
+                TrackLink(
+                    track_id=canon_id,
+                    source_provider_id="yandex_music",
+                    source_external_id="999",
+                    local_file_id=1,
+                    confidence=1.0,
+                    match_method=MatchMethod.EXACT_ID,
+                    metadata_json={},
+                )
+            )
+
+            planner = SyncPlanner(db, base_dir)
+            plan = planner.build_plan(dry_run=True)
+
+            def _pick(op_type: SyncOperationType) -> SyncOperation | None:
+                for operation in plan.operations:
+                    if operation.operation_type == op_type and operation.entity_id == "999":
+                        return operation
+                return None
+
+            upload = _pick(SyncOperationType.UPLOAD_CANDIDATE)
+            self.assertIsNotNone(upload)
+            assert upload is not None
+            self.assertEqual(upload.metadata.get("local_file_id"), 1)
+
+            replace = _pick(SyncOperationType.REPLACE_CANDIDATE)
+            self.assertIsNotNone(replace)
 
     def test_save_show_cancel_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -18,7 +18,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('MusicArk Desktop v0.10'), findsOneWidget);
+    expect(find.text('MusicArk Desktop v0.11'), findsOneWidget);
     expect(find.text('Dashboard'), findsAtLeastNWidgets(1));
     expect(find.text('Run Yandex Scan'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);

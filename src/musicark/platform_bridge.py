@@ -37,6 +37,7 @@ from musicark.providers.yandex_music_provider import YandexMusicProvider
 from musicark.metadata.service import MetadataEditorService
 from musicark.storage.download_storage import DownloadStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
+from musicark.sync.executor import execute_experimental_yandex_upload
 from musicark.sync.planner import SyncPlanner
 
 
@@ -256,6 +257,9 @@ def run_action(
     if name == "metadata_bulk_update":
         return meta.bulk_update_tags(pl)
 
+    if name == "experimental_yandex_upload":
+        return execute_experimental_yandex_upload(database_path=db_path, base_dir=base_dir, payload=dict(pl))
+
     if name == "scan_yandex":
         return YandexMusicProvider(base_dir=base_dir).scan_all(database_path=db_path)
     if name == "scan_local":
@@ -265,7 +269,7 @@ def run_action(
     if name == "match_run":
         return MatchingEngine(db_path).run()
     if name == "sync_plan":
-        plan = SyncPlanner(db_path).build_plan(dry_run=True)
+        plan = SyncPlanner(db_path, base_dir).build_plan(dry_run=True)
         return {
             "id": plan.id,
             "created_at": plan.created_at,
@@ -280,12 +284,18 @@ def update_settings(
     base_dir: Path | None = None,
     database_path: str | None = None,
     log_level: str | None = None,
+    experimental_yandex_upload: bool | None = None,
 ) -> dict[str, Any]:
     """Update persisted app settings without touching core logic from UI."""
     config = load_config(base_dir)
     new_config = AppConfig(
-        database_path=database_path or config.database_path,
-        log_level=log_level or config.log_level,
+        database_path=database_path if database_path is not None else config.database_path,
+        log_level=log_level if log_level is not None else config.log_level,
+        experimental_yandex_upload=(
+            experimental_yandex_upload
+            if experimental_yandex_upload is not None
+            else config.experimental_yandex_upload
+        ),
     )
     saved_path = save_config(new_config, base_dir)
     return {"saved_to": str(saved_path), "settings": asdict(new_config)}
@@ -310,6 +320,12 @@ def build_parser() -> argparse.ArgumentParser:
     settings_parser = subparsers.add_parser("settings-update", help="Update config values.")
     settings_parser.add_argument("--database-path", default=None)
     settings_parser.add_argument("--log-level", default=None)
+    settings_parser.add_argument(
+        "--experimental-yandex-upload",
+        default=None,
+        choices=("true", "false"),
+        help="Enable/disable v0.11 experimental Yandex upload scaffolding.",
+    )
     return parser
 
 
@@ -334,12 +350,16 @@ def main() -> int:
             )
             return 0
         if args.command == "settings-update":
+            exp_val: bool | None = None
+            if getattr(args, "experimental_yandex_upload", None) is not None:
+                exp_val = args.experimental_yandex_upload == "true"
             print(
                 json.dumps(
                     update_settings(
                         base_dir=base_dir,
                         database_path=args.database_path,
                         log_level=args.log_level,
+                        experimental_yandex_upload=exp_val,
                     ),
                     ensure_ascii=False,
                 )

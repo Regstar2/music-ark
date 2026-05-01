@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from musicark.core.config import load_config
 from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.matching_storage import MatchingStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
@@ -14,13 +15,22 @@ from .models import SyncOperation, SyncOperationType, SyncPlan
 class SyncPlanner:
     """Builds dry-run sync operations by comparing provider/local/matching state."""
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_path: Path, base_dir: Path | None = None) -> None:
         self._database_path = database_path
+        self._base_dir = base_dir
         self._matching_storage = MatchingStorageRepository(database_path)
         self._sync_storage = SyncStorageRepository(database_path)
         self._audit = AuditLogRepository(database_path)
 
     def build_plan(self, dry_run: bool = True) -> SyncPlan:
+        cfg = load_config(self._base_dir)
+        experimental_upload = cfg.experimental_yandex_upload
+
+        links_by_external: dict[str, int] = {}
+        if experimental_upload:
+            for row in self._matching_storage.list_track_links_for_provider("yandex_music"):
+                links_by_external[str(row["source_external_id"])] = int(row["local_file_id"])
+
         provider_tracks = self._matching_storage.list_provider_track_candidates()
         local_files = self._matching_storage.list_local_audio_files()
         operations: list[SyncOperation] = []
@@ -49,6 +59,29 @@ class SyncPlanner:
                         is_dangerous=False,
                     )
                 )
+                loc_id = links_by_external.get(external_id)
+                if experimental_upload and loc_id is not None:
+                    meta = {"local_file_id": loc_id, "original_external_id": external_id}
+                    operations.append(
+                        SyncOperation(
+                            operation_type=SyncOperationType.UPLOAD_CANDIDATE,
+                            entity_id=external_id,
+                            reason="remote_unavailable_matched_local_for_experimental_restore",
+                            confidence=0.55,
+                            is_dangerous=True,
+                            metadata=meta,
+                        )
+                    )
+                    operations.append(
+                        SyncOperation(
+                            operation_type=SyncOperationType.REPLACE_CANDIDATE,
+                            entity_id=external_id,
+                            reason="post_upload_hypothetical_playlist_catalog_replace_placeholder",
+                            confidence=0.40,
+                            is_dangerous=True,
+                            metadata=meta,
+                        )
+                    )
                 continue
 
             if not has_local_copy:

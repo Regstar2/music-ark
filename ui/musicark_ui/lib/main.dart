@@ -51,6 +51,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   bool _metaClearCover = false;
   String? _metaResolvedPathHint;
 
+  /// Experimental Yandex upload (v0.11); persisted in `.musicark/config.json`.
+  bool _experimentalYandexUpload = false;
+  final TextEditingController _uploadProbeLocalIdController = TextEditingController();
+  final TextEditingController _uploadProbeOriginalIdController = TextEditingController();
+  bool _uploadProbeConfirmed = false;
+
   int _tabIndex = 0;
   bool _loading = true;
   bool _runningAction = false;
@@ -91,6 +97,8 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     _metaGenreController.dispose();
     _metaCoverPathController.dispose();
     _metaBulkIdsController.dispose();
+    _uploadProbeLocalIdController.dispose();
+    _uploadProbeOriginalIdController.dispose();
     super.dispose();
   }
 
@@ -103,8 +111,17 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final snapshot = await _bridge.snapshot();
       _dbPathController.text = (snapshot['settings']?['database_path'] ?? '').toString();
       _logLevelController.text = (snapshot['settings']?['log_level'] ?? '').toString();
+      final sx = snapshot['settings'];
+      final rawExp =
+          sx is Map<String, dynamic> ? sx['experimental_yandex_upload'] : null;
+      final expOn =
+          rawExp == true ||
+          rawExp == 1 ||
+          (rawExp is String &&
+              {'true', '1', 'yes', 'on'}.contains(rawExp.trim().toLowerCase()));
       setState(() {
         _snapshot = snapshot;
+        _experimentalYandexUpload = expOn;
       });
     } catch (err) {
       setState(() {
@@ -150,6 +167,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       await _bridge.updateSettings(
         databasePath: _dbPathController.text.trim(),
         logLevel: _logLevelController.text.trim(),
+        experimentalYandexUpload: _experimentalYandexUpload,
       );
       await _refresh();
     } catch (err) {
@@ -172,7 +190,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
             : _buildTabBody();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MusicArk Desktop v0.10'),
+        title: const Text('MusicArk Desktop v0.11'),
         actions: [
           IconButton(onPressed: _runningAction ? null : _refresh, icon: const Icon(Icons.refresh)),
         ],
@@ -556,13 +574,96 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
           controller: _logLevelController,
           decoration: const InputDecoration(labelText: 'Log level'),
         ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: const Text('Experimental Yandex upload / restore probes (v0.11)'),
+          subtitle: const Text(
+            'Adds upload_candidate / replace_candidate to sync plans and enables probe actions.',
+          ),
+          value: _experimentalYandexUpload,
+          onChanged: (v) => setState(() => _experimentalYandexUpload = v),
+        ),
         const SizedBox(height: 12),
         ElevatedButton(
           onPressed: _runningAction ? null : _saveSettings,
           child: const Text('Save settings'),
         ),
+        const Divider(height: 32),
+        const Text(
+          'Experimental upload probe (typically returns not_supported: yandex-music has no Client upload API)',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        TextField(
+          controller: _uploadProbeLocalIdController,
+          decoration: const InputDecoration(
+            labelText: 'Indexed local_file_id',
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        TextField(
+          controller: _uploadProbeOriginalIdController,
+          decoration: const InputDecoration(labelText: 'Original Yandex track external id'),
+        ),
+        CheckboxListTile(
+          title: const Text('I confirm an explicit upload probe (may bill API / violate ToS risks)'),
+          value: _uploadProbeConfirmed,
+          onChanged: (v) => setState(() => _uploadProbeConfirmed = v ?? false),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
+        ElevatedButton(
+          onPressed: _runningAction ? null : _runExperimentalYandexProbe,
+          style: ElevatedButton.styleFrom(foregroundColor: Colors.deepOrange),
+          child: const Text('Run experimental_yandex_upload'),
+        ),
       ],
     );
+  }
+
+  Future<void> _runExperimentalYandexProbe() async {
+    if (!_experimentalYandexUpload) {
+      setState(() => _error = 'Enable the experimental toggle and Save settings first.');
+      return;
+    }
+    if (!_uploadProbeConfirmed) {
+      setState(() => _error = 'Confirm the upload probe checkbox.');
+      return;
+    }
+    final lid = int.tryParse(_uploadProbeLocalIdController.text.trim());
+    if (lid == null) {
+      setState(() => _error = 'Local file id must be a number.');
+      return;
+    }
+    final orig = _uploadProbeOriginalIdController.text.trim();
+    if (orig.isEmpty) {
+      setState(() => _error = 'Original external id is required.');
+      return;
+    }
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final res = await _bridge.action(
+        'experimental_yandex_upload',
+        payload: {
+          'confirm': true,
+          'local_file_id': lid,
+          'original_external_id': orig,
+        },
+      );
+      if (!mounted) {
+        return;
+      }
+      final status = res['status'];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('experimental_yandex_upload: $status (${res['mapping'] ?? ''})')),
+      );
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
   }
 
   Widget _buildTable(List<Map<String, dynamic>> rows) {
@@ -658,6 +759,7 @@ class MusicArkBridge {
   Future<Map<String, dynamic>> updateSettings({
     required String databasePath,
     required String logLevel,
+    required bool experimentalYandexUpload,
   }) {
     return _runBridge([
       'settings-update',
@@ -665,6 +767,8 @@ class MusicArkBridge {
       databasePath,
       '--log-level',
       logLevel,
+      '--experimental-yandex-upload',
+      experimentalYandexUpload ? 'true' : 'false',
     ]);
   }
 
@@ -722,7 +826,11 @@ class FakeMusicArkBridge extends MusicArkBridge {
       'sync_plans': [],
       'conflicts': [],
       'logs': [],
-      'settings': {'database_path': '.musicark/musicark.db', 'log_level': 'INFO'},
+      'settings': {
+        'database_path': '.musicark/musicark.db',
+        'log_level': 'INFO',
+        'experimental_yandex_upload': false,
+      },
     };
   }
 
@@ -735,10 +843,15 @@ class FakeMusicArkBridge extends MusicArkBridge {
   Future<Map<String, dynamic>> updateSettings({
     required String databasePath,
     required String logLevel,
+    required bool experimentalYandexUpload,
   }) async {
     return {
       'saved_to': '.musicark/config.json',
-      'settings': {'database_path': databasePath, 'log_level': logLevel},
+      'settings': {
+        'database_path': databasePath,
+        'log_level': logLevel,
+        'experimental_yandex_upload': experimentalYandexUpload,
+      },
     };
   }
 }

@@ -73,6 +73,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=".musicark/downloads/yandex",
         help="Destination folder for downloaded tracks.",
     )
+    yandex_experimental_upload = yandex_subparsers.add_parser(
+        "experimental-upload",
+        help="v0.11 Upload probe via yandex-experimental scaffold (normally not_supported).",
+    )
+    yandex_experimental_upload.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Acknowledge risky/experimental probe per project rules.",
+        required=True,
+    )
+    yandex_experimental_upload.add_argument(
+        "--local-file-id",
+        type=int,
+        required=True,
+        help="SQLite id from local_audio_files.",
+    )
+    yandex_experimental_upload.add_argument(
+        "--original-external-id",
+        required=True,
+        help="Catalogue external id being restored/replaced hypothetically.",
+    )
 
     local_parser = subparsers.add_parser("local", help="Run local library commands.")
     local_subparsers = local_parser.add_subparsers(dest="local_command", required=True)
@@ -220,6 +241,21 @@ def main() -> int:
                     results.append(asdict(done))
                 print(json.dumps(results, ensure_ascii=False, indent=2))
                 return 0
+            if args.yandex_command == "experimental-upload":
+                from musicark.providers.yandex_experimental_upload import run_experimental_yandex_upload
+
+                db_path = app.db_init()
+                result = run_experimental_yandex_upload(
+                    database_path=db_path,
+                    base_dir=base_dir,
+                    payload={
+                        "confirm": args.confirm,
+                        "local_file_id": args.local_file_id,
+                        "original_external_id": args.original_external_id,
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
         except (YandexTokenMissingError, YandexAuthenticationError, YandexMusicError) as exc:
             print(str(exc))
             return 2
@@ -305,7 +341,7 @@ def main() -> int:
 
     if args.command == "sync":
         db_path = app.db_init()
-        planner = SyncPlanner(db_path)
+        planner = SyncPlanner(db_path, base_dir)
         if args.sync_command == "plan":
             plan = planner.build_plan(dry_run=True if args.dry_run else True)
             print(

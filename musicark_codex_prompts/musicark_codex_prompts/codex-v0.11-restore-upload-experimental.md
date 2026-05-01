@@ -18,6 +18,12 @@
 - [[upload-uncertainty-risk]]
 - [[legal-terms-risk]]
 
+## Контекст реализации (после v0.10)
+
+- Клиент `yandex-music` 3.0.0 **не предоставляет** публичных методов загрузки треков; пробник всегда может возвращать `not_supported` — это допустимо по цели версии («проверить возможность»).
+- Флаг `experimental_yandex_upload` хранится в [[AppConfig]] (`.musicark/config.json`), UI: вкладка **Settings** во Flutter.
+- Пробы: CLI `musicark yandex experimental-upload --confirm …`, bridge `experimental_yandex_upload` с `--payload`.
+
 # Prompt for Codex
 
 Ты работаешь над MusicArk. Реализуй этап [[v0.11-restore-upload-experimental]].

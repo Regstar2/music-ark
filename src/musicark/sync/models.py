@@ -16,6 +16,7 @@ class SyncOperationType(StrEnum):
     NEEDS_REVIEW = "needs_review"
     UPDATE_METADATA_CANDIDATE = "update_metadata_candidate"
     UPLOAD_CANDIDATE = "upload_candidate"
+    REPLACE_CANDIDATE = "replace_candidate"
     CREATE_DOWNLOAD_TASK = "create_download_task"
 
 

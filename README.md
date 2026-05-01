@@ -2,7 +2,7 @@
 
 MusicArk is a cross-platform application for preserving and restoring a personal music collection.
 
-This repository currently contains the `v0.9-desktop-ui` stage:
+This repository currently contains the `v0.10-metadata-editor` stage (desktop UI from v0.9 included):
 
 - Python package skeleton;
 - core configuration and error model;
@@ -41,6 +41,12 @@ This repository currently contains the `v0.9-desktop-ui` stage:
   - `musicark sync plan-cancel --id "<plan_id>"`
   - `musicark-bridge snapshot`
   - `musicark-bridge action --name sync_plan`
+  - metadata (Flutter tab **Metadata**, or CLI):
+    ```bash
+    musicark-bridge action --name metadata_get --payload '{"local_file_id": 1}'
+    musicark-bridge action --name metadata_update --payload '{"local_file_id":1,"confirm":true,"title":"T","artist":"A","album":"B","genre":"Rock"}'
+    musicark-bridge action --name metadata_bulk_update --payload '{"local_file_ids":[1,2],"confirm":true,"genre":"Electronic"}'
+    ```
 
 Yandex dependency is pinned in `requirements-yandex.txt`:
 
@@ -57,7 +63,9 @@ pip install -e .
 musicark health-check
 ```
 
-## Desktop UI (v0.9)
+## Desktop UI (v0.10)
+
+Adds a **Metadata** tab for viewing/editing tags on indexed local files (mutagen-backed). Saves create a duplicate under `.musicark/metadata_backups` and audit log entries (`metadata_update`, `metadata_bulk_update`).
 
 ```bash
 cd ui/musicark_ui

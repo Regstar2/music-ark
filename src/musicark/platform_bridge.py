@@ -34,6 +34,7 @@ from musicark.core.errors import StorageError
 from musicark.matching.engine import MatchingEngine
 from musicark.providers.local_library import LocalLibraryProvider
 from musicark.providers.yandex_music_provider import YandexMusicProvider
+from musicark.metadata.service import MetadataEditorService
 from musicark.storage.download_storage import DownloadStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
 from musicark.sync.planner import SyncPlanner
@@ -227,10 +228,33 @@ def build_snapshot(base_dir: Path | None = None) -> dict[str, Any]:
     }
 
 
-def run_action(name: str, base_dir: Path | None = None, path: str | None = None) -> dict[str, Any]:
+def run_action(
+    name: str,
+    base_dir: Path | None = None,
+    path: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Run state-changing action in Python core, returning JSON-safe result."""
     app = MusicArkApp(base_dir=base_dir)
     db_path = app.db_init()
+    meta = MetadataEditorService(db_path, base_dir)
+
+    pl = payload or {}
+
+    if name == "metadata_get":
+        if "local_file_id" not in pl:
+            raise ValueError("metadata_get requires payload.local_file_id.")
+        try:
+            lid = int(pl["local_file_id"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("payload.local_file_id must be integer.") from exc
+        return meta.fetch_structured_tags(lid)
+
+    if name == "metadata_update":
+        return meta.update_tags(dict(pl))
+
+    if name == "metadata_bulk_update":
+        return meta.bulk_update_tags(pl)
 
     if name == "scan_yandex":
         return YandexMusicProvider(base_dir=base_dir).scan_all(database_path=db_path)
@@ -276,7 +300,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     action_parser = subparsers.add_parser("action", help="Run one UI action.")
     action_parser.add_argument("--name", required=True, help="Action name.")
-    action_parser.add_argument("--path", default=None, help="Optional path for scan_local.")
+    action_parser.add_argument("--path", default=None, help="Optional path for scan_local or cover image.")
+    action_parser.add_argument(
+        "--payload",
+        default=None,
+        help='JSON object for richer actions (e.g. metadata_get / metadata_update).',
+    )
 
     settings_parser = subparsers.add_parser("settings-update", help="Update config values.")
     settings_parser.add_argument("--database-path", default=None)
@@ -294,7 +323,15 @@ def main() -> int:
             print(json.dumps(build_snapshot(base_dir), ensure_ascii=False))
             return 0
         if args.command == "action":
-            print(json.dumps(run_action(args.name, base_dir=base_dir, path=args.path), ensure_ascii=False))
+            parsed_payload: dict[str, Any] | None = None
+            if getattr(args, "payload", None):
+                parsed_payload = json.loads(args.payload)
+            print(
+                json.dumps(
+                    run_action(args.name, base_dir=base_dir, path=args.path, payload=parsed_payload),
+                    ensure_ascii=False,
+                )
+            )
             return 0
         if args.command == "settings-update":
             print(

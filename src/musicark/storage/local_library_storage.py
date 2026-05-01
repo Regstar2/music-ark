@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
+from typing import Any
 
 from musicark.core.errors import StorageError
 from musicark.providers.models import LocalAudioFile, TrackSource
@@ -114,6 +115,32 @@ class LocalLibraryStorageRepository:
             }
             for row in rows
         ]
+
+    def fetch_local_audio_file_row_by_id(self, file_id: int) -> dict[str, Any] | None:
+        """Return one row keyed for metadata UI."""
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT id, path, sha256, file_size, duration_seconds, codec, metadata_json
+                    FROM local_audio_files
+                    WHERE id=?
+                    """,
+                    (int(file_id),),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to load local audio file row.") from exc
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "path": row[1],
+            "sha256": row[2],
+            "file_size": row[3],
+            "duration_seconds": row[4],
+            "codec": row[5],
+            "metadata_json": json.loads(row[6] or "{}"),
+        }
 
     def local_stats(self) -> dict:
         try:

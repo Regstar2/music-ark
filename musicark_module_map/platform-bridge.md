@@ -22,3 +22,9 @@
 ## Примечания
 
 Windows: Flutter -> Python sidecar -> Python core. Android: Flutter -> Kotlin bridge -> embedded Python -> Python core.
+
+## Команды (оформление v0.10)
+
+Подкоманда `action`:
+
+- общие флаги: `--name …`, необязательно `--path`, необязательно `--payload '<JSON>'` для действий с аргументами (например [[metadata-engine]] — `metadata_get`, `metadata_update`, `metadata_bulk_update`).

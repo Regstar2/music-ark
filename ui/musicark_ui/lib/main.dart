@@ -36,6 +36,21 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   final TextEditingController _localScanPathController = TextEditingController();
   final TextEditingController _dbPathController = TextEditingController();
   final TextEditingController _logLevelController = TextEditingController();
+
+  /// Metadata Editor (v0.10)
+  final TextEditingController _metaFileIdController = TextEditingController();
+  final TextEditingController _metaTitleController = TextEditingController();
+  final TextEditingController _metaArtistController = TextEditingController();
+  final TextEditingController _metaAlbumController = TextEditingController();
+  final TextEditingController _metaTrackController = TextEditingController();
+  final TextEditingController _metaYearController = TextEditingController();
+  final TextEditingController _metaGenreController = TextEditingController();
+  final TextEditingController _metaCoverPathController = TextEditingController();
+  final TextEditingController _metaBulkIdsController = TextEditingController();
+  bool _metaWriteConfirmed = false;
+  bool _metaClearCover = false;
+  String? _metaResolvedPathHint;
+
   int _tabIndex = 0;
   bool _loading = true;
   bool _runningAction = false;
@@ -51,6 +66,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     _NavItem('Sync Plan', Icons.sync_alt),
     _NavItem('Conflicts', Icons.warning_amber),
     _NavItem('Logs', Icons.receipt_long),
+    _NavItem('Metadata', Icons.edit_note),
     _NavItem('Settings', Icons.settings),
   ];
 
@@ -66,6 +82,15 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     _localScanPathController.dispose();
     _dbPathController.dispose();
     _logLevelController.dispose();
+    _metaFileIdController.dispose();
+    _metaTitleController.dispose();
+    _metaArtistController.dispose();
+    _metaAlbumController.dispose();
+    _metaTrackController.dispose();
+    _metaYearController.dispose();
+    _metaGenreController.dispose();
+    _metaCoverPathController.dispose();
+    _metaBulkIdsController.dispose();
     super.dispose();
   }
 
@@ -147,7 +172,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
             : _buildTabBody();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MusicArk Desktop v0.9'),
+        title: const Text('MusicArk Desktop v0.10'),
         actions: [
           IconButton(onPressed: _runningAction ? null : _refresh, icon: const Icon(Icons.refresh)),
         ],
@@ -235,10 +260,275 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       case 7:
         return _buildTable(_listOfMaps('logs'));
       case 8:
+        return _buildMetadataEditor();
+      case 9:
         return _buildSettings();
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  Future<void> _loadMetadataFromDisk() async {
+    final raw = _metaFileIdController.text.trim();
+    final id = int.tryParse(raw);
+    if (id == null) {
+      setState(() => _error = 'Metadata: enter numeric local file id (from Local Library list).');
+      return;
+    }
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final row = await _bridge.action('metadata_get', payload: {'local_file_id': id});
+      final tags = row['tags'] as Map<String, dynamic>? ?? const {};
+      _metaTitleController.text = '${tags['title'] ?? ''}';
+      _metaArtistController.text = '${tags['artist'] ?? ''}';
+      _metaAlbumController.text = '${tags['album'] ?? ''}';
+      _metaTrackController.text = '${tags['track_number'] ?? ''}';
+      _metaYearController.text = '${tags['year'] ?? ''}';
+      _metaGenreController.text = '${tags['genre'] ?? ''}';
+      setState(() {
+        _metaResolvedPathHint = row['path']?.toString();
+        _metaClearCover = false;
+      });
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
+  }
+
+  Future<void> _saveMetadataToDisk() async {
+    if (_metaResolvedPathHint == null) {
+      setState(() => _error = 'Load tags once so the bridge resolves the indexed path, then edit and save.');
+      return;
+    }
+    if (!_metaWriteConfirmed) {
+      setState(() => _error = 'Check the confirmation box before writing tags to disk.');
+      return;
+    }
+    final raw = _metaFileIdController.text.trim();
+    final id = int.tryParse(raw);
+    if (id == null) {
+      setState(() => _error = 'Metadata: invalid file id.');
+      return;
+    }
+    final payload = <String, dynamic>{
+      'confirm': true,
+      'local_file_id': id,
+      'title': _metaTitleController.text.trim(),
+      'artist': _metaArtistController.text.trim(),
+      'album': _metaAlbumController.text.trim(),
+      'genre': _metaGenreController.text.trim(),
+    };
+    final tr = _metaTrackController.text.trim();
+    if (tr.isNotEmpty) {
+      final tn = int.tryParse(tr.split('/').first.trim());
+      if (tn != null) {
+        payload['track_number'] = tn;
+      }
+    }
+    final y = _metaYearController.text.trim();
+    if (y.isNotEmpty) {
+      final yi = int.tryParse(y.length >= 4 ? y.substring(0, 4) : y);
+      if (yi != null) {
+        payload['year'] = yi;
+      }
+    }
+    final cov = _metaCoverPathController.text.trim();
+    if (cov.isNotEmpty) {
+      payload['cover_image_path'] = cov;
+    }
+    if (_metaClearCover) {
+      payload['clear_cover'] = true;
+    }
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final res = await _bridge.action('metadata_update', payload: payload);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res['backup_path'] != null
+                  ? 'Saved. Backup: ${res['backup_path']}'
+                  : 'Metadata saved.',
+            ),
+          ),
+        );
+      }
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
+  }
+
+  Future<void> _saveMetadataBulk() async {
+    if (!_metaWriteConfirmed) {
+      setState(() => _error = 'Check the confirmation box for bulk edits.');
+      return;
+    }
+    final parts = _metaBulkIdsController.text.trim().split(RegExp(r'[\s,;]+'));
+    final ids = <int>[];
+    for (final p in parts) {
+      if (p.isEmpty) {
+        continue;
+      }
+      final v = int.tryParse(p);
+      if (v == null) {
+        setState(() => _error = 'Bulk ids: invalid token "$p".');
+        return;
+      }
+      ids.add(v);
+    }
+    if (ids.length < 2) {
+      setState(() => _error = 'Bulk update needs at least two numeric ids (comma/space-separated).');
+      return;
+    }
+    final payload = <String, dynamic>{
+      'confirm': true,
+      'local_file_ids': ids,
+      'title': _metaTitleController.text.trim(),
+      'artist': _metaArtistController.text.trim(),
+      'album': _metaAlbumController.text.trim(),
+      'genre': _metaGenreController.text.trim(),
+    };
+    final tr = _metaTrackController.text.trim();
+    if (tr.isNotEmpty) {
+      final tn = int.tryParse(tr.split('/').first.trim());
+      if (tn != null) {
+        payload['track_number'] = tn;
+      }
+    }
+    final y = _metaYearController.text.trim();
+    if (y.isNotEmpty) {
+      final yi = int.tryParse(y.length >= 4 ? y.substring(0, 4) : y);
+      if (yi != null) {
+        payload['year'] = yi;
+      }
+    }
+    final cov = _metaCoverPathController.text.trim();
+    if (cov.isNotEmpty) {
+      payload['cover_image_path'] = cov;
+    }
+    if (_metaClearCover) {
+      payload['clear_cover'] = true;
+    }
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final report = await _bridge.action('metadata_bulk_update', payload: payload);
+      if (mounted) {
+        final okList = report['succeeded'] as List<dynamic>? ?? const [];
+        final badList = report['failed'] as List<dynamic>? ?? const [];
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Bulk: OK ${okList.length}, failed ${badList.length}.'),
+          ),
+        );
+      }
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
+  }
+
+  Widget _buildMetadataEditor() {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        const Text(
+          'Loads tags from disk via mutagen (MP3, FLAC, M4A/AAC/MP4; OGG text-only, no cover). '
+          'A full-file backup copy is written under .musicark/metadata_backups before each save.',
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _metaFileIdController,
+          decoration: const InputDecoration(
+            labelText: 'Local file ID',
+            helperText: 'Same id shown in Local Library tab',
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 8),
+        if (_metaResolvedPathHint != null) Text('Path: $_metaResolvedPathHint'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ElevatedButton(
+              onPressed: _runningAction ? null : _loadMetadataFromDisk,
+              child: const Text('Load tags from file'),
+            ),
+            ElevatedButton(
+              onPressed: _runningAction ? null : _saveMetadataToDisk,
+              style: ElevatedButton.styleFrom(foregroundColor: Colors.redAccent),
+              child: const Text('Save to file + DB'),
+            ),
+          ],
+        ),
+        TextField(controller: _metaTitleController, decoration: const InputDecoration(labelText: 'Title')),
+        TextField(controller: _metaArtistController, decoration: const InputDecoration(labelText: 'Artist')),
+        TextField(controller: _metaAlbumController, decoration: const InputDecoration(labelText: 'Album')),
+        TextField(
+          controller: _metaTrackController,
+          decoration: const InputDecoration(labelText: 'Track number'),
+          keyboardType: TextInputType.number,
+        ),
+        TextField(
+          controller: _metaYearController,
+          decoration: const InputDecoration(labelText: 'Year'),
+          keyboardType: TextInputType.number,
+        ),
+        TextField(controller: _metaGenreController, decoration: const InputDecoration(labelText: 'Genre')),
+        TextField(
+          controller: _metaCoverPathController,
+          decoration: const InputDecoration(
+            labelText: 'JPEG cover image path',
+            helperText: 'Optional; JPEG recommended for portability',
+          ),
+        ),
+        CheckboxListTile(
+          value: _metaClearCover,
+          onChanged: (v) => setState(() => _metaClearCover = v ?? false),
+          title: const Text('Clear embedded cover'),
+        ),
+        CheckboxListTile(
+          value: _metaWriteConfirmed,
+          onChanged: (v) => setState(() => _metaWriteConfirmed = v ?? false),
+          title: const Text('Confirm writing metadata to disk (required)'),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
+        const Divider(height: 32),
+        const Text(
+          'Bulk edit: Same field values applied to multiple files — each file is backed up. '
+          'Requires at least two ids.',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _metaBulkIdsController,
+          decoration: const InputDecoration(
+            labelText: 'Bulk IDs',
+            helperText: 'Comma or whitespace separated local file IDs',
+          ),
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton(
+          onPressed: _runningAction ? null : _saveMetadataBulk,
+          child: const Text('Bulk apply fields'),
+        ),
+      ],
+    );
   }
 
   Widget _buildDashboard() {
@@ -350,10 +640,17 @@ class MusicArkBridge {
     return _runBridge(['snapshot']);
   }
 
-  Future<Map<String, dynamic>> action(String name, {String? path}) {
+  Future<Map<String, dynamic>> action(
+    String name, {
+    String? path,
+    Map<String, dynamic>? payload,
+  }) {
     final args = ['action', '--name', name];
     if (path != null && path.isNotEmpty) {
       args.addAll(['--path', path]);
+    }
+    if (payload != null && payload.isNotEmpty) {
+      args.addAll(['--payload', jsonEncode(payload)]);
     }
     return _runBridge(args);
   }
@@ -430,8 +727,8 @@ class FakeMusicArkBridge extends MusicArkBridge {
   }
 
   @override
-  Future<Map<String, dynamic>> action(String name, {String? path}) async {
-    return {'status': 'ok', 'name': name};
+  Future<Map<String, dynamic>> action(String name, {String? path, Map<String, dynamic>? payload}) async {
+    return {'status': 'ok', 'name': name, 'payload Echo': payload};
   }
 
   @override

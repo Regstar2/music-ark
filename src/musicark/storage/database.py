@@ -188,7 +188,7 @@ def initialize_database(database_path: Path) -> None:
                 conn.execute(
                     """
                     INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.8.0')
+                    VALUES('schema_version', '0.10.0')
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value;
                     """
                 )

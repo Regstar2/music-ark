@@ -11,3 +11,7 @@ class ConfigError(MusicArkError):
 
 class StorageError(MusicArkError):
     """Raised when SQLite storage operations fail."""
+
+
+class MetadataEditorError(MusicArkError):
+    """Raised when metadata read/write fails or violates validation rules."""

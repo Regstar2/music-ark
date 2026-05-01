@@ -13,6 +13,7 @@ dependencies = ["requests>=2.32.0"]
 
 [project.scripts]
 musicark = "musicark.cli:main"
+musicark-bridge = "musicark.platform_bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

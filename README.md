@@ -2,7 +2,7 @@
 
 MusicArk is a cross-platform application for preserving and restoring a personal music collection.
 
-This repository currently contains the `v0.8-sync-planner` stage:
+This repository currently contains the `v0.9-desktop-ui` stage:
 
 - Python package skeleton;
 - core configuration and error model;
@@ -15,6 +15,7 @@ This repository currently contains the `v0.8-sync-planner` stage:
 - yandex download provider integrated into download-system (single and batch tasks);
 - matching-engine with canonical tracks, links and conflict queue;
 - sync-planner with dry-run plans and persisted sync operations;
+- Flutter Windows desktop UI with a Python `platform-bridge`;
 - CLI commands:
   - `musicark health-check`
   - `musicark db-init`
@@ -38,6 +39,8 @@ This repository currently contains the `v0.8-sync-planner` stage:
   - `musicark sync plan --dry-run`
   - `musicark sync plan-show --id "<plan_id>"`
   - `musicark sync plan-cancel --id "<plan_id>"`
+  - `musicark-bridge snapshot`
+  - `musicark-bridge action --name sync_plan`
 
 Yandex dependency is pinned in `requirements-yandex.txt`:
 
@@ -52,4 +55,12 @@ python -m venv .venv
 . .venv/Scripts/activate
 pip install -e .
 musicark health-check
+```
+
+## Desktop UI (v0.9)
+
+```bash
+cd ui/musicark_ui
+flutter pub get
+flutter run -d windows
 ```

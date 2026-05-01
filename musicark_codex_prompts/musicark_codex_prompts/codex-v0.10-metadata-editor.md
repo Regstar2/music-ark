@@ -16,6 +16,11 @@
 - [[history-audit-log]]
 - [[metadata-chaos-risk]]
 
+## Контекст после v0.9 (desktop UI)
+
+- Клиент: Flutter Windows в `ui/musicark_ui`; новые экраны и вызовы ядра расширяют этот проект.
+- Связка с Python: модуль-мост [[platform-bridge]] (`src/musicark/platform_bridge.py`); любые новые действия редактора (чтение/запись тегов и т.д.) добавляй как отдельные подкоманды или `action` с явным именем и JSON ответом, без дублирования бизнес-логики во Flutter.
+
 # Prompt for Codex
 
 Ты работаешь над MusicArk. Реализуй этап [[v0.10-metadata-editor]].

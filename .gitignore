@@ -11,3 +11,5 @@ build/
 *.db
 
 .env
+local.properties
+yandex_tracks.txt

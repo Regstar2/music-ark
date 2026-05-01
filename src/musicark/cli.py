@@ -23,6 +23,7 @@ from musicark.download.system import DownloadSystem
 from musicark.matching.engine import MatchingEngine
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
 from musicark.sync.planner import SyncPlanner
+from musicark.sync.safe_execution import SyncSafeExecutor
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,6 +150,21 @@ def build_parser() -> argparse.ArgumentParser:
     sync_show.add_argument("--id", required=True, help="Sync plan id.")
     sync_cancel = sync_subparsers.add_parser("plan-cancel", help="Cancel saved sync plan.")
     sync_cancel.add_argument("--id", required=True, help="Sync plan id.")
+    sync_execute_safe = sync_subparsers.add_parser(
+        "execute-safe",
+        help="v1.0: run safe operations from a sync plan (Yandex download tasks only).",
+    )
+    sync_execute_safe.add_argument(
+        "--plan-id",
+        default=None,
+        help="Sync plan id; defaults to latest non-cancelled plan.",
+    )
+    sync_execute_safe.add_argument(
+        "--confirm",
+        action="store_true",
+        required=True,
+        help="Required acknowledgment before running queued downloads from the plan.",
+    )
     return parser
 
 
@@ -365,6 +381,11 @@ def main() -> int:
         if args.sync_command == "plan-cancel":
             planner.cancel_plan(args.id)
             print(json.dumps({"status": "cancelled", "id": args.id}, ensure_ascii=False, indent=2))
+            return 0
+        if args.sync_command == "execute-safe":
+            executor = SyncSafeExecutor(database_path=db_path, base_dir=base_dir)
+            result = executor.execute_safe_plan_operations(plan_id=args.plan_id, confirm=args.confirm)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
 
     parser.print_help()

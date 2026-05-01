@@ -2,7 +2,13 @@
 
 MusicArk is a cross-platform application for preserving and restoring a personal music collection.
 
-This repository currently contains the `v0.11-restore-upload-experimental` stage (v0.9–v0.10 features included):
+This repository currently targets the **`v1.0-stable-desktop-mvp`** milestone (previous v0.x stages included):
+
+- SQLite **forward migrations** (`schema_version`, audit log index `1.0.0`);
+- **Safe sync executor** — applies only validated `CREATE_DOWNLOAD_TASK` rows for Yandex downloads from a saved plan (`musicark.sync.safe_execution`);
+- Flutter **Dashboard MVP** shortcuts: auth probe, single-track enqueue+run, `sync_execute_safe` with confirmations.
+
+Earlier stages bundled in-tree include:
 
 - Python package skeleton;
 - core configuration and error model;
@@ -41,8 +47,15 @@ This repository currently contains the `v0.11-restore-upload-experimental` stage
   - `musicark sync plan --dry-run`
   - `musicark sync plan-show --id "<plan_id>"`
   - `musicark sync plan-cancel --id "<plan_id>"`
-  - `musicark-bridge snapshot`
+  - `musicark sync execute-safe --confirm [--plan-id "<id>"]` (v1.0 safe Yandex downloads from persisted plan)
+  - `musicark-bridge snapshot` (includes `mvp_hints.latest_sync_plan_id` and schema version)
   - `musicark-bridge action --name sync_plan`
+  - Bridge v1.0 actions (JSON `--payload`), e.g.:
+    ```bash
+    musicark-bridge action --name yandex_auth_check
+    musicark-bridge action --name download_enqueue_run --payload "{\"confirm\":true,\"external_id\":\"<yandex_track_id>\",\"quality\":\"best\"}"
+    musicark-bridge action --name sync_execute_safe --payload "{\"confirm\":true}"
+    ```
   - metadata (Flutter tab **Metadata**, or CLI):
     ```bash
     musicark-bridge action --name metadata_get --payload '{"local_file_id": 1}'
@@ -63,15 +76,19 @@ pip install -r requirements-yandex.txt
 
 ## Quick start
 
-```bash
+```powershell
 python -m venv .venv
-. .venv/Scripts/activate
+.\.venv\Scripts\Activate.ps1
 pip install -e .
+pip install -r requirements-yandex.txt
+musicark db-init  # migrations run automatically
 musicark health-check
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-## Desktop UI (v0.11)
+## Desktop UI (v1.0)
 
+- **Dashboard** MVP card: guided copy, schema hint, **Yandex auth check** dialog, **download_enqueue_run** and **sync_execute_safe** with explicit checkboxes (same confirmations as CLI/bridge payloads).
 - **Metadata** tab (mutagen-backed tag edits + backups under `.musicark/metadata_backups`).
 - **Settings → Experimental Yandex upload** toggle + guarded `experimental_yandex_upload` bridge probe (normally `not_supported`).
 

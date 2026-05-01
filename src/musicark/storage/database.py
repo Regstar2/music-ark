@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from musicark.core.errors import StorageError
+from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
 
 
 SCHEMA_STATEMENTS = (
@@ -178,19 +179,14 @@ SCHEMA_STATEMENTS = (
 
 
 def initialize_database(database_path: Path) -> None:
-    """Create SQLite file and minimal schema for core modules."""
+    """Create SQLite file, apply schema DDL, run forward migrations."""
     database_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with closing(sqlite3.connect(database_path)) as conn:
             with conn:
                 for statement in SCHEMA_STATEMENTS:
                     conn.execute(statement)
-                conn.execute(
-                    """
-                    INSERT INTO app_metadata(key, value)
-                    VALUES('schema_version', '0.11.0')
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value;
-                    """
-                )
+                ensure_schema_version_seed(conn)
+                migrate_schema(conn)
     except sqlite3.Error as exc:
         raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

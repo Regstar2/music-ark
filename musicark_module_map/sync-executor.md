@@ -27,6 +27,20 @@
 
 Частичный провал должен быть нормальной ситуацией: что сделано, что упало, что можно повторить. Не надо превращать ошибку в туманную драму.
 
-## Реализация (v0.11 стартовая точка)
+## Реализация v0.11
 
-Модуль `src/musicark/sync/executor.py` — тонкая обёртка над экспериментальным пробником загрузки `musicark.providers.yandex_experimental_upload`. Полное исполнение планов с `upload_candidate`/`replace_candidate` будет расширяться позже как только появится стабильный API или подтверждённая стратегия.
+Модуль `src/musicark/sync/executor.py` содержит `execute_experimental_yandex_upload` — обёртка над экспериментальным пробником `musicark.providers.yandex_experimental_upload`.
+
+## Реализация v1.0 (desktop MVP — безопасный путь)
+
+`src/musicark/sync/safe_execution.py` экспортирует `SyncSafeExecutor` и `resolve_latest_plan_id`.
+
+- Исполняются только неопасные операции типа `create_download_task` с парой (`yandex_download`, `yandex_music_download`).
+- Остальные операции плана пропускаются с указанием причины; опасные — никогда не выполняются.
+- Итог и отдельные шаги пишутся в [[history-audit-log]].
+
+### Ре‑экспорт
+
+`executor.py` реэкспортирует `SyncSafeExecutor` и `resolve_latest_plan_id` для удобства импорта (`from musicark.sync.executor import SyncSafeExecutor`).
+
+Полноценное исполнение прочих типов операций плана (аплоад, массовые правки метаданных и т.д.) — только в следующих версиях.

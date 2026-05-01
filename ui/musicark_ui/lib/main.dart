@@ -15,7 +15,7 @@ class MusicArkDesktopApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MusicArk Desktop',
+      title: 'MusicArk Desktop MVP',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue)),
       home: MusicArkHomePage(bridge: bridge ?? const MusicArkBridge()),
     );
@@ -56,6 +56,16 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   final TextEditingController _uploadProbeLocalIdController = TextEditingController();
   final TextEditingController _uploadProbeOriginalIdController = TextEditingController();
   bool _uploadProbeConfirmed = false;
+
+  /// v1.0 MVP dashboard shortcuts (bridge actions).
+  final TextEditingController _mvpTrackIdController = TextEditingController();
+  final TextEditingController _mvpDlFolderController =
+      TextEditingController(text: '.musicark/downloads/yandex');
+  final TextEditingController _mvpDlQualityController =
+      TextEditingController(text: 'best');
+  final TextEditingController _mvpPlanIdController = TextEditingController();
+  bool _mvpDownloadConfirmed = false;
+  bool _mvpSafeSyncConfirmed = false;
 
   int _tabIndex = 0;
   bool _loading = true;
@@ -99,6 +109,10 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     _metaBulkIdsController.dispose();
     _uploadProbeLocalIdController.dispose();
     _uploadProbeOriginalIdController.dispose();
+    _mvpTrackIdController.dispose();
+    _mvpDlFolderController.dispose();
+    _mvpDlQualityController.dispose();
+    _mvpPlanIdController.dispose();
     super.dispose();
   }
 
@@ -109,6 +123,15 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     });
     try {
       final snapshot = await _bridge.snapshot();
+      final hints = snapshot['mvp_hints'];
+      if (hints is Map<String, dynamic>) {
+        final lp = hints['latest_sync_plan_id']?.toString();
+        if (lp != null &&
+            lp.isNotEmpty &&
+            _mvpPlanIdController.text.trim().isEmpty) {
+          _mvpPlanIdController.text = lp;
+        }
+      }
       _dbPathController.text = (snapshot['settings']?['database_path'] ?? '').toString();
       _logLevelController.text = (snapshot['settings']?['log_level'] ?? '').toString();
       final sx = snapshot['settings'];
@@ -190,7 +213,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
             : _buildTabBody();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MusicArk Desktop v0.11'),
+        title: const Text('MusicArk Desktop v1.0'),
         actions: [
           IconButton(onPressed: _runningAction ? null : _refresh, icon: const Icon(Icons.refresh)),
         ],
@@ -257,6 +280,133 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
         ),
       ],
     );
+  }
+
+  void _showJsonDialog(String title, Map<String, dynamic> data) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: SelectableText(JsonEncoder.withIndent('  ').convert(data)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runYandexAuthCheck() async {
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final res = await _bridge.action('yandex_auth_check');
+      if (!mounted) {
+        return;
+      }
+      _showJsonDialog('Yandex auth check', Map<String, dynamic>.from(res));
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
+  }
+
+  Future<void> _runMvpDownloadEnqueue() async {
+    if (!_mvpDownloadConfirmed) {
+      setState(() => _error = 'Confirm enqueue and download first.');
+      return;
+    }
+    final ext = _mvpTrackIdController.text.trim();
+    if (ext.isEmpty) {
+      setState(() => _error = 'Enter a Yandex track external id.');
+      return;
+    }
+    final folder = _mvpDlFolderController.text.trim();
+    final qual = _mvpDlQualityController.text.trim().isEmpty
+        ? 'best'
+        : _mvpDlQualityController.text.trim();
+
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final payload = <String, dynamic>{
+        'confirm': true,
+        'external_id': ext,
+        'quality': qual,
+      };
+      if (folder.isNotEmpty) {
+        payload['target_folder'] = folder;
+      }
+      final res = await _bridge.action(
+        'download_enqueue_run',
+        payload: payload,
+      );
+      if (!mounted) {
+        return;
+      }
+      final task = res['task'];
+      final status = task is Map ? task['status'] : res.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('download_enqueue_run: $status')),
+      );
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
+  }
+
+  Future<void> _runMvpSafeSyncExecute() async {
+    if (!_mvpSafeSyncConfirmed) {
+      setState(() => _error = 'Confirm safe sync execution first.');
+      return;
+    }
+    setState(() {
+      _runningAction = true;
+      _error = null;
+    });
+    try {
+      final rawPlan = _mvpPlanIdController.text.trim();
+      final payload = <String, dynamic>{
+        'confirm': true,
+        if (rawPlan.isNotEmpty) 'plan_id': rawPlan,
+      };
+      final res = await _bridge.action(
+        'sync_execute_safe',
+        payload: payload,
+      );
+      if (!mounted) {
+        return;
+      }
+      final sum = res['summary'] as Map?;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'sync_execute_safe: executed=${sum?['executed_count'] ?? '—'}, '
+            'skipped=${sum?['skipped_count'] ?? '—'}, errors=${sum?['error_count'] ?? '—'}',
+          ),
+        ),
+      );
+      await _refresh();
+    } catch (err) {
+      setState(() => _error = '$err');
+    } finally {
+      setState(() => _runningAction = false);
+    }
   }
 
   Widget _buildTabBody() {
@@ -550,15 +700,151 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   }
 
   Widget _buildDashboard() {
-    final dashboard = (_snapshot['dashboard'] as Map<String, dynamic>? ?? const {});
+    final dashboard =
+        (_snapshot['dashboard'] as Map<String, dynamic>? ?? const {});
+    final hints =
+        (_snapshot['mvp_hints'] as Map<String, dynamic>?) ?? const {};
+    final schema = hints['schema_version']?.toString() ?? '—';
+
+    var allZero = dashboard.isEmpty;
+    if (dashboard.isNotEmpty) {
+      allZero = true;
+      for (final v in dashboard.values) {
+        final n = v is int ? v : int.tryParse('$v') ?? 0;
+        if (n != 0) {
+          allZero = false;
+          break;
+        }
+      }
+    }
+
     final cards = dashboard.entries
-        .map((entry) => _DashboardCard(title: entry.key, value: '${entry.value}'))
+        .map(
+          (entry) =>
+              _DashboardCard(title: entry.key, value: '${entry.value}'),
+        )
         .toList();
-    return GridView.count(
-      crossAxisCount: 3,
-      crossAxisSpacing: 8,
-      mainAxisSpacing: 8,
-      children: cards,
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        Text(
+          'Stable desktop MVP (v1.0) — schema $schema',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Authenticate, scan remote and local collections, build a sync plan, then run downloads '
+          '(single track below or safe planner ops). Use the toolbar for bulk scans.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        if (allZero && !_loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Counts are zero — run Yandex / local scans from the bar above.',
+            ),
+          ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Guided MVP',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _runningAction ? null : _runYandexAuthCheck,
+                      icon: const Icon(Icons.verified_user),
+                      label: const Text('Yandex auth check'),
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                const Text(
+                  'Single-track download',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                TextField(
+                  controller: _mvpTrackIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Yandex external track id',
+                  ),
+                ),
+                TextField(
+                  controller: _mvpDlFolderController,
+                  decoration:
+                      const InputDecoration(labelText: 'Target folder'),
+                ),
+                TextField(
+                  controller: _mvpDlQualityController,
+                  decoration:
+                      const InputDecoration(labelText: 'Quality hint'),
+                ),
+                CheckboxListTile(
+                  value: _mvpDownloadConfirmed,
+                  onChanged: (v) =>
+                      setState(() => _mvpDownloadConfirmed = v ?? false),
+                  title: const Text(
+                    'Confirm network download via downloadEnqueueRun',
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+                ElevatedButton.icon(
+                  onPressed: _runningAction ? null : _runMvpDownloadEnqueue,
+                  icon: const Icon(Icons.cloud_download),
+                  label: const Text('download_enqueue_run'),
+                ),
+                const Divider(height: 24),
+                const Text(
+                  'Safe sync execute',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                TextField(
+                  controller: _mvpPlanIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Plan id (empty → latest)',
+                  ),
+                ),
+                CheckboxListTile(
+                  value: _mvpSafeSyncConfirmed,
+                  onChanged: (v) =>
+                      setState(() => _mvpSafeSyncConfirmed = v ?? false),
+                  title: const Text('Confirm sync_execute_safe'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+                ElevatedButton.icon(
+                  onPressed:
+                      _runningAction ? null : _runMvpSafeSyncExecute,
+                  icon: const Icon(Icons.play_circle_outline),
+                  label: const Text('sync_execute_safe'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Counts',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          children: cards,
+        ),
+      ],
     );
   }
 
@@ -819,6 +1105,10 @@ class FakeMusicArkBridge extends MusicArkBridge {
   Future<Map<String, dynamic>> snapshot() async {
     return {
       'dashboard': {'providers': 1, 'remote_tracks': 2, 'local_files': 3},
+      'mvp_hints': {
+        'schema_version': '1.0.0',
+        'latest_sync_plan_id': null,
+      },
       'collection': [],
       'local_library': [],
       'providers': [],

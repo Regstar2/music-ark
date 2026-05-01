@@ -84,3 +84,11 @@
 - `sync_plans`;
 - `sync_operations`;
 - `SyncStorageRepository` для сохранения/чтения/отмены SyncPlan.
+
+## Расширение v1.0
+
+[[v1.0-stable-desktop-mvp]]:
+
+- `musicark/storage/migrations.py` — упорядоченные только вперёд миграции по ключу `app_metadata.schema_version` (стартует с seed `0.1.0` для существующих БД без ключа).
+- Первая миграция `1.0.0` создаёт индекс `idx_audit_log_created_at` на [[history-audit-log]] для производительности и отчётов.
+- `initialize_database()` после DDL выполняет `ensure_schema_version_seed` и `migrate_schema`.

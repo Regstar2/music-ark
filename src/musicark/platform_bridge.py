@@ -34,10 +34,13 @@ from musicark.core.errors import StorageError
 from musicark.matching.engine import MatchingEngine
 from musicark.providers.local_library import LocalLibraryProvider
 from musicark.providers.yandex_music_provider import YandexMusicProvider
+from musicark.download.models import DownloadTask
+from musicark.download.provider import LocalImportProvider, YandexMusicDownloadProvider
+from musicark.download.system import DownloadSystem
 from musicark.metadata.service import MetadataEditorService
 from musicark.storage.download_storage import DownloadStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
-from musicark.sync.executor import execute_experimental_yandex_upload
+from musicark.sync.executor import SyncSafeExecutor, execute_experimental_yandex_upload
 from musicark.sync.planner import SyncPlanner
 
 
@@ -47,6 +50,19 @@ def _db_query(db_path: Path, sql: str, params: tuple[Any, ...] = ()) -> list[tup
             return conn.execute(sql, params).fetchall()
     except sqlite3.Error as exc:
         raise StorageError(f"Bridge query failed: {exc}") from exc
+
+
+def _yandex_download_system(db_path: Path, base_dir: Path | None) -> DownloadSystem:
+    system = DownloadSystem(db_path)
+    system.register_provider(LocalImportProvider())
+    system.register_provider(YandexMusicDownloadProvider(base_dir=base_dir))
+    return system
+
+
+def _download_task_public_dict(task: DownloadTask) -> dict[str, Any]:
+    data = asdict(task)
+    data["status"] = str(task.status)
+    return data
 
 
 def build_snapshot(base_dir: Path | None = None) -> dict[str, Any]:
@@ -185,6 +201,10 @@ def build_snapshot(base_dir: Path | None = None) -> dict[str, Any]:
             }
         )
 
+    schema_rows = _db_query(db_path, "SELECT value FROM app_metadata WHERE key='schema_version'")
+    schema_version_val = str(schema_rows[0][0]) if schema_rows else "unknown"
+    latest_sync_plan_id = str(sync_plan_headers[0][0]) if sync_plan_headers else None
+
     logs = [
         {
             "id": row[0],
@@ -209,6 +229,10 @@ def build_snapshot(base_dir: Path | None = None) -> dict[str, Any]:
     config = load_config(base_dir)
     return {
         "database_path": str(db_path),
+        "mvp_hints": {
+            "schema_version": schema_version_val,
+            "latest_sync_plan_id": latest_sync_plan_id,
+        },
         "dashboard": {
             "providers": counts_row[0],
             "remote_tracks": counts_row[1],
@@ -256,6 +280,38 @@ def run_action(
 
     if name == "metadata_bulk_update":
         return meta.bulk_update_tags(pl)
+
+    if name == "yandex_auth_check":
+        return YandexMusicProvider(base_dir=base_dir).auth_check()
+
+    if name == "download_enqueue_run":
+        if pl.get("confirm") is not True:
+            raise ValueError('download_enqueue_run requires payload {"confirm": true}.')
+        ext = str(pl.get("external_id") or pl.get("track_id") or "").strip()
+        if not ext:
+            raise ValueError("download_enqueue_run requires external_id or track_id.")
+        tf = str(pl.get("target_folder") or ".musicark/downloads/yandex").strip() or ".musicark/downloads/yandex"
+        quality = str(pl.get("quality") or "best")
+        downloads = DownloadStorageRepository(db_path)
+        ds = _yandex_download_system(db_path, base_dir)
+        task = ds.create_task(
+            task_type="yandex_download",
+            source_id=ext,
+            provider_id="yandex_music_download",
+            target_folder=tf,
+        )
+        task.raw_payload = {"track_id": ext, "quality": quality}
+        downloads.upsert_task(task)
+        finished = ds.run_task(task.id)
+        return {"task": _download_task_public_dict(finished)}
+
+    if name == "sync_execute_safe":
+        raw_pid = pl.get("plan_id")
+        pid: str | None = None
+        if raw_pid is not None and str(raw_pid).strip():
+            pid = str(raw_pid).strip()
+        executor = SyncSafeExecutor(database_path=db_path, base_dir=base_dir)
+        return executor.execute_safe_plan_operations(plan_id=pid, confirm=pl.get("confirm"))
 
     if name == "experimental_yandex_upload":
         return execute_experimental_yandex_upload(database_path=db_path, base_dir=base_dir, payload=dict(pl))

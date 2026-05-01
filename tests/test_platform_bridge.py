@@ -24,6 +24,29 @@ class PlatformBridgeTests(unittest.TestCase):
             self.assertIn("sync_plans", snapshot)
             self.assertIn("logs", snapshot)
             self.assertIn("settings", snapshot)
+            self.assertIn("mvp_hints", snapshot)
+            mh = snapshot["mvp_hints"]
+            self.assertIn("schema_version", mh)
+            self.assertEqual(mh["schema_version"], "1.0.0")
+            self.assertIn("latest_sync_plan_id", mh)
+
+    def test_sync_execute_safe_requires_confirm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp)
+            initialize_database(base_dir / ".musicark" / "musicark.db")
+            with self.assertRaises(ValueError):
+                run_action("sync_execute_safe", base_dir=base_dir, payload={"confirm": False})
+
+    def test_download_enqueue_run_requires_confirm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp)
+            initialize_database(base_dir / ".musicark" / "musicark.db")
+            with self.assertRaises(ValueError):
+                run_action(
+                    "download_enqueue_run",
+                    base_dir=base_dir,
+                    payload={"external_id": "1"},
+                )
 
     def test_sync_plan_action_returns_plan_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

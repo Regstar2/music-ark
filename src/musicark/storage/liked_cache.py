@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -28,6 +28,21 @@ class LikedCacheSnapshot:
     @property
     def count(self) -> int:
         return len(self.tracks)
+
+
+def _cache_track_payload(track: ProviderTrack) -> dict[str, Any]:
+    """Keep only fields required by the persistent library UI."""
+    return {
+        "provider_id": track.provider_id,
+        "external_id": track.external_id,
+        "title": track.title,
+        "artists": list(track.artists),
+        "album_external_id": track.album_external_id,
+        "album_title": track.album_title,
+        "duration_seconds": track.duration_seconds,
+        "explicit": track.explicit,
+        "availability": track.availability,
+    }
 
 
 class LikedCacheRepository:
@@ -104,7 +119,7 @@ class LikedCacheRepository:
                                 _COLLECTION_ID,
                                 track.external_id,
                                 position,
-                                json.dumps(asdict(track), ensure_ascii=False),
+                                json.dumps(_cache_track_payload(track), ensure_ascii=False),
                             ),
                         )
                     conn.execute(

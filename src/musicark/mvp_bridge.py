@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
-from enum import StrEnum
+from enum import Enum
 import json
 from pathlib import Path
 import sys
@@ -23,7 +23,7 @@ from musicark.providers.yandex_music_provider import (
 )
 
 
-class BridgeErrorCode(StrEnum):
+class BridgeErrorCode(str, Enum):
     TOKEN_MISSING = "token_missing"
     AUTHENTICATION_FAILED = "authentication_failed"
     YANDEX_REQUEST_FAILED = "yandex_request_failed"

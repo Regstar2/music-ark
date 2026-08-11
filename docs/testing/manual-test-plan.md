@@ -1,91 +1,159 @@
-# Ручной тест-план
+# Ручной тест-план v0.2.0
 
 ## Предусловия
 
 - Windows;
-- Python и Flutter настроены по README;
-- зависимости установлены;
-- есть действующий токен Яндекс Музыки;
-- токен не записан в репозиторий.
+- Python/Flutter настроены по README;
+- ветка `agent/v0.2-persistent-library`;
+- зависимости переустановлены через `python -m pip install -e .`;
+- есть действующий Yandex Music token.
 
-## Сценарий 0 — Python bridge в свежем процессе
-
-Из корня репозитория выполнить:
+## 0. Автоматические проверки
 
 ```powershell
+cd C:\Base\projects\MusicArk
 .\.venv\Scripts\Activate.ps1
+python -c "import keyring; print(keyring.get_keyring())"
 python -c "import musicark.mvp_bridge; print('MVP bridge import OK')"
 python -m unittest discover -s tests -p "test_*.py" -v
+
+cd .\ui\musicark_ui
+flutter analyze
+flutter test
 ```
 
-Ожидаемый результат:
+Ожидается отсутствие errors и успешное завершение test suites.
 
-- печатается `MVP bridge import OK`;
-- весь Python test suite завершается с `OK`;
-- нет `ImportError`, `partially initialized module` или сообщения о `circular import`.
+## 1. Чистый первый запуск
 
-Этот сценарий обязателен: предыдущая версия могла проходить обычный unittest discovery, но падала при первом импорте `musicark.mvp_bridge` в отдельном Python-процессе.
-
-## Сценарий 1 — запуск
-
-1. Из `ui/musicark_ui` выполнить `flutter run -d windows`.
-2. Проверить, что открывается окно MusicArk без старого multi-tab dashboard.
-3. Проверить наличие формы токена и кнопки «Войти».
-
-Ожидаемый результат: приложение готово принять token.
-
-## Сценарий 2 — пустой token
-
-1. Не вводить token.
-2. Нажать «Войти».
-
-Ожидаемый результат: UI просит ввести token и не запускает provider request.
-
-## Сценарий 3 — неверный token
-
-1. Ввести заведомо неверное значение.
-2. Нажать «Войти».
-
-Ожидаемый результат: приложение показывает ошибку авторизации и остаётся на форме входа.
-
-## Сценарий 4 — реальный вход
-
-1. Ввести действующий token.
-2. Нажать «Войти».
-3. Сверить показанное имя аккаунта.
-4. Сверить несколько треков с «Мне нравится» в Яндекс Музыке.
-
-Ожидаемый результат: отображается правильный аккаунт и реальный список.
-
-## Сценарий 5 — refresh
-
-1. После успешного входа нажать refresh.
-
-Ожидаемый результат: список загружается повторно без повторного ввода token.
-
-## Сценарий 6 — logout
-
-1. Нажать «Выйти».
-
-Ожидаемый результат: список исчезает, возвращается token form, повторный вход требует token.
-
-## Сценарий 7 — release build
+Предусловие: пользователь вышел из MusicArk либо credential/cache ещё отсутствуют.
 
 ```powershell
+flutter run -d windows
+```
+
+Ожидается форма token.
+
+## 2. Пустой/неверный token
+
+- пустой token не должен запускать provider request;
+- неверный token должен дать понятную auth error;
+- приложение остаётся на login form.
+
+## 3. Реальный первый вход
+
+1. Ввести рабочий token.
+2. Войти.
+3. Проверить account name.
+4. Сверить несколько Liked tracks.
+5. Проверить source/time indicators.
+
+Ожидается network snapshot и сохранение secure session.
+
+## 4. Search
+
+Проверить запросы по:
+
+- части title;
+- artist;
+- album;
+- строке без совпадений.
+
+Ожидается корректный filtered count и отсутствие изменения исходного cache.
+
+## 5. Sort
+
+Проверить:
+
+- порядок Яндекса;
+- title;
+- artist.
+
+## 6. Повторный запуск
+
+1. Закрыть окно без logout.
+2. Снова выполнить `flutter run -d windows`.
+
+Ожидается:
+
+- token form не показывается;
+- cached library доступна автоматически;
+- затем выполняется network refresh.
+
+## 7. Offline/cache
+
+1. После успешного cache отключить сеть.
+2. Перезапустить MusicArk.
+
+Ожидается:
+
+- cached tracks остаются видимыми;
+- показывается refresh/network error;
+- cache не очищается.
+
+## 8. Добавление membership
+
+1. Добавить тестовый track в Yandex Liked.
+2. Refresh.
+
+Ожидается track в MusicArk и `+1` в sync diff (если других изменений нет).
+
+## 9. Удаление membership
+
+1. Удалить тестовый track из Yandex Liked.
+2. Refresh.
+
+Ожидается исчезновение track из MusicArk/SQLite snapshot и `-1` в diff.
+
+## 10. Logout
+
+1. Нажать «Выйти».
+2. Закрыть приложение.
+3. Запустить снова.
+
+Ожидается:
+
+- login form;
+- cached library отсутствует;
+- token требуется снова.
+
+## 11. Credential backend диагностика
+
+При проблеме persistence:
+
+```powershell
+python -m keyring diagnose
+python -c "import keyring; print(keyring.get_keyring())"
+```
+
+Не выводить сам token.
+
+## 12. Release build
+
+```powershell
+cd C:\Base\projects\MusicArk\ui\musicark_ui
+flutter clean
+flutter pub get
+flutter analyze
+flutter test
 flutter build windows --release
+
+$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
+$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
 .\build\windows\x64\runner\Release\musicark_ui.exe
 ```
 
-Повторить сценарии 4–6.
+Повторить сценарии 3, 6, 7 и 10.
 
-## Что фиксировать при ошибке
+## Что прикладывать к ошибке
 
 - точную команду;
 - stdout/stderr без token;
-- текст UI-ошибки;
+- текст UI error;
 - `python --version`;
 - `flutter --version`;
 - `flutter doctor -v`;
-- отличается ли debug от release.
+- вывод backend class из `keyring.get_keyring()`;
+- debug/release distinction.
 
-Не прикладывать token к issue или логам.
+Token никогда не прикладывать.

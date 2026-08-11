@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 from musicark.mvp_bridge import liked_tracks, login
@@ -54,6 +60,33 @@ class MvpBridgeTests(unittest.TestCase):
             result["tracks"][0]["artists"],
             ("Thousand Foot Krutch",),
         )
+
+    def test_module_entrypoint_imports_cleanly_in_fresh_process(self) -> None:
+        """Catch import-order cycles hidden by in-process unittest discovery."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env.pop("YANDEX_MUSIC_TOKEN", None)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "musicark.mvp_bridge",
+                    "--base-dir",
+                    str(Path(tmp)),
+                    "login",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("circular import", result.stderr.lower())
+        self.assertNotIn("ImportError", result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["error"]["code"], "token_missing")
 
 
 if __name__ == "__main__":

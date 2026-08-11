@@ -77,8 +77,15 @@ class PersistentLibraryService:
         provider = self._provider(clean)
         account = provider.auth_check()
         tracks = provider.list_tracks()
-        diff = self._cache.replace(account, tracks)
+
         self._credentials.set_token(clean)
+        try:
+            diff = self._cache.replace(account, tracks)
+        except Exception:
+            # Avoid a half-signed-in state if persistence fails after secure save.
+            self._credentials.delete_token()
+            raise
+
         snapshot = self._cache.load()
         return {
             "session": {"hasStoredToken": True, "account": account},

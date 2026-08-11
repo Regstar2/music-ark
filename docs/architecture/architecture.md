@@ -1,61 +1,102 @@
 # Архитектура
 
-## Главный сценарий
+## v0.2.0 Persistent Library
 
 ```text
-Flutter sign-in form
+Flutter UI
     |
-    | token via child environment
+    | first sign-in token via child-process environment
     v
 musicark.mvp_bridge
     |
     v
-YandexMusicProvider
+PersistentLibraryService
+    |                         \
+    v                          v
+SystemCredentialStore       LikedCacheRepository
+    |                          |
+Windows Credential Locker     SQLite snapshot
     |
-    v
-yandex-music Client
-    |
-    v
-account / liked tracks JSON
-    |
-    v
-Flutter state + ListView
+    +---- saved token ----+
+                          |
+                          v
+                  YandexMusicProvider
+                          |
+                          v
+                    yandex-music
 ```
 
-## Границы
-
-### UI
+## UI
 
 `ui/musicark_ui/lib/main.dart`
 
-Отвечает за ввод токена, состояние сессии, loading/error states и отображение списка.
+Отвечает за:
 
-### UI-ресурсы
+- форму первого входа;
+- cache-first bootstrap;
+- автоматический refresh сохранённой сессии;
+- loading/error states без уничтожения cached списка;
+- поиск и сортировку;
+- logout.
 
-`ui/musicark_ui/lib/app_strings.dart`
+UI не хранит token после первого sign-in.
 
-Содержит пользовательские строки текущего MVP, чтобы transport/provider-код не формировал UI-текст.
-
-### Process bridge
+## Process bridge
 
 `src/musicark/mvp_bridge.py`
 
-Имеет только два сценария: login и liked tracks. Bridge не сохраняет токен и не пишет библиотеку в SQLite.
+Стабильные действия v0.2:
 
-### Provider
+- `bootstrap` — только saved-session metadata + cache, без сети;
+- `login` — token из environment, auth, network snapshot, secure save;
+- `refresh` — token из credential store, network snapshot replacement;
+- `cached` — чтение snapshot без сети;
+- `logout` — удаление credential и cache.
+
+Token никогда не передаётся через argv.
+
+## PersistentLibraryService
+
+`src/musicark/persistent_library.py`
+
+Orchestration-слой между credentials, provider и cache. Он задаёт порядок операций и гарантирует, что неуспешный network refresh не очищает последний рабочий snapshot.
+
+## Credentials
+
+`src/musicark/credentials.py`
+
+`SystemCredentialStore` использует Python `keyring`. На Windows целевой backend — Windows Credential Locker.
+
+Идентификаторы:
+
+- service: `MusicArk`;
+- username: `yandex_music_token`.
+
+Token не хранится в SQLite/config.
+
+## Cache
+
+`src/musicark/storage/liked_cache.py`
+
+Используются отдельные таблицы membership/snapshot:
+
+- `provider_collection_snapshots`;
+- `provider_collection_items`.
+
+Snapshot заменяется в одной SQLite transaction. Это важно: `provider_tracks` legacy-схемы умеет upsert, но сама по себе не описывает удаление трека из конкретной коллекции.
+
+Schema migration: `1.1.0`.
+
+## Provider
 
 `src/musicark/providers/yandex_music_provider.py`
 
-Существующий адаптер внешней библиотеки. Объекты `yandex-music` не должны выходить за эту границу.
-
-## Секреты
-
-Токен вводится в Flutter и передаётся только через environment дочернего процесса как `YANDEX_MUSIC_TOKEN`. Новый MVP не передаёт токен в argv и не сохраняет его на диск.
+Provider теперь может получить token явно через constructor. Legacy fallback через environment/local.properties сохранён для старых CLI flows.
 
 ## Ошибки
 
-Python bridge переводит известные provider exceptions в стабильные error codes. Flutter преобразует code в пользовательское сообщение и может отдельно показать техническую причину.
+Bridge нормализует provider/storage/credential ошибки в стабильные codes. Flutter может показывать cached library одновременно с ошибкой refresh.
 
-## Legacy
+## Legacy boundary
 
-Существующие storage/download/matching/sync/metadata-модули остаются в репозитории. v0.1.0 не удаляет их и не использует в основном UI-сценарии.
+Download, matching, sync, metadata и local-library подсистемы не подключаются обратно к UI в v0.2.0.

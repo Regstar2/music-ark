@@ -10,11 +10,12 @@ All notable project changes are recorded here.
 - `PersistentLibraryService` orchestration layer;
 - atomic SQLite Liked snapshot cache with membership removal support;
 - schema migration `1.1.0` for `provider_collection_snapshots` and `provider_collection_items`;
+- repair migration `1.1.1` for incompatible experimental cache tables left by older local work;
 - cache-first startup and automatic refresh of a saved session;
 - search across title, artist, and album;
 - library sorting by Yandex order, title, or artist;
 - last-update metadata and added/removed sync diff;
-- tests for persistent credentials/cache service behavior and snapshot replacement.
+- tests for persistent credentials/cache service behavior, snapshot replacement, duplicate IDs, and stale-schema repair.
 
 ### Changed
 
@@ -23,6 +24,8 @@ All notable project changes are recorded here.
 - `musicark.mvp_bridge` now exposes `bootstrap`, `login`, `refresh`, `cached`, and `logout`;
 - refresh failures preserve the last successful cached library;
 - logout clears both stored credentials and cached Liked data;
+- liked-cache persistence ignores blank/duplicate provider track IDs instead of failing the whole snapshot;
+- SQLite cache errors include the underlying safe SQLite diagnostic message;
 - README, architecture, roadmap, scope, test plan, and version docs updated for v0.2.
 
 ## v0.1.0 — Verified Yandex Likes MVP

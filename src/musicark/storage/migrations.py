@@ -1,16 +1,45 @@
-"""Forward-only SQLite schema migrations for desktop MVP (v1.0).
-
-Reads/writes ``app_metadata.schema_version``.
-"""
+"""Forward-only SQLite schema migrations for MusicArk desktop data."""
 
 from __future__ import annotations
 
 from typing import Callable
 
 _SCHEMA_KEY = "schema_version"
-
-# Semantic versions applied in ascending order once when the stored version is strictly older.
 MigrationFn = Callable[[object], None]  # sqlite3.Connection
+
+
+def _create_persistent_library_tables(c: object) -> None:
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_collection_snapshots (
+            provider_id TEXT NOT NULL,
+            collection_id TEXT NOT NULL,
+            account_json TEXT NOT NULL DEFAULT '{}',
+            item_count INTEGER NOT NULL DEFAULT 0,
+            refreshed_at TEXT NOT NULL,
+            PRIMARY KEY(provider_id, collection_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_collection_items (
+            provider_id TEXT NOT NULL,
+            collection_id TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(provider_id, collection_id, external_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_provider_collection_items_position
+        ON provider_collection_items(provider_id, collection_id, position)
+        """
+    )
+
 
 MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     (
@@ -23,6 +52,10 @@ MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
                 """
             ),
         ),
+    ),
+    (
+        "1.1.0",
+        (_create_persistent_library_tables,),
     ),
 ]
 

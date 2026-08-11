@@ -411,7 +411,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                     SizedBox(
                       width: 220,
                       child: DropdownButtonFormField<LibrarySort>(
-                        value: _sortMode,
+                        initialValue: _sortMode,
                         decoration: const InputDecoration(
                           labelText: AppStrings.sort,
                           border: OutlineInputBorder(),

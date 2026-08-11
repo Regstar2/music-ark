@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "musicark"
 version = "0.1.0"
-description = "MusicArk desktop core (SQLite, providers, downloads, planner; v1.0 migrations + safe sync path)"
+description = "MusicArk Yandex Music likes desktop MVP"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]

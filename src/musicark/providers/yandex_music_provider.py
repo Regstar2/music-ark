@@ -1,4 +1,4 @@
-"""Real Yandex Music provider adapter for v0.3 scanner tasks."""
+"""Real Yandex Music provider adapter."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class YandexMusicError(MusicArkError):
 
 
 class YandexTokenMissingError(YandexMusicError):
-    """Raised when Yandex token is missing from local config."""
+    """Raised when Yandex token is missing."""
 
 
 class YandexAuthenticationError(YandexMusicError):
@@ -33,8 +33,9 @@ class YandexAuthenticationError(YandexMusicError):
 class YandexMusicProvider(MusicProvider):
     """Provider implementation that keeps yandex-music DTOs inside this module."""
 
-    def __init__(self, base_dir: Path | None = None) -> None:
+    def __init__(self, base_dir: Path | None = None, token: str | None = None) -> None:
         self._base_dir = base_dir
+        self._token = token.strip() if token else None
 
     @property
     def provider_id(self) -> str:
@@ -143,6 +144,9 @@ class YandexMusicProvider(MusicProvider):
         }
 
     def _resolve_token(self) -> str:
+        if self._token:
+            return self._token
+
         token = os.getenv("YANDEX_MUSIC_TOKEN", "").strip()
         if token:
             return token

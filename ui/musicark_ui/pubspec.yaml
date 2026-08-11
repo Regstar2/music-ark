@@ -1,8 +1,8 @@
 name: musicark_ui
-description: "MusicArk Yandex Music likes desktop MVP."
+description: "MusicArk persistent Yandex Music library desktop MVP."
 publish_to: 'none'
 
-version: 0.1.0+1
+version: 0.2.0+1
 
 environment:
   sdk: ^3.11.5

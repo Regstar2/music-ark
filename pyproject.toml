@@ -4,16 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.1.0"
-description = "MusicArk Yandex Music likes desktop MVP"
+version = "0.2.0"
+description = "MusicArk persistent Yandex Music library desktop MVP"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]
-dependencies = ["mutagen>=1.47.0", "requests>=2.32.0"]
+dependencies = [
+  "keyring==25.7.0",
+  "mutagen>=1.47.0",
+  "requests>=2.32.0",
+]
 
 [project.scripts]
 musicark = "musicark.cli:main"
 musicark-bridge = "musicark.platform_bridge:main"
+musicark-mvp-bridge = "musicark.mvp_bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

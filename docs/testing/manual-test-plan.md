@@ -8,6 +8,24 @@
 - есть действующий токен Яндекс Музыки;
 - токен не записан в репозиторий.
 
+## Сценарий 0 — Python bridge в свежем процессе
+
+Из корня репозитория выполнить:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -c "import musicark.mvp_bridge; print('MVP bridge import OK')"
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Ожидаемый результат:
+
+- печатается `MVP bridge import OK`;
+- весь Python test suite завершается с `OK`;
+- нет `ImportError`, `partially initialized module` или сообщения о `circular import`.
+
+Этот сценарий обязателен: предыдущая версия могла проходить обычный unittest discovery, но падала при первом импорте `musicark.mvp_bridge` в отдельном Python-процессе.
+
 ## Сценарий 1 — запуск
 
 1. Из `ui/musicark_ui` выполнить `flutter run -d windows`.

@@ -20,7 +20,7 @@ class StableDesktopMigrationsTests(unittest.TestCase):
                 row = conn.execute(
                     "SELECT value FROM app_metadata WHERE key='schema_version'",
                 ).fetchone()
-                self.assertEqual(row[0], "1.1.0")
+                self.assertEqual(row[0], "1.1.1")
 
                 idx_rows = conn.execute("PRAGMA index_list(audit_log)").fetchall()
                 self.assertIn("idx_audit_log_created_at", {r[1] for r in idx_rows})
@@ -33,6 +33,49 @@ class StableDesktopMigrationsTests(unittest.TestCase):
                 }
                 self.assertIn("provider_collection_snapshots", tables)
                 self.assertIn("provider_collection_items", tables)
+
+    def test_repair_migration_replaces_incompatible_experimental_cache_tables(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            db_path = Path(tmp) / ".musicark" / "musicark.db"
+            initialize_database(db_path)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("DROP TABLE provider_collection_items")
+                conn.execute("DROP TABLE provider_collection_snapshots")
+                conn.execute(
+                    "CREATE TABLE provider_collection_items (external_id TEXT PRIMARY KEY, payload TEXT)"
+                )
+                conn.execute(
+                    "CREATE TABLE provider_collection_snapshots (provider TEXT PRIMARY KEY, payload TEXT)"
+                )
+                conn.execute(
+                    "UPDATE app_metadata SET value='1.1.0' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            initialize_database(db_path)
+
+            with sqlite3.connect(db_path) as conn:
+                version = conn.execute(
+                    "SELECT value FROM app_metadata WHERE key='schema_version'"
+                ).fetchone()[0]
+                item_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(provider_collection_items)")
+                }
+                snapshot_columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(provider_collection_snapshots)")
+                }
+
+            self.assertEqual(version, "1.1.1")
+            self.assertTrue(
+                {"provider_id", "collection_id", "external_id", "position", "payload_json"}
+                .issubset(item_columns)
+            )
+            self.assertTrue(
+                {"provider_id", "collection_id", "account_json", "item_count", "refreshed_at"}
+                .issubset(snapshot_columns)
+            )
 
 
 if __name__ == "__main__":

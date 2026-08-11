@@ -45,6 +45,19 @@ def _cache_track_payload(track: ProviderTrack) -> dict[str, Any]:
     }
 
 
+def _normalize_tracks(tracks: Iterable[ProviderTrack]) -> list[ProviderTrack]:
+    """Return stable, unique cache members with a usable provider id."""
+    result: list[ProviderTrack] = []
+    seen: set[str] = set()
+    for track in tracks:
+        external_id = track.external_id.strip()
+        if not external_id or external_id in seen:
+            continue
+        seen.add(external_id)
+        result.append(track)
+    return result
+
+
 class LikedCacheRepository:
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
@@ -71,7 +84,7 @@ class LikedCacheRepository:
                     (_PROVIDER_ID, _COLLECTION_ID),
                 ).fetchall()
         except sqlite3.Error as exc:
-            raise StorageError("Failed to read the liked-tracks cache.") from exc
+            raise StorageError(f"Failed to read the liked-tracks cache: {exc}") from exc
 
         account = json.loads(meta[0]) if meta else {}
         refreshed_at = str(meta[1]) if meta else None
@@ -83,7 +96,7 @@ class LikedCacheRepository:
         account: dict[str, Any],
         tracks: Iterable[ProviderTrack],
     ) -> dict[str, int]:
-        track_list = list(tracks)
+        track_list = _normalize_tracks(tracks)
         refreshed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         new_ids = {track.external_id for track in track_list}
 
@@ -141,7 +154,7 @@ class LikedCacheRepository:
                         ),
                     )
         except sqlite3.Error as exc:
-            raise StorageError("Failed to update the liked-tracks cache.") from exc
+            raise StorageError(f"Failed to update the liked-tracks cache: {exc}") from exc
 
         return {
             "added": len(new_ids - before_ids),
@@ -162,4 +175,4 @@ class LikedCacheRepository:
                         (_PROVIDER_ID, _COLLECTION_ID),
                     )
         except sqlite3.Error as exc:
-            raise StorageError("Failed to clear the liked-tracks cache.") from exc
+            raise StorageError(f"Failed to clear the liked-tracks cache: {exc}") from exc

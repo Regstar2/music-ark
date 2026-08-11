@@ -88,6 +88,20 @@ class PersistentLibraryTests(unittest.TestCase):
         ids = [item["external_id"] for item in result["library"]["tracks"]]
         self.assertEqual(ids, ["102", "103"])
 
+    def test_duplicate_and_blank_provider_ids_do_not_break_snapshot(self) -> None:
+        self.provider.tracks = [
+            track("101", "One"),
+            track("101", "One duplicate"),
+            track("", "Broken provider row"),
+            track("102", "Two"),
+        ]
+
+        result = self.service.login("secret-token")
+
+        self.assertEqual(result["library"]["count"], 2)
+        ids = [item["external_id"] for item in result["library"]["tracks"]]
+        self.assertEqual(ids, ["101", "102"])
+
     def test_logout_clears_credentials_and_cache(self) -> None:
         self.service.login("secret-token")
         result = self.service.logout()

@@ -62,12 +62,7 @@ def _create_persistent_library_tables(c: object) -> None:
 
 
 def _repair_persistent_library_tables(c: object) -> None:
-    """Repair cache-only tables created by older experimental local schemas.
-
-    These tables contain rebuildable provider cache data only. If an older
-    local experiment created a table with the same name but incompatible
-    columns, preserving it would make the v0.2 INSERT statements fail forever.
-    """
+    """Repair cache-only tables created by older experimental local schemas."""
     snapshot_columns = _table_columns(c, "provider_collection_snapshots")
     item_columns = _table_columns(c, "provider_collection_items")
 
@@ -77,6 +72,52 @@ def _repair_persistent_library_tables(c: object) -> None:
         c.execute("DROP TABLE provider_collection_items")
 
     _create_persistent_library_tables(c)
+
+
+def _add_snapshot_column(c: object, name: str, declaration: str) -> None:
+    if name not in _table_columns(c, "provider_collection_snapshots"):
+        c.execute(
+            f"ALTER TABLE provider_collection_snapshots ADD COLUMN {name} {declaration}"
+        )
+
+
+def _upgrade_collection_metadata(c: object) -> None:
+    """Extend the v0.2 generic collection cache for playlist metadata.
+
+    The migration only adds columns and indexes. Existing ``liked`` rows and
+    provider_collection_items are kept intact.
+    """
+    _create_persistent_library_tables(c)
+    _add_snapshot_column(c, "collection_type", "TEXT NOT NULL DEFAULT 'liked'")
+    _add_snapshot_column(c, "external_id", "TEXT")
+    _add_snapshot_column(c, "title", "TEXT")
+    _add_snapshot_column(c, "owner_name", "TEXT")
+    _add_snapshot_column(c, "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+    _add_snapshot_column(c, "source_position", "INTEGER NOT NULL DEFAULT 0")
+    _add_snapshot_column(c, "active", "INTEGER NOT NULL DEFAULT 1")
+    _add_snapshot_column(c, "content_refreshed_at", "TEXT")
+
+    c.execute(
+        """
+        UPDATE provider_collection_snapshots
+        SET collection_type='liked', content_refreshed_at=COALESCE(content_refreshed_at, refreshed_at)
+        WHERE collection_id='liked'
+        """
+    )
+    c.execute(
+        """
+        UPDATE provider_collection_snapshots
+        SET collection_type='playlist',
+            external_id=COALESCE(external_id, substr(collection_id, 10))
+        WHERE collection_id LIKE 'playlist:%'
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_provider_collections_type_position
+        ON provider_collection_snapshots(provider_id, collection_type, active, source_position)
+        """
+    )
 
 
 MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
@@ -91,14 +132,9 @@ MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
             ),
         ),
     ),
-    (
-        "1.1.0",
-        (_create_persistent_library_tables,),
-    ),
-    (
-        "1.1.1",
-        (_repair_persistent_library_tables,),
-    ),
+    ("1.1.0", (_create_persistent_library_tables,)),
+    ("1.1.1", (_repair_persistent_library_tables,)),
+    ("1.2.0", (_upgrade_collection_metadata,)),
 ]
 
 

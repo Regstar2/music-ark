@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from musicark.mvp_bridge import _error_payload, library_refresh, liked_refresh, playlist, playlist_refresh, playlists
-from musicark.providers.yandex_music_provider import YandexMusicError
+from musicark.providers.yandex_music_provider import YandexMusicError, YandexTokenMissingError
 
 
 class FakeService:
@@ -22,10 +22,16 @@ class BridgeV03Tests(unittest.TestCase):
         self.assertEqual(playlist("10", service)["collection"]["source"], "cache")
         self.assertEqual(playlist_refresh("10", service)["collection"]["source"], "network")
         self.assertEqual(library_refresh(service)["playlists"]["source"], "network")
+
     def test_provider_error_is_normalized(self):
         payload = _error_payload(YandexMusicError("offline"))
         self.assertEqual(payload["error"]["code"], "yandex_request_failed")
         self.assertEqual(payload["error"]["message"], "offline")
+
+    def test_missing_token_is_normalized(self):
+        payload = _error_payload(YandexTokenMissingError("No saved token"))
+        self.assertEqual(payload["error"]["code"], "token_missing")
+        self.assertEqual(payload["error"]["message"], "No saved token")
 
 
 if __name__ == "__main__":

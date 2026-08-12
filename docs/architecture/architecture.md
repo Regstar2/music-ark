@@ -1,102 +1,45 @@
-# Архитектура
+# MusicArk Architecture
 
-## v0.2.0 Persistent Library
+## v0.3 runtime boundary
 
 ```text
-Flutter UI
-    |
-    | first sign-in token via child-process environment
-    v
+Flutter desktop UI
+        ↓ JSON subprocess bridge
 musicark.mvp_bridge
-    |
-    v
-PersistentLibraryService
-    |                         \
-    v                          v
-SystemCredentialStore       LikedCacheRepository
-    |                          |
-Windows Credential Locker     SQLite snapshot
-    |
-    +---- saved token ----+
-                          |
-                          v
-                  YandexMusicProvider
-                          |
-                          v
-                    yandex-music
+        ↓
+YandexLibraryService
+   ┌────┴──────────────┐
+   ↓                   ↓
+CredentialStore   collection repositories
+   ↓                   ↓
+OS keyring          SQLite
+                       ↑
+YandexMusicProvider ───┘
+        ↓
+   yandex-music
 ```
 
-## UI
+Rules:
 
-`ui/musicark_ui/lib/main.dart`
+1. Flutter uses bridge DTOs only; it never imports provider or SQLite concepts.
+2. `YandexLibraryService` orchestrates session, network phase, cache writes, and cache-first responses.
+3. `YandexMusicProvider` is the only layer that sees third-party `yandex-music` objects.
+4. Tokens stay in the OS credential store. SQLite stores account/library data, never the token.
+5. Provider collections are universal: `liked` and `playlist:<external_id>` share the same snapshot/item tables.
+6. Playlist item `position` is authoritative for original/Yandex order.
+7. Full library refresh is metadata-oriented and does not eagerly request every playlist body.
+8. Network failures must not erase the last successful local snapshot.
 
-Отвечает за:
+## SQLite collection model
 
-- форму первого входа;
-- cache-first bootstrap;
-- автоматический refresh сохранённой сессии;
-- loading/error states без уничтожения cached списка;
-- поиск и сортировку;
-- logout.
+`provider_collection_snapshots` stores collection identity, metadata, source order, activity, metadata refresh time, and content refresh time. `provider_collection_items` stores ordered item payloads.
 
-UI не хранит token после первого sign-in.
+Migration `1.2.0` is additive over v0.2 (`1.1.1`) and is idempotent. Existing `yandex_music/liked` rows and items are preserved. No user database deletion is required.
 
-## Process bridge
+Playlist deletion after a successful index refresh removes that playlist snapshot and its membership so stale remote collections do not remain active indefinitely.
 
-`src/musicark/mvp_bridge.py`
+## Compatibility
 
-Стабильные действия v0.2:
+`PersistentLibraryService`, legacy `YandexMusicProvider.list_playlists()`, and bridge aliases `refresh`/`cached` remain for v0.2/legacy tests. New desktop flows use `YandexLibraryService` and the v0.3 commands.
 
-- `bootstrap` — только saved-session metadata + cache, без сети;
-- `login` — token из environment, auth, network snapshot, secure save;
-- `refresh` — token из credential store, network snapshot replacement;
-- `cached` — чтение snapshot без сети;
-- `logout` — удаление credential и cache.
-
-Token никогда не передаётся через argv.
-
-## PersistentLibraryService
-
-`src/musicark/persistent_library.py`
-
-Orchestration-слой между credentials, provider и cache. Он задаёт порядок операций и гарантирует, что неуспешный network refresh не очищает последний рабочий snapshot.
-
-## Credentials
-
-`src/musicark/credentials.py`
-
-`SystemCredentialStore` использует Python `keyring`. На Windows целевой backend — Windows Credential Locker.
-
-Идентификаторы:
-
-- service: `MusicArk`;
-- username: `yandex_music_token`.
-
-Token не хранится в SQLite/config.
-
-## Cache
-
-`src/musicark/storage/liked_cache.py`
-
-Используются отдельные таблицы membership/snapshot:
-
-- `provider_collection_snapshots`;
-- `provider_collection_items`.
-
-Snapshot заменяется в одной SQLite transaction. Это важно: `provider_tracks` legacy-схемы умеет upsert, но сама по себе не описывает удаление трека из конкретной коллекции.
-
-Schema migration: `1.1.0`.
-
-## Provider
-
-`src/musicark/providers/yandex_music_provider.py`
-
-Provider теперь может получить token явно через constructor. Legacy fallback через environment/local.properties сохранён для старых CLI flows.
-
-## Ошибки
-
-Bridge нормализует provider/storage/credential ошибки в стабильные codes. Flutter может показывать cached library одновременно с ошибкой refresh.
-
-## Legacy boundary
-
-Download, matching, sync, metadata и local-library подсистемы не подключаются обратно к UI в v0.2.0.
+See [[providers]], [[storage]], and [[v0.3.0]].

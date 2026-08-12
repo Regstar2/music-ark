@@ -1,51 +1,24 @@
-# Roadmap
+# MusicArk Roadmap
 
-Roadmap фиксирует последовательность, а не обещание сроков.
+## Product sequence
 
-## v0.1.0 — Yandex likes MVP
+| Version | Focus | Status |
+|---|---|---|
+| v0.1 | Yandex Likes MVP | complete |
+| v0.2 | Persistent Library | complete |
+| v0.3 | Yandex Library / Playlists | implementation complete; real Windows/Yandex validation pending |
+| v0.4 | Local Library | next |
+| v0.5 | Matching | planned |
+| v0.6 | Missing Tracks | planned |
+| v0.7 | Download | planned |
+| v0.8 | Sync | planned |
 
-Статус: **подтверждено ручным Windows-тестом**.
+## v0.3 boundary
 
-- запуск приложения;
-- вход по token;
-- реальный аккаунт;
-- реальный список «Мне нравится».
+v0.3 turns the single Liked screen into a cache-first Yandex library with user playlists and ordered playlist snapshots. Playlist bodies are refreshed lazily; a full library refresh updates account, Likes, and playlist metadata.
 
-## v0.2.0 — Persistent Library
+## Not a current priority
 
-Текущая версия разработки.
+Standalone Python packaging, installer work, local scanning, matching, downloading, playback, playlist editing/upload, and sync UI must not displace the product sequence above.
 
-- secure token storage;
-- автоматическое восстановление сессии;
-- SQLite cache «Мне нравится»;
-- cache-first/offline behavior;
-- snapshot replacement с удалениями;
-- поиск;
-- сортировка;
-- last updated / sync diff.
-
-## v0.3.0 — Standalone Windows App
-
-Цель: убрать зависимость release-build от внешнего checkout и отдельно установленного Python environment.
-
-## v0.4.0 — Yandex Library Expansion
-
-Кандидаты после стабильной v0.3:
-
-- playlists;
-- дополнительные provider-library surfaces;
-- улучшенная навигация библиотеки.
-
-## v0.5.0 — Local Library
-
-Возврат локального индексирования только после устойчивого remote-library слоя.
-
-## v0.6+
-
-Последовательно, а не одним релизом:
-
-- matching;
-- downloads;
-- sync planning/execution.
-
-Legacy-функции не возвращаются в UI автоматически только потому, что их код уже существует.
+Next: [[v0.3.0]] → v0.4 Local Library.

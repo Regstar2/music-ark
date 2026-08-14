@@ -1,159 +1,57 @@
-# Ручной тест-план v0.2.0
+# Manual Test Plan
 
-## Предусловия
+## v0.3 Windows + real Yandex validation
 
-- Windows;
-- Python/Flutter настроены по README;
-- ветка `agent/v0.2-persistent-library`;
-- зависимости переустановлены через `python -m pip install -e .`;
-- есть действующий Yandex Music token.
+Run from a clean checkout of `agent/v0.3-yandex-library` without deleting `.musicark/musicark.db`.
 
-## 0. Автоматические проверки
+### Automated baseline
 
-```powershell
-cd C:\Base\projects\MusicArk
-.\.venv\Scripts\Activate.ps1
-python -c "import keyring; print(keyring.get_keyring())"
-python -c "import musicark.mvp_bridge; print('MVP bridge import OK')"
-python -m unittest discover -s tests -p "test_*.py" -v
+1. `python -m unittest discover -s tests -v`
+2. `flutter pub get`
+3. `flutter analyze`
+4. `flutter test`
 
-cd .\ui\musicark_ui
-flutter analyze
-flutter test
-```
+All must be green before release.
 
-Ожидается отсутствие errors и успешное завершение test suites.
+### Migration / startup
 
-## 1. Чистый первый запуск
+1. Start with an existing v0.2 database containing Liked cache.
+2. Launch v0.3.
+3. Confirm no database deletion/re-login is requested.
+4. Confirm cached Likes appears before network refresh completes.
+5. Confirm existing Liked content remains intact after migration.
 
-Предусловие: пользователь вышел из MusicArk либо credential/cache ещё отсутствуют.
+### Real playlists
 
-```powershell
-flutter run -d windows
-```
+1. With a valid stored session, open `Плейлисты`.
+2. Confirm the list matches the real Yandex account and shows title, track count, owner when available, external ID, and local update time.
+3. Open at least two real playlists, including one with many tracks if available.
+4. Confirm title/artist/album and original ordering match Yandex.
+5. Confirm duration/availability display when supplied by provider data.
+6. Search by title, artist, and album; test original/title/artist sorting.
+7. Search playlist list by title and switch original/title order.
 
-Ожидается форма token.
+### Refresh behavior
 
-## 2. Пустой/неверный token
+1. Add/remove a Liked track in Yandex and refresh Liked.
+2. Add/remove/reorder tracks in one playlist and refresh that playlist.
+3. Create or delete a playlist in Yandex, then use `Обновить библиотеку`.
+4. Confirm a remotely deleted playlist disappears locally.
+5. Confirm full library refresh remains responsive and does not eagerly load every playlist body.
 
-- пустой token не должен запускать provider request;
-- неверный token должен дать понятную auth error;
-- приложение остаётся на login form.
+### Offline fallback
 
-## 3. Реальный первый вход
+1. Open a playlist successfully once.
+2. Close MusicArk and disconnect network.
+3. Relaunch.
+4. Confirm cached Likes and playlist list are visible.
+5. Open the previously cached playlist and confirm its tracks remain visible.
+6. Trigger refresh and confirm an error banner appears without replacing cached content.
 
-1. Ввести рабочий token.
-2. Войти.
-3. Проверить account name.
-4. Сверить несколько Liked tracks.
-5. Проверить source/time indicators.
+### Credentials/logout
 
-Ожидается network snapshot и сохранение secure session.
+1. Confirm token is not present in SQLite, logs, process argv, Git diff, or generated docs.
+2. Logout.
+3. Confirm next launch shows login and cached Yandex collections are cleared.
 
-## 4. Search
-
-Проверить запросы по:
-
-- части title;
-- artist;
-- album;
-- строке без совпадений.
-
-Ожидается корректный filtered count и отсутствие изменения исходного cache.
-
-## 5. Sort
-
-Проверить:
-
-- порядок Яндекса;
-- title;
-- artist.
-
-## 6. Повторный запуск
-
-1. Закрыть окно без logout.
-2. Снова выполнить `flutter run -d windows`.
-
-Ожидается:
-
-- token form не показывается;
-- cached library доступна автоматически;
-- затем выполняется network refresh.
-
-## 7. Offline/cache
-
-1. После успешного cache отключить сеть.
-2. Перезапустить MusicArk.
-
-Ожидается:
-
-- cached tracks остаются видимыми;
-- показывается refresh/network error;
-- cache не очищается.
-
-## 8. Добавление membership
-
-1. Добавить тестовый track в Yandex Liked.
-2. Refresh.
-
-Ожидается track в MusicArk и `+1` в sync diff (если других изменений нет).
-
-## 9. Удаление membership
-
-1. Удалить тестовый track из Yandex Liked.
-2. Refresh.
-
-Ожидается исчезновение track из MusicArk/SQLite snapshot и `-1` в diff.
-
-## 10. Logout
-
-1. Нажать «Выйти».
-2. Закрыть приложение.
-3. Запустить снова.
-
-Ожидается:
-
-- login form;
-- cached library отсутствует;
-- token требуется снова.
-
-## 11. Credential backend диагностика
-
-При проблеме persistence:
-
-```powershell
-python -m keyring diagnose
-python -c "import keyring; print(keyring.get_keyring())"
-```
-
-Не выводить сам token.
-
-## 12. Release build
-
-```powershell
-cd C:\Base\projects\MusicArk\ui\musicark_ui
-flutter clean
-flutter pub get
-flutter analyze
-flutter test
-flutter build windows --release
-
-$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
-$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
-.\build\windows\x64\runner\Release\musicark_ui.exe
-```
-
-Повторить сценарии 3, 6, 7 и 10.
-
-## Что прикладывать к ошибке
-
-- точную команду;
-- stdout/stderr без token;
-- текст UI error;
-- `python --version`;
-- `flutter --version`;
-- `flutter doctor -v`;
-- вывод backend class из `keyring.get_keyring()`;
-- debug/release distinction.
-
-Token никогда не прикладывать.
+Record any discrepancy before marking v0.3 complete.

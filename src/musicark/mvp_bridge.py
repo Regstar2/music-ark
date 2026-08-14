@@ -1,4 +1,4 @@
-"""JSON process bridge for the MusicArk persistent-library desktop MVP.
+"""JSON process bridge for the MusicArk v0.3 Yandex Library desktop UI.
 
 The sign-in token is accepted only through the child-process environment. After
 successful sign-in it is stored by ``SystemCredentialStore`` and later bridge
@@ -15,14 +15,18 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from musicark.core.errors import StorageError
+from musicark.core.errors import MusicArkError, StorageError
 from musicark.credentials import CredentialStoreError
-from musicark.persistent_library import PersistentLibraryService
 from musicark.providers.yandex_music_provider import (
     YandexAuthenticationError,
     YandexMusicError,
     YandexTokenMissingError,
 )
+from musicark.yandex_library import YandexLibraryService
+
+
+class BridgeRequestError(MusicArkError):
+    """Raised for malformed bridge commands before provider work starts."""
 
 
 class BridgeErrorCode(str, Enum):
@@ -31,26 +35,48 @@ class BridgeErrorCode(str, Enum):
     YANDEX_REQUEST_FAILED = "yandex_request_failed"
     CREDENTIAL_STORE_FAILED = "credential_store_failed"
     CACHE_FAILED = "cache_failed"
+    INVALID_REQUEST = "invalid_request"
     UNEXPECTED_ERROR = "unexpected_error"
 
 
-def bootstrap(service: PersistentLibraryService) -> dict[str, Any]:
+def bootstrap(service: Any) -> dict[str, Any]:
     return service.bootstrap()
 
 
-def login(token: str, service: PersistentLibraryService) -> dict[str, Any]:
+def login(token: str, service: Any) -> dict[str, Any]:
     return service.login(token)
 
 
-def refresh(service: PersistentLibraryService) -> dict[str, Any]:
+def refresh(service: Any) -> dict[str, Any]:
+    """v0.2-compatible alias for refreshing Liked."""
     return service.refresh()
 
 
-def cached(service: PersistentLibraryService) -> dict[str, Any]:
+def liked_refresh(service: Any) -> dict[str, Any]:
+    return service.liked_refresh()
+
+
+def playlists(service: Any) -> dict[str, Any]:
+    return service.playlists()
+
+
+def playlist(external_id: str, service: Any) -> dict[str, Any]:
+    return service.playlist(external_id)
+
+
+def playlist_refresh(external_id: str, service: Any) -> dict[str, Any]:
+    return service.playlist_refresh(external_id)
+
+
+def library_refresh(service: Any) -> dict[str, Any]:
+    return service.library_refresh()
+
+
+def cached(service: Any) -> dict[str, Any]:
     return service.cached()
 
 
-def logout(service: PersistentLibraryService) -> dict[str, Any]:
+def logout(service: Any) -> dict[str, Any]:
     return service.logout()
 
 
@@ -65,6 +91,8 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
         code = BridgeErrorCode.CREDENTIAL_STORE_FAILED
     elif isinstance(exc, StorageError):
         code = BridgeErrorCode.CACHE_FAILED
+    elif isinstance(exc, BridgeRequestError):
+        code = BridgeErrorCode.INVALID_REQUEST
     else:
         code = BridgeErrorCode.UNEXPECTED_ERROR
 
@@ -80,9 +108,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "command",
-        choices=("bootstrap", "login", "refresh", "cached", "logout"),
+        choices=(
+            "bootstrap",
+            "login",
+            "refresh",
+            "liked_refresh",
+            "playlists",
+            "playlist",
+            "playlist_refresh",
+            "library_refresh",
+            "cached",
+            "logout",
+        ),
+    )
+    parser.add_argument(
+        "--playlist-id",
+        default=None,
+        help="Yandex playlist external id for playlist commands.",
     )
     return parser
+
+
+def _required_playlist_id(value: str | None) -> str:
+    clean = (value or "").strip()
+    if not clean:
+        raise BridgeRequestError("--playlist-id is required for this command.")
+    return clean
 
 
 def main() -> int:
@@ -91,7 +142,7 @@ def main() -> int:
     base_dir = Path(args.base_dir) if args.base_dir else None
 
     try:
-        service = PersistentLibraryService(base_dir=base_dir)
+        service = YandexLibraryService(base_dir=base_dir)
         if args.command == "bootstrap":
             payload = bootstrap(service)
         elif args.command == "login":
@@ -99,6 +150,16 @@ def main() -> int:
             payload = login(token, service)
         elif args.command == "refresh":
             payload = refresh(service)
+        elif args.command == "liked_refresh":
+            payload = liked_refresh(service)
+        elif args.command == "playlists":
+            payload = playlists(service)
+        elif args.command == "playlist":
+            payload = playlist(_required_playlist_id(args.playlist_id), service)
+        elif args.command == "playlist_refresh":
+            payload = playlist_refresh(_required_playlist_id(args.playlist_id), service)
+        elif args.command == "library_refresh":
+            payload = library_refresh(service)
         elif args.command == "cached":
             payload = cached(service)
         else:

@@ -1,13 +1,9 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import 'app_strings.dart';
+import 'musicark_bridge.dart';
 
-void main() {
-  runApp(const MusicArkDesktopApp());
-}
+void main() => runApp(const MusicArkDesktopApp());
 
 class MusicArkDesktopApp extends StatelessWidget {
   const MusicArkDesktopApp({super.key, this.bridge});
@@ -15,19 +11,21 @@ class MusicArkDesktopApp extends StatelessWidget {
   final MusicArkBridgeClient? bridge;
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: AppStrings.appTitle,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
-      home: MusicArkHomePage(bridge: bridge ?? MusicArkBridge()),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        title: AppStrings.appTitle,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+          useMaterial3: true,
+        ),
+        home: MusicArkHomePage(bridge: bridge ?? MusicArkBridge()),
+      );
 }
 
 enum LibrarySort { original, title, artist }
+
+enum PlaylistSort { original, title }
+
+enum _PageKind { liked, playlists, playlist }
 
 class MusicArkHomePage extends StatefulWidget {
   const MusicArkHomePage({super.key, required this.bridge});
@@ -39,8 +37,8 @@ class MusicArkHomePage extends StatefulWidget {
 }
 
 class _MusicArkHomePageState extends State<MusicArkHomePage> {
-  final TextEditingController _tokenController = TextEditingController();
-  final TextEditingController _searchController = TextEditingController();
+  final _tokenController = TextEditingController();
+  final _searchController = TextEditingController();
 
   bool _initializing = true;
   bool _busy = false;
@@ -49,10 +47,19 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   String? _errorMessage;
   String? _errorDetails;
   Map<String, dynamic> _account = const {};
-  List<Map<String, dynamic>> _tracks = const [];
-  String _source = 'none';
-  String? _lastUpdated;
-  LibrarySort _sortMode = LibrarySort.original;
+  List<Map<String, dynamic>> _likedTracks = const [];
+  List<Map<String, dynamic>> _playlists = const [];
+  List<Map<String, dynamic>> _playlistTracks = const [];
+  Map<String, dynamic>? _selectedPlaylist;
+  String _likedSource = 'none';
+  String _playlistsSource = 'none';
+  String _playlistSource = 'none';
+  String? _likedLastUpdated;
+  String? _playlistsLastUpdated;
+  String? _playlistLastUpdated;
+  LibrarySort _trackSort = LibrarySort.original;
+  PlaylistSort _playlistSort = PlaylistSort.original;
+  _PageKind _page = _PageKind.liked;
 
   @override
   void initState() {
@@ -71,17 +78,14 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     try {
       final payload = await widget.bridge.bootstrap();
       if (!mounted) return;
-      _applyPayload(payload);
+      _applyLibraryPayload(payload);
       setState(() => _initializing = false);
-      if (_hasStoredToken) {
-        await _refreshLikes(showDiff: false);
-      }
+      if (_hasStoredToken) await _refreshLibrary(showDiff: false);
     } on MusicArkBridgeException catch (error) {
       if (!mounted) return;
       setState(() {
         _initializing = false;
-        _errorMessage = _messageForBridgeError(error.code);
-        _errorDetails = error.message;
+        _setBridgeError(error);
       });
     } catch (error) {
       if (!mounted) return;
@@ -103,119 +107,219 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       return;
     }
 
-    setState(() {
-      _busy = true;
-      _errorMessage = null;
-      _errorDetails = null;
-    });
-
+    _beginBusy();
     try {
       final payload = await widget.bridge.login(token);
       if (!mounted) return;
-      _applyPayload(payload);
+      _applyLibraryPayload(payload);
       _tokenController.clear();
-      _showSyncDiff(payload);
+      _showDiff(_asMap(payload['liked'] ?? payload['library']));
     } on MusicArkBridgeException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = _messageForBridgeError(error.code);
-        _errorDetails = error.message;
-      });
+      if (mounted) setState(() => _setBridgeError(error));
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = AppStrings.unexpectedError;
-        _errorDetails = error.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = AppStrings.unexpectedError;
+          _errorDetails = error.toString();
+        });
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _endBusy();
     }
   }
 
-  Future<void> _refreshLikes({bool showDiff = true}) async {
+  Future<void> _refreshLibrary({bool showDiff = true}) async {
+    _beginBusy();
+    try {
+      final payload = await widget.bridge.libraryRefresh();
+      if (!mounted) return;
+      _applyLibraryPayload(payload);
+      if (showDiff) {
+        _showDiff(_asMap(payload['liked'] ?? payload['library']));
+        _showDiff(_asMap(payload['playlists']));
+      }
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _setBridgeError(error));
+    } finally {
+      _endBusy();
+    }
+  }
+
+  Future<void> _refreshLiked() async {
+    _beginBusy();
+    try {
+      final payload = await widget.bridge.likedRefresh();
+      if (!mounted) return;
+      _applyLibraryPayload(payload);
+      _showDiff(_asMap(payload['liked'] ?? payload['library']));
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _setBridgeError(error));
+    } finally {
+      _endBusy();
+    }
+  }
+
+  Future<void> _openPlaylist(Map<String, dynamic> playlist) async {
+    final externalId = (playlist['externalId'] ?? '').toString();
+    if (externalId.isEmpty) return;
+
     setState(() {
-      _busy = true;
+      _page = _PageKind.playlist;
+      _selectedPlaylist = playlist;
+      _playlistTracks = const [];
+      _playlistSource = 'none';
+      _playlistLastUpdated = null;
+      _trackSort = LibrarySort.original;
+      _searchController.clear();
       _errorMessage = null;
       _errorDetails = null;
     });
 
     try {
-      final payload = await widget.bridge.refresh();
-      if (!mounted) return;
-      _applyPayload(payload);
-      if (showDiff) _showSyncDiff(payload);
+      final cached = await widget.bridge.playlist(externalId);
+      if (!mounted || _selectedPlaylist?['externalId'] != externalId) return;
+      _applyPlaylistPayload(cached);
     } on MusicArkBridgeException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = _messageForBridgeError(error.code);
-        _errorDetails = error.message;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = AppStrings.unexpectedError;
-        _errorDetails = error.toString();
-      });
+      if (mounted) setState(() => _setBridgeError(error));
+    }
+
+    if (_hasStoredToken &&
+        mounted &&
+        _selectedPlaylist?['externalId'] == externalId) {
+      await _refreshSelectedPlaylist(showDiff: false);
+    }
+  }
+
+  Future<void> _refreshSelectedPlaylist({bool showDiff = true}) async {
+    final externalId = (_selectedPlaylist?['externalId'] ?? '').toString();
+    if (externalId.isEmpty) return;
+
+    _beginBusy();
+    try {
+      final payload = await widget.bridge.playlistRefresh(externalId);
+      if (!mounted || _selectedPlaylist?['externalId'] != externalId) return;
+      _applyPlaylistPayload(payload);
+      if (showDiff) _showDiff(_asMap(payload['collection']));
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _setBridgeError(error));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _endBusy();
     }
   }
 
   Future<void> _logout() async {
+    _beginBusy();
+    try {
+      final payload = await widget.bridge.logout();
+      if (!mounted) return;
+      _applyLibraryPayload(payload);
+      setState(() {
+        _page = _PageKind.liked;
+        _selectedPlaylist = null;
+        _playlistTracks = const [];
+        _searchController.clear();
+        _tokenController.clear();
+        _trackSort = LibrarySort.original;
+        _playlistSort = PlaylistSort.original;
+      });
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _setBridgeError(error));
+    } finally {
+      _endBusy();
+    }
+  }
+
+  void _beginBusy() {
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _errorMessage = null;
       _errorDetails = null;
     });
-    try {
-      final payload = await widget.bridge.logout();
-      if (!mounted) return;
-      _applyPayload(payload);
-      _searchController.clear();
-      _tokenController.clear();
-      setState(() => _sortMode = LibrarySort.original);
-    } on MusicArkBridgeException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = _messageForBridgeError(error.code);
-        _errorDetails = error.message;
-      });
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
-  void _applyPayload(Map<String, dynamic> payload) {
+  void _endBusy() {
+    if (mounted) setState(() => _busy = false);
+  }
+
+  void _applyLibraryPayload(Map<String, dynamic> payload) {
     final session = _asMap(payload['session']);
-    final library = _asMap(payload['library']);
-    final account = _asMap(session['account']);
-    final rawTracks = library['tracks'];
-    final tracks = rawTracks is List
-        ? rawTracks
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList(growable: false)
-        : <Map<String, dynamic>>[];
+    final liked = _asMap(payload['liked'] ?? payload['library']);
+    final playlistIndex = _asMap(payload['playlists']);
+    final playlistItems = _asListOfMaps(playlistIndex['items']);
 
     setState(() {
       _hasStoredToken = session['hasStoredToken'] == true;
-      _account = account;
-      _tracks = tracks;
-      _source = (library['source'] ?? 'none').toString();
-      _lastUpdated = library['lastUpdated']?.toString();
+      _account = _asMap(session['account']);
+      _likedTracks = _asListOfMaps(liked['tracks']);
+      _playlists = playlistItems;
+      _likedSource = (liked['source'] ?? 'none').toString();
+      _playlistsSource = (playlistIndex['source'] ?? 'none').toString();
+      _likedLastUpdated = liked['lastUpdated']?.toString();
+      _playlistsLastUpdated = playlistIndex['lastUpdated']?.toString();
+      _errorMessage = null;
+      _errorDetails = null;
+
+      final selectedId = (_selectedPlaylist?['externalId'] ?? '').toString();
+      if (selectedId.isNotEmpty &&
+          !_playlists.any(
+            (item) => (item['externalId'] ?? '').toString() == selectedId,
+          )) {
+        _selectedPlaylist = null;
+        _playlistTracks = const [];
+        if (_page == _PageKind.playlist) _page = _PageKind.playlists;
+      } else if (selectedId.isNotEmpty) {
+        final fresh = _playlists.firstWhere(
+          (item) => (item['externalId'] ?? '').toString() == selectedId,
+        );
+        _selectedPlaylist = {...?_selectedPlaylist, ...fresh};
+      }
+    });
+  }
+
+  void _applyPlaylistPayload(Map<String, dynamic> payload) {
+    final metadata = _asMap(payload['playlist']);
+    final collection = _asMap(payload['collection']);
+    setState(() {
+      _selectedPlaylist = {...?_selectedPlaylist, ...metadata};
+      _playlistTracks = _asListOfMaps(collection['tracks']);
+      _playlistSource = (collection['source'] ?? 'none').toString();
+      _playlistLastUpdated = collection['lastUpdated']?.toString();
       _errorMessage = null;
       _errorDetails = null;
     });
   }
 
-  Map<String, dynamic> _asMap(dynamic value) {
-    return value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+  Map<String, dynamic> _asMap(dynamic value) =>
+      value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+
+  List<Map<String, dynamic>> _asListOfMaps(dynamic value) => value is List
+      ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false)
+      : <Map<String, dynamic>>[];
+
+  void _setBridgeError(MusicArkBridgeException error) {
+    _errorMessage = _messageForBridgeError(error.code);
+    _errorDetails = error.message;
   }
 
-  void _showSyncDiff(Map<String, dynamic> payload) {
+  String _messageForBridgeError(String code) => switch (code) {
+        'token_missing' => AppStrings.tokenMissing,
+        'authentication_failed' => AppStrings.authenticationFailed,
+        'yandex_request_failed' => AppStrings.yandexRequestFailed,
+        'credential_store_failed' => AppStrings.credentialStoreFailed,
+        'cache_failed' => AppStrings.cacheFailed,
+        'invalid_request' => AppStrings.invalidRequest,
+        'python_not_found' => AppStrings.pythonNotFound,
+        'repo_root_not_found' => AppStrings.repoRootNotFound,
+        _ => AppStrings.unexpectedError,
+      };
+
+  void _showDiff(Map<String, dynamic> value) {
     if (!mounted) return;
-    final library = _asMap(payload['library']);
-    final diff = _asMap(library['diff']);
+    final diff = _asMap(value['diff']);
     final added = int.tryParse('${diff['added'] ?? 0}') ?? 0;
     final removed = int.tryParse('${diff['removed'] ?? 0}') ?? 0;
     if (added == 0 && removed == 0) return;
@@ -224,30 +328,23 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     );
   }
 
-  String _messageForBridgeError(String code) {
-    switch (code) {
-      case 'token_missing':
-        return AppStrings.tokenMissing;
-      case 'authentication_failed':
-        return AppStrings.authenticationFailed;
-      case 'yandex_request_failed':
-        return AppStrings.yandexRequestFailed;
-      case 'credential_store_failed':
-        return AppStrings.credentialStoreFailed;
-      case 'cache_failed':
-        return AppStrings.cacheFailed;
-      case 'python_not_found':
-        return AppStrings.pythonNotFound;
-      case 'repo_root_not_found':
-        return AppStrings.repoRootNotFound;
-      default:
-        return AppStrings.unexpectedError;
-    }
-  }
+  void _showLiked() => setState(() {
+        _page = _PageKind.liked;
+        _searchController.clear();
+        _trackSort = LibrarySort.original;
+      });
+
+  void _showPlaylists() => setState(() {
+        _page = _PageKind.playlists;
+        _searchController.clear();
+        _playlistSort = PlaylistSort.original;
+      });
 
   List<Map<String, dynamic>> get _visibleTracks {
+    final source =
+        _page == _PageKind.playlist ? _playlistTracks : _likedTracks;
     final query = _searchController.text.trim().toLowerCase();
-    final result = _tracks.where((track) {
+    final filtered = source.where((track) {
       if (query.isEmpty) return true;
       final haystack = [
         (track['title'] ?? '').toString(),
@@ -257,16 +354,39 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       return haystack.contains(query);
     }).toList(growable: false);
 
-    final sorted = List<Map<String, dynamic>>.from(result);
-    switch (_sortMode) {
-      case LibrarySort.original:
-        break;
-      case LibrarySort.title:
-        sorted.sort((a, b) => _title(a).toLowerCase().compareTo(_title(b).toLowerCase()));
-        break;
-      case LibrarySort.artist:
-        sorted.sort((a, b) => _artistsText(a).toLowerCase().compareTo(_artistsText(b).toLowerCase()));
-        break;
+    final sorted = List<Map<String, dynamic>>.from(filtered);
+    if (_trackSort == LibrarySort.title) {
+      sorted.sort(
+        (a, b) => _title(a).toLowerCase().compareTo(_title(b).toLowerCase()),
+      );
+    }
+    if (_trackSort == LibrarySort.artist) {
+      sorted.sort(
+        (a, b) =>
+            _artistsText(a).toLowerCase().compareTo(_artistsText(b).toLowerCase()),
+      );
+    }
+    return sorted;
+  }
+
+  List<Map<String, dynamic>> get _visiblePlaylists {
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = _playlists.where((playlist) {
+      if (query.isEmpty) return true;
+      return (playlist['title'] ?? '')
+          .toString()
+          .toLowerCase()
+          .contains(query);
+    }).toList(growable: false);
+
+    final sorted = List<Map<String, dynamic>>.from(filtered);
+    if (_playlistSort == PlaylistSort.title) {
+      sorted.sort(
+        (a, b) => (a['title'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['title'] ?? '').toString().toLowerCase()),
+      );
     }
     return sorted;
   }
@@ -277,7 +397,10 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   String _artistsText(Map<String, dynamic> track) {
     final raw = track['artists'];
     if (raw is List) {
-      final text = raw.map((value) => value.toString()).where((value) => value.isNotEmpty).join(', ');
+      final text = raw
+          .map((value) => value.toString())
+          .where((value) => value.isNotEmpty)
+          .join(', ');
       if (text.isNotEmpty) return text;
     }
     final text = raw?.toString().trim() ?? '';
@@ -285,176 +408,490 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('${AppStrings.appTitle} 0.2')),
-      body: _initializing
-          ? const Center(child: CircularProgressIndicator())
-          : _hasStoredToken
-              ? _buildLibrary()
-              : _buildLogin(),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('${AppStrings.appTitle} 0.3')),
+        body: _initializing
+            ? const Center(child: CircularProgressIndicator())
+            : _hasStoredToken
+                ? _buildSignedIn()
+                : _buildLogin(),
+      );
 
-  Widget _buildLogin() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(AppStrings.loginTitle, style: Theme.of(context).textTheme.headlineSmall),
-                  const SizedBox(height: 12),
-                  const Text(AppStrings.loginDescription),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _tokenController,
-                    obscureText: !_tokenVisible,
-                    enabled: !_busy,
-                    onSubmitted: (_) {
-                      if (!_busy) _signIn();
-                    },
-                    decoration: InputDecoration(
-                      labelText: AppStrings.tokenLabel,
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        onPressed: _busy
-                            ? null
-                            : () => setState(() => _tokenVisible = !_tokenVisible),
-                        icon: Icon(_tokenVisible ? Icons.visibility_off : Icons.visibility),
+  Widget _buildLogin() => Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      AppStrings.loginTitle,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(AppStrings.loginDescription),
+                    const SizedBox(height: 20),
+                    TextField(
+                      key: const Key('token-field'),
+                      controller: _tokenController,
+                      obscureText: !_tokenVisible,
+                      enabled: !_busy,
+                      onSubmitted: (_) {
+                        if (!_busy) _signIn();
+                      },
+                      decoration: InputDecoration(
+                        labelText: AppStrings.tokenLabel,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          onPressed: _busy
+                              ? null
+                              : () => setState(
+                                    () => _tokenVisible = !_tokenVisible,
+                                  ),
+                          icon: Icon(
+                            _tokenVisible
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _busy ? null : _signIn,
-                    child: Text(_busy ? AppStrings.signingIn : AppStrings.signIn),
-                  ),
-                  if (_errorMessage != null) ...[
                     const SizedBox(height: 16),
-                    _ErrorPanel(message: _errorMessage!, details: _errorDetails),
+                    FilledButton(
+                      key: const Key('login-button'),
+                      onPressed: _busy ? null : _signIn,
+                      child: Text(
+                        _busy ? AppStrings.signingIn : AppStrings.signIn,
+                      ),
+                    ),
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 16),
+                      _ErrorPanel(
+                        message: _errorMessage!,
+                        details: _errorDetails,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-    );
-  }
+      );
 
-  Widget _buildLibrary() {
-    final displayName = (_account['displayName'] ?? _account['providerUserId'] ?? '').toString();
-    final visible = _visibleTracks;
-    final sourceLabel = _source == 'network' ? AppStrings.networkSource : AppStrings.cacheSource;
-    final lastUpdated = _lastUpdated ?? AppStrings.neverUpdated;
-
-    return Column(
-      children: [
-        Material(
-          elevation: 1,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+  Widget _buildSignedIn() => Row(
+        children: [
+          _buildSidebar(),
+          const VerticalDivider(width: 1),
+          Expanded(
             child: Column(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(AppStrings.likedTracks, style: Theme.of(context).textTheme.titleLarge),
-                          if (displayName.isNotEmpty) Text(displayName),
-                          Text(AppStrings.lastUpdated(lastUpdated), style: Theme.of(context).textTheme.bodySmall),
-                        ],
-                      ),
+                if (_busy) const LinearProgressIndicator(),
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    child: _ErrorPanel(
+                      message: _errorMessage!,
+                      details: _errorDetails,
                     ),
-                    Chip(label: Text(sourceLabel)),
-                    const SizedBox(width: 12),
-                    Text(
-                      visible.length == _tracks.length
-                          ? AppStrings.trackCount(_tracks.length)
-                          : AppStrings.filteredCount(visible.length, _tracks.length),
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      tooltip: AppStrings.refresh,
-                      onPressed: _busy ? null : _refreshLikes,
-                      icon: const Icon(Icons.refresh),
-                    ),
-                    TextButton(
-                      onPressed: _busy ? null : _logout,
-                      child: const Text(AppStrings.logout),
-                    ),
-                  ],
+                  ),
+                Expanded(child: _buildPage()),
+              ],
+            ),
+          ),
+        ],
+      );
+
+  Widget _buildSidebar() {
+    final displayName =
+        (_account['displayName'] ?? _account['providerUserId'] ?? '').toString();
+
+    return SizedBox(
+      key: const Key('library-sidebar'),
+      width: 280,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppStrings.yandexMusic,
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: AppStrings.search,
-                          prefixIcon: Icon(Icons.search),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 220,
-                      child: DropdownButtonFormField<LibrarySort>(
-                        initialValue: _sortMode,
-                        decoration: const InputDecoration(
-                          labelText: AppStrings.sort,
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: LibrarySort.original, child: Text(AppStrings.sortOriginal)),
-                          DropdownMenuItem(value: LibrarySort.title, child: Text(AppStrings.sortTitle)),
-                          DropdownMenuItem(value: LibrarySort.artist, child: Text(AppStrings.sortArtist)),
-                        ],
-                        onChanged: _busy
-                            ? null
-                            : (value) {
-                                if (value != null) setState(() => _sortMode = value);
-                              },
-                      ),
-                    ),
-                  ],
+                if (displayName.isNotEmpty)
+                  Text(
+                    displayName,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            key: const Key('nav-liked'),
+            leading: const Icon(Icons.favorite_outline),
+            selected: _page == _PageKind.liked,
+            title: const Text(AppStrings.likedTracks),
+            onTap: _showLiked,
+          ),
+          ListTile(
+            key: const Key('nav-playlists'),
+            leading: const Icon(Icons.queue_music),
+            selected: _page == _PageKind.playlists,
+            title: const Text(AppStrings.playlists),
+            trailing: Text('${_playlists.length}'),
+            onTap: _showPlaylists,
+          ),
+          if (_playlists.isNotEmpty) const Divider(),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _playlists.length,
+              itemBuilder: (context, index) {
+                final item = _playlists[index];
+                final id = (item['externalId'] ?? '').toString();
+                return ListTile(
+                  key: Key('nav-playlist-$id'),
+                  contentPadding: const EdgeInsets.only(left: 40, right: 12),
+                  dense: true,
+                  selected: _page == _PageKind.playlist &&
+                      _selectedPlaylist?['externalId'] == id,
+                  title: Text(
+                    (item['title'] ?? AppStrings.unknownPlaylist).toString(),
+                  ),
+                  onTap: () => _openPlaylist(item),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.tonalIcon(
+                  key: const Key('refresh-library'),
+                  onPressed: _busy ? null : _refreshLibrary,
+                  icon: const Icon(Icons.sync),
+                  label: const Text(AppStrings.refreshLibrary),
+                ),
+                const SizedBox(height: 6),
+                TextButton(
+                  key: const Key('logout-button'),
+                  onPressed: _busy ? null : _logout,
+                  child: const Text(AppStrings.logout),
                 ),
               ],
             ),
           ),
-        ),
-        if (_busy) const LinearProgressIndicator(),
-        if (_errorMessage != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: _ErrorPanel(message: _errorMessage!, details: _errorDetails),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPage() => switch (_page) {
+        _PageKind.liked => _buildTrackCollection(
+            title: AppStrings.likedTracks,
+            tracks: _likedTracks,
+            source: _likedSource,
+            lastUpdated: _likedLastUpdated,
+            emptyMessage: AppStrings.emptyLikes,
+            refresh: _refreshLiked,
           ),
+        _PageKind.playlists => _buildPlaylistIndex(),
+        _PageKind.playlist => _buildTrackCollection(
+            title: (_selectedPlaylist?['title'] ?? AppStrings.unknownPlaylist)
+                .toString(),
+            tracks: _playlistTracks,
+            source: _playlistSource,
+            lastUpdated: _playlistLastUpdated,
+            emptyMessage: AppStrings.emptyPlaylist,
+            refresh: _refreshSelectedPlaylist,
+            subtitle: _playlistSubtitle(_selectedPlaylist),
+          ),
+      };
+
+  Widget _buildTrackCollection({
+    required String title,
+    required List<Map<String, dynamic>> tracks,
+    required String source,
+    required String? lastUpdated,
+    required String emptyMessage,
+    required Future<void> Function() refresh,
+    String? subtitle,
+  }) {
+    final visible = _visibleTracks;
+
+    return Column(
+      children: [
+        _CollectionHeader(
+          title: title,
+          subtitle: subtitle,
+          source: source,
+          lastUpdated: lastUpdated,
+          countLabel: visible.length == tracks.length
+              ? AppStrings.trackCount(tracks.length)
+              : AppStrings.filteredCount(visible.length, tracks.length),
+          onRefresh: _busy ? null : refresh,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('track-search'),
+                  controller: _searchController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.search,
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 280,
+                child: DropdownButtonFormField<LibrarySort>(
+                  key: Key('track-sort-${_trackSort.name}'),
+                  initialValue: _trackSort,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.sort,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: LibrarySort.original,
+                      child: Text(AppStrings.sortOriginal),
+                    ),
+                    DropdownMenuItem(
+                      value: LibrarySort.title,
+                      child: Text(AppStrings.sortTitle),
+                    ),
+                    DropdownMenuItem(
+                      value: LibrarySort.artist,
+                      child: Text(AppStrings.sortArtist),
+                    ),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => _trackSort = value);
+                          }
+                        },
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: visible.isEmpty
               ? Center(
                   child: Text(
-                    _tracks.isEmpty ? AppStrings.emptyLikes : AppStrings.noSearchResults,
+                    tracks.isEmpty
+                        ? emptyMessage
+                        : AppStrings.noSearchResults,
                   ),
                 )
               : ListView.separated(
+                  key: const Key('track-list'),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: visible.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) => _TrackTile(track: visible[index]),
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) =>
+                      _TrackTile(track: visible[index]),
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildPlaylistIndex() {
+    final visible = _visiblePlaylists;
+
+    return Column(
+      children: [
+        _CollectionHeader(
+          title: AppStrings.playlists,
+          source: _playlistsSource,
+          lastUpdated: _playlistsLastUpdated,
+          countLabel: visible.length == _playlists.length
+              ? AppStrings.playlistCount(_playlists.length)
+              : AppStrings.filteredCount(visible.length, _playlists.length),
+          onRefresh: _busy ? null : _refreshLibrary,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('playlist-search'),
+                  controller: _searchController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.playlistSearch,
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 280,
+                child: DropdownButtonFormField<PlaylistSort>(
+                  key: Key('playlist-sort-${_playlistSort.name}'),
+                  initialValue: _playlistSort,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.sort,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: PlaylistSort.original,
+                      child: Text(AppStrings.sortOriginal),
+                    ),
+                    DropdownMenuItem(
+                      value: PlaylistSort.title,
+                      child: Text(AppStrings.sortTitle),
+                    ),
+                  ],
+                  onChanged: _busy
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => _playlistSort = value);
+                          }
+                        },
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: visible.isEmpty
+              ? Center(
+                  child: Text(
+                    _playlists.isEmpty
+                        ? AppStrings.emptyPlaylists
+                        : AppStrings.noSearchResults,
+                  ),
+                )
+              : ListView.separated(
+                  key: const Key('playlist-list'),
+                  itemCount: visible.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = visible[index];
+                    final id = (item['externalId'] ?? '').toString();
+                    final owner = (item['ownerName'] ?? '').toString();
+                    final count =
+                        int.tryParse('${item['trackCount'] ?? 0}') ?? 0;
+                    final updated = item['lastUpdated']?.toString() ??
+                        AppStrings.neverUpdated;
+                    return ListTile(
+                      key: Key('playlist-row-$id'),
+                      leading: const Icon(Icons.queue_music),
+                      title: Text(
+                        (item['title'] ?? AppStrings.unknownPlaylist).toString(),
+                      ),
+                      subtitle: Text(
+                        [
+                          if (owner.isNotEmpty) owner,
+                          AppStrings.externalId(id),
+                          AppStrings.lastUpdated(updated),
+                        ].join(' · '),
+                      ),
+                      trailing: Text(AppStrings.trackCount(count)),
+                      onTap: () => _openPlaylist(item),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  String? _playlistSubtitle(Map<String, dynamic>? playlist) {
+    if (playlist == null) return null;
+    final values = <String>[];
+    final owner = (playlist['ownerName'] ?? '').toString();
+    final id = (playlist['externalId'] ?? '').toString();
+    if (owner.isNotEmpty) values.add(owner);
+    if (id.isNotEmpty) values.add(AppStrings.externalId(id));
+    return values.isEmpty ? null : values.join(' · ');
+  }
+}
+
+class _CollectionHeader extends StatelessWidget {
+  const _CollectionHeader({
+    required this.title,
+    required this.source,
+    required this.lastUpdated,
+    required this.countLabel,
+    required this.onRefresh,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final String source;
+  final String? lastUpdated;
+  final String countLabel;
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceLabel = switch (source) {
+      'network' => AppStrings.networkSource,
+      'cache' => AppStrings.cacheSource,
+      _ => AppStrings.noneSource,
+    };
+    final titleChildren = <Widget>[
+      Text(title, style: Theme.of(context).textTheme.headlineSmall),
+    ];
+    final subtitleText = subtitle?.trim();
+    if (subtitleText != null && subtitleText.isNotEmpty) {
+      titleChildren.add(Text(subtitleText));
+    }
+    titleChildren.add(
+      Text(
+        AppStrings.lastUpdated(lastUpdated ?? AppStrings.neverUpdated),
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: titleChildren,
+            ),
+          ),
+          Chip(label: Text(sourceLabel)),
+          const SizedBox(width: 12),
+          Text(countLabel),
+          const SizedBox(width: 8),
+          IconButton(
+            key: const Key('refresh-current'),
+            tooltip: AppStrings.refresh,
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -472,17 +909,28 @@ class _TrackTile extends StatelessWidget {
         ? rawArtists.map((value) => value.toString()).join(', ')
         : rawArtists?.toString() ?? '';
     final album = (track['album_title'] ?? '').toString().trim();
-    final subtitle = [
-      artists.isEmpty ? AppStrings.unknownArtist : artists,
-      if (album.isNotEmpty) album,
-    ].join(' · ');
+    final duration = _formatDuration(track['duration_seconds']);
+    final availability = (track['availability'] ?? '').toString().trim();
 
     return ListTile(
       leading: const Icon(Icons.music_note),
       title: Text(title.isEmpty ? AppStrings.unknownTitle : title),
-      subtitle: Text(subtitle),
+      subtitle: Text(
+        [
+          artists.isEmpty ? AppStrings.unknownArtist : artists,
+          if (album.isNotEmpty) album,
+          if (duration != null) duration,
+          if (availability.isNotEmpty) availability,
+        ].join(' · '),
+      ),
       dense: true,
     );
+  }
+
+  static String? _formatDuration(dynamic raw) {
+    final seconds = raw is int ? raw : int.tryParse('${raw ?? ''}');
+    if (seconds == null || seconds < 0) return null;
+    return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
   }
 }
 
@@ -494,236 +942,32 @@ class _ErrorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final children = <Widget>[
+      Text(
+        message,
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
+    ];
     final detailText = details?.trim();
+    if (detailText != null && detailText.isNotEmpty) {
+      children.add(const SizedBox(height: 6));
+      children.add(
+        SelectableText(
+          detailText,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      );
+    }
+
     return Card(
+      key: const Key('error-panel'),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            if (detailText != null && detailText.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              SelectableText(detailText, style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ],
+          children: children,
         ),
       ),
     );
   }
-}
-
-abstract interface class MusicArkBridgeClient {
-  Future<Map<String, dynamic>> bootstrap();
-  Future<Map<String, dynamic>> login(String token);
-  Future<Map<String, dynamic>> refresh();
-  Future<Map<String, dynamic>> logout();
-}
-
-class MusicArkBridge implements MusicArkBridgeClient {
-  @override
-  Future<Map<String, dynamic>> bootstrap() => _runBridge('bootstrap');
-
-  @override
-  Future<Map<String, dynamic>> login(String token) => _runBridge('login', token: token);
-
-  @override
-  Future<Map<String, dynamic>> refresh() => _runBridge('refresh');
-
-  @override
-  Future<Map<String, dynamic>> logout() => _runBridge('logout');
-
-  Future<Map<String, dynamic>> _runBridge(String command, {String? token}) async {
-    final repoRoot = _resolveRepoRoot();
-    final python = await _resolvePythonCommand();
-    final srcPath = '$repoRoot${Platform.pathSeparator}src';
-    final existingPythonPath = Platform.environment['PYTHONPATH'];
-    final mergedPythonPath = existingPythonPath == null || existingPythonPath.isEmpty
-        ? srcPath
-        : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath';
-
-    final bridgeEnv = <String, String>{
-      ...Platform.environment,
-      'PYTHONPATH': mergedPythonPath,
-      'PYTHONIOENCODING': 'utf-8',
-      'PYTHONUTF8': '1',
-    };
-    bridgeEnv.remove('YANDEX_MUSIC_TOKEN');
-    if (token != null && token.isNotEmpty) bridgeEnv['YANDEX_MUSIC_TOKEN'] = token;
-
-    final result = await Process.run(
-      python.executable,
-      [
-        ...python.prefixArgs,
-        '-m',
-        'musicark.mvp_bridge',
-        '--base-dir',
-        repoRoot,
-        command,
-      ],
-      runInShell: false,
-      workingDirectory: repoRoot,
-      environment: bridgeEnv,
-    );
-
-    final stdoutText = (result.stdout ?? '').toString().trim();
-    final stderrText = (result.stderr ?? '').toString().trim();
-    Map<String, dynamic>? payload;
-    if (stdoutText.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(stdoutText);
-        if (decoded is Map) payload = Map<String, dynamic>.from(decoded);
-      } on FormatException {
-        payload = null;
-      }
-    }
-
-    final rawError = payload?['error'];
-    if (rawError is Map) {
-      final error = Map<String, dynamic>.from(rawError);
-      throw MusicArkBridgeException(
-        (error['code'] ?? 'unexpected_error').toString(),
-        (error['message'] ?? stderrText).toString(),
-      );
-    }
-    if (result.exitCode != 0) {
-      throw MusicArkBridgeException(
-        'unexpected_error',
-        stderrText.isNotEmpty ? stderrText : stdoutText,
-      );
-    }
-    if (payload == null) {
-      throw MusicArkBridgeException(
-        'unexpected_error',
-        stderrText.isNotEmpty ? stderrText : 'Bridge returned invalid JSON.',
-      );
-    }
-    return payload;
-  }
-
-  String _resolveRepoRoot() {
-    final override = Platform.environment['MUSICARK_REPO_ROOT']?.trim();
-    if (override != null && override.isNotEmpty) {
-      final directory = Directory(override);
-      if (_looksLikeRepoRoot(directory)) return directory.absolute.path;
-    }
-
-    final candidates = <Directory>{
-      Directory.current.absolute,
-      File(Platform.resolvedExecutable).parent.absolute,
-    };
-    for (final start in candidates) {
-      var current = start;
-      while (true) {
-        if (_looksLikeRepoRoot(current)) return current.path;
-        final parent = current.parent;
-        if (parent.path == current.path) break;
-        current = parent;
-      }
-    }
-    throw const MusicArkBridgeException('repo_root_not_found', AppStrings.repoRootNotFound);
-  }
-
-  bool _looksLikeRepoRoot(Directory directory) {
-    final separator = Platform.pathSeparator;
-    return File('${directory.path}${separator}pyproject.toml').existsSync() &&
-        File('${directory.path}${separator}src${separator}musicark${separator}mvp_bridge.py')
-            .existsSync();
-  }
-
-  Future<_PythonCommand> _resolvePythonCommand() async {
-    final override = Platform.environment['MUSICARK_PYTHON']?.trim();
-    if (override != null && override.isNotEmpty) return _PythonCommand(override);
-
-    final candidates = Platform.isWindows
-        ? const [_PythonCommand('python'), _PythonCommand('py', prefixArgs: ['-3'])]
-        : const [_PythonCommand('python3'), _PythonCommand('python')];
-
-    for (final candidate in candidates) {
-      try {
-        final result = await Process.run(
-          candidate.executable,
-          [...candidate.prefixArgs, '--version'],
-          runInShell: false,
-        );
-        if (result.exitCode == 0) return candidate;
-      } on ProcessException {
-        // Try the next known Python launcher.
-      }
-    }
-    throw const MusicArkBridgeException('python_not_found', AppStrings.pythonNotFound);
-  }
-}
-
-class _PythonCommand {
-  const _PythonCommand(this.executable, {this.prefixArgs = const []});
-
-  final String executable;
-  final List<String> prefixArgs;
-}
-
-class MusicArkBridgeException implements Exception {
-  const MusicArkBridgeException(this.code, this.message);
-
-  final String code;
-  final String message;
-
-  @override
-  String toString() => '$code: $message';
-}
-
-class FakeMusicArkBridge implements MusicArkBridgeClient {
-  const FakeMusicArkBridge({this.startSignedIn = false});
-
-  final bool startSignedIn;
-
-  static const _account = {
-    'provider': 'yandex_music',
-    'providerUserId': 'test-user',
-    'displayName': 'Tester',
-  };
-
-  static const _tracks = [
-    {
-      'provider_id': 'yandex_music',
-      'external_id': '101',
-      'title': 'Courtesy Call',
-      'artists': ['Thousand Foot Krutch'],
-      'album_title': 'The End Is Where We Begin',
-    },
-    {
-      'provider_id': 'yandex_music',
-      'external_id': '102',
-      'title': 'Animal I Have Become',
-      'artists': ['Three Days Grace'],
-      'album_title': 'One-X',
-    },
-  ];
-
-  Map<String, dynamic> _state({required bool signedIn, String source = 'network'}) => {
-        'session': {
-          'hasStoredToken': signedIn,
-          'account': signedIn ? _account : <String, dynamic>{},
-        },
-        'library': {
-          'source': signedIn ? source : 'none',
-          'count': signedIn ? _tracks.length : 0,
-          'lastUpdated': signedIn ? '2026-08-11T14:00:00+00:00' : null,
-          'tracks': signedIn ? _tracks : <Map<String, dynamic>>[],
-          'diff': {'added': 0, 'removed': 0, 'unchanged': signedIn ? _tracks.length : 0},
-        },
-      };
-
-  @override
-  Future<Map<String, dynamic>> bootstrap() async =>
-      _state(signedIn: startSignedIn, source: 'cache');
-
-  @override
-  Future<Map<String, dynamic>> login(String token) async => _state(signedIn: true);
-
-  @override
-  Future<Map<String, dynamic>> refresh() async => _state(signedIn: true);
-
-  @override
-  Future<Map<String, dynamic>> logout() async => _state(signedIn: false, source: 'none');
 }

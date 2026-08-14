@@ -68,8 +68,54 @@ class YandexMusicProvider(MusicProvider):
         return [map_yandex_track(item) for item in payload]
 
     def list_playlists(self) -> list[ProviderPlaylist]:
+        """Legacy eager playlist scan retained for provider-storage compatibility."""
         payload = self._fetch_playlists_payload()
         return [map_yandex_playlist(item) for item in payload]
+
+    def list_playlist_metadata(self) -> list[ProviderPlaylist]:
+        """Return the user's playlist index without fetching each playlist's tracks."""
+        payload = self._fetch_playlist_metadata_payload()
+        return [map_yandex_playlist(item) for item in payload]
+
+    def get_playlist(self, external_id: str) -> tuple[ProviderPlaylist, list[ProviderTrack]]:
+        """Fetch one playlist and map its ordered tracks across the provider boundary."""
+        clean_id = external_id.strip()
+        if not clean_id:
+            raise YandexMusicError("Playlist external id is empty.")
+
+        client = self._build_client()
+        try:
+            playlists = client.users_playlists_list() or []
+            target = None
+            for candidate in playlists:
+                kind = getattr(candidate, "kind", None)
+                if kind is not None and str(kind) == clean_id:
+                    target = candidate
+                    break
+                candidate_dict = json.loads(candidate.to_json())
+                if str(candidate_dict.get("kind", "")) == clean_id:
+                    target = candidate
+                    break
+            if target is None:
+                raise YandexMusicError(f"Yandex playlist '{clean_id}' was not found.")
+
+            playlist_dict = json.loads(target.to_json())
+            fetched_tracks = target.fetch_tracks() if hasattr(target, "fetch_tracks") else []
+            track_payloads = [json.loads(item.to_json()) for item in (fetched_tracks or [])]
+            playlist_dict["track_refs"] = [
+                str(item.get("id"))
+                for item in track_payloads
+                if item.get("id") is not None
+            ]
+            playlist_dict["track_count"] = len(track_payloads)
+            return (
+                map_yandex_playlist(playlist_dict),
+                [map_yandex_track(item) for item in track_payloads],
+            )
+        except YandexMusicError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError(f"Failed to scan Yandex playlist '{clean_id}'.") from exc
 
     def auth_check(self) -> dict[str, Any]:
         client = self._build_client()
@@ -84,7 +130,6 @@ class YandexMusicProvider(MusicProvider):
         }
 
     def scan_all(self, database_path: Path) -> dict[str, Any]:
-        """Scan account, liked tracks and playlists, then persist normalized data."""
         scanned_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         account = self.auth_check()
         tracks_payload = self._fetch_liked_tracks_payload()
@@ -182,6 +227,14 @@ class YandexMusicProvider(MusicProvider):
             return [json.loads(item.to_json()) for item in (short_tracks or [])]
         except Exception as exc:  # noqa: BLE001
             raise YandexMusicError("Failed to scan liked tracks.") from exc
+
+    def _fetch_playlist_metadata_payload(self) -> list[dict]:
+        client = self._build_client()
+        try:
+            playlists = client.users_playlists_list() or []
+            return [json.loads(playlist.to_json()) for playlist in playlists]
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError("Failed to scan playlist metadata.") from exc
 
     def _fetch_playlists_payload(self) -> list[dict]:
         client = self._build_client()

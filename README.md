@@ -1,250 +1,87 @@
 # MusicArk
 
-MusicArk — Windows desktop-приложение для личной музыкальной коллекции. Версия **v0.2.0 Persistent Library** развивает подтверждённый v0.1.0: после первого входа токен сохраняется в защищённом системном хранилище, библиотека «Мне нравится» кэшируется локально и доступна сразу при следующем запуске.
+[English version](README_EN.md)
 
-**Русский** · [English](README_EN.md)
+**Текущая версия: 0.3.0 — Yandex Library / Playlists.**
 
-## Что работает в v0.2.0
+MusicArk — desktop-first приложение для сохранения и дальнейшей синхронизации личной музыкальной библиотеки. На этапе v0.3 основной рабочий provider — Яндекс Музыка.
 
-- первый вход по Yandex Music OAuth token;
-- безопасное сохранение токена через Python `keyring` / Windows Credential Locker;
-- автоматическое восстановление сессии после перезапуска приложения;
-- SQLite snapshot списка «Мне нравится»;
-- показ локального cache до завершения сетевого refresh;
-- сохранение cache при сетевой ошибке;
-- корректное удаление из cache треков, убранных из «Мне нравится»;
-- отображение количества треков и времени последнего обновления;
-- поиск по названию, исполнителю и альбому;
-- сортировка по порядку Яндекса, названию или исполнителю;
-- refresh с подсчётом добавленных/удалённых треков;
-- logout с удалением сохранённого токена и cached library.
+## Что работает в v0.3
 
-Legacy download/matching/sync/metadata/local-library код остаётся в репозитории, но не возвращён в поддерживаемый UI.
+- одноразовый вход по Yandex Music OAuth token с сохранением токена в системном credential store;
+- cache-first запуск без повторного ввода токена;
+- «Мне нравится» с refresh, offline fallback, поиском и сортировкой;
+- список пользовательских плейлистов Яндекс Музыки;
+- открытие плейлиста и просмотр его треков в исходном Yandex-порядке;
+- локальный SQLite snapshot playlist metadata + membership + position;
+- lazy refresh содержимого плейлиста при открытии;
+- «Обновить библиотеку» для account + Likes + playlist metadata без полного N-playlist сканирования;
+- удаление stale playlist cache после подтверждённого полного refresh;
+- offline-доступ к ранее загруженным playlist snapshots;
+- logout очищает credential и provider cache.
 
-## Архитектура
+## Архитектура v0.3
 
 ```text
-Flutter UI
-  -> musicark.mvp_bridge subprocess
-       -> SystemCredentialStore -> Windows Credential Locker
-       -> PersistentLibraryService
-            -> YandexMusicProvider -> yandex-music
-            -> LikedCacheRepository -> SQLite
+Flutter desktop UI
+        ↓
+musicark.mvp_bridge
+        ↓
+YandexLibraryService
+   ↓             ↓
+Yandex provider  SQLite collection cache
+        ↓
+   yandex-music
 ```
 
-Токен при первом входе передаётся дочернему Python-процессу через environment, а не через argv. После успешного входа следующие процессы получают его из системного credential store. В SQLite токен не записывается.
+Flutter не знает детали `yandex-music` и SQLite. Объекты сторонней библиотеки остаются внутри provider boundary.
 
-## Требования
+SQLite использует универсальные коллекции:
 
-- Windows;
-- Python >= 3.10;
-- Flutter SDK с Windows desktop support;
-- Visual Studio C++ toolchain, требуемый `flutter doctor`;
-- Git;
-- интернет для первого входа и обновления Яндекс Музыки.
+- `yandex_music / liked`;
+- `yandex_music / playlist:<external_id>`.
 
-## Полный запуск из новой PowerShell-сессии
+Токен не записывается в SQLite и не передаётся через argv. UI передаёт токен bridge только через environment дочернего процесса при login, после чего используется системное хранилище учётных данных.
 
-Для текущей ветки разработки v0.2.0:
+## Запуск для разработки на Windows
+
+Из корня репозитория:
 
 ```powershell
-cd C:\Base\projects\MusicArk
-
-git fetch origin
-git switch agent/v0.2-persistent-library
-git pull
-
-git status
-
 .\.venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
+python -m pip install -U pip
 python -m pip install -e .
 python -m pip install -r requirements-yandex.txt
+python -m unittest discover -s tests -v
 
-python -c "import keyring; print(keyring.get_keyring())"
-python -c "import musicark.mvp_bridge; print('MVP bridge import OK')"
-python -m unittest discover -s tests -p "test_*.py" -v
-
-$env:Path = "C:\Base\tools\flutter\bin;$env:Path"
-$env:MUSICARK_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+$env:MUSICARK_PYTHON = (Resolve-Path ".\.venv\Scripts\python.exe").Path
 $env:MUSICARK_REPO_ROOT = (Get-Location).Path
-
-flutter --version
-flutter doctor -v
-flutter config --enable-windows-desktop
-flutter devices
-
-cd .\ui\musicark_ui
-
+Set-Location .\ui\musicark_ui
 flutter pub get
 flutter analyze
 flutter test
 flutter run -d windows
 ```
 
-Если `.venv` ещё не существует:
+Существующая `.musicark/musicark.db` удалять не нужно: `initialize_database()` применяет forward-only migration `1.2.0` автоматически.
 
-```powershell
-cd C:\Base\projects\MusicArk
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install -r requirements-yandex.txt
+## Проверка реального Yandex
+
+Unit/widget tests не требуют реального аккаунта. Перед закрытием v0.3 вручную на Windows нужно подтвердить: сохранённую сессию, реальные playlists, открытие playlist tracks, refresh, restart/offline cache и logout. Не храните OAuth token в Git.
+
+## Roadmap
+
+```text
+v0.1 — Yandex Likes MVP
+v0.2 — Persistent Library
+v0.3 — Yandex Library / Playlists
+v0.4 — Local Library
+v0.5 — Matching
+v0.6 — Missing Tracks
+v0.7 — Download
+v0.8 — Sync
 ```
 
-## Что проверить вручную
+Standalone packaging/installer не является приоритетом текущего этапа.
 
-### Первый запуск
-
-1. Открывается форма входа.
-2. Ввести действующий Yandex Music token.
-3. Нажать **«Войти»**.
-4. Проверить имя аккаунта и несколько треков.
-5. Проверить поиск и сортировку.
-
-### Повторный запуск
-
-Закрыть приложение и снова выполнить:
-
-```powershell
-flutter run -d windows
-```
-
-Ожидаемый результат:
-
-- token повторно не запрашивается;
-- cached «Мне нравится» появляется автоматически;
-- затем MusicArk выполняет refresh;
-- время последнего обновления меняется после успешного запроса.
-
-### Offline/cache
-
-После хотя бы одного успешного входа временно отключить сеть и снова запустить приложение.
-
-Ожидаемый результат: cached library остаётся на экране, а ошибка refresh не удаляет список.
-
-### Удаление из «Мне нравится»
-
-1. Удалить тестовый трек из «Мне нравится» в Яндекс Музыке.
-2. Нажать refresh в MusicArk.
-3. Проверить, что трек исчез из локального snapshot и счётчик показывает удаление.
-
-### Logout
-
-Нажать **«Выйти»**.
-
-Ожидаемый результат:
-
-- token удаляется из Windows credential store;
-- локальный snapshot очищается;
-- появляется форма входа;
-- при следующем запуске нужен token.
-
-## Тесты
-
-Python:
-
-```powershell
-cd C:\Base\projects\MusicArk
-.\.venv\Scripts\Activate.ps1
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-Flutter:
-
-```powershell
-cd C:\Base\projects\MusicArk\ui\musicark_ui
-flutter analyze
-flutter test
-```
-
-## Release build
-
-Из `ui\musicark_ui`:
-
-```powershell
-flutter clean
-flutter pub get
-flutter analyze
-flutter test
-flutter build windows --release
-```
-
-Запуск:
-
-```powershell
-$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
-$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
-.\build\windows\x64\runner\Release\musicark_ui.exe
-```
-
-Release-сборка v0.2.0 пока не автономна: рядом по-прежнему требуется checkout MusicArk и установленный Python environment. Автономная Windows-упаковка запланирована отдельной версией.
-
-## Где хранятся данные
-
-При стандартном запуске из checkout:
-
-- настройки/SQLite: `C:\Base\projects\MusicArk\.musicark\`;
-- cache «Мне нравится»: таблицы `provider_collection_snapshots` и `provider_collection_items` в MusicArk SQLite;
-- Yandex token: системный credential store Windows, service `MusicArk`, username `yandex_music_token`.
-
-Token не должен появляться в Git, README, issue, логах или SQLite.
-
-## Диагностика
-
-Проверка credential backend:
-
-```powershell
-python -m keyring diagnose
-python -c "import keyring; print(keyring.get_keyring())"
-```
-
-Проверка Python:
-
-```powershell
-python --version
-where.exe python
-```
-
-Если Flutter не найден:
-
-```powershell
-$env:Path = "C:\Base\tools\flutter\bin;$env:Path"
-flutter --version
-```
-
-Если MusicArk не находит Python:
-
-```powershell
-$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
-```
-
-Если не определяется корень checkout:
-
-```powershell
-$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
-```
-
-## Документация
-
-- [MVP scope](docs/product/mvp-scope.md)
-- [Roadmap](docs/product/roadmap.md)
-- [Architecture](docs/architecture/architecture.md)
-- [Versions](docs/versions/versions-index.md)
-- [Manual test plan](docs/testing/manual-test-plan.md)
-- [Release checklist](docs/release/release-checklist.md)
-- [CHANGELOG](CHANGELOG.md)
-
-## Ограничения v0.2.0
-
-- поддерживается только Яндекс Музыка → «Мне нравится»;
-- token всё ещё вводится вручную при первом входе;
-- release build не включает Python runtime;
-- playlists/download/matching/sync/local-library UI ещё не возвращены;
-- интеграция с Яндекс Музыкой использует неофициальную библиотеку `yandex-music`.
-
-## Лицензия
-
-Файл `LICENSE` пока отсутствует.
+Подробности: `docs/versions/v0.3.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.

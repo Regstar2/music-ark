@@ -1,51 +1,36 @@
-# Scope текущего MVP
+# MusicArk Product Scope
 
-## Версия
+## Current product scope: v0.3
 
-v0.2.0 — Persistent Library.
+The current usable product is a desktop cache-first Yandex Music library.
 
-## Цель
+Included:
 
-Перевести подтверждённый v0.1 flow из одноразовой демонстрации в устойчивое desktop-приложение:
+- secure persistent Yandex session;
+- account information;
+- Liked collection;
+- user playlist metadata;
+- opening one playlist and reading its ordered tracks;
+- local snapshots and offline fallback;
+- search and simple sorting;
+- current-collection refresh and full library metadata refresh;
+- logout cleanup.
 
-`первый вход -> secure session -> cached library -> следующий запуск без token -> refresh`.
+## Explicitly out of v0.3
 
-## Входит
-
-- secure token persistence через OS credential store;
-- bootstrap без сети;
-- SQLite snapshot «Мне нравится»;
-- network refresh без потери последнего cache при ошибке;
-- добавление/удаление membership при snapshot replacement;
-- поиск title/artist/album;
-- сортировка;
-- last-update timestamp;
-- sync diff;
-- logout с очисткой credential/cache;
-- Python/Flutter tests;
-- полный набор run/test/build команд.
-
-## Не входит
-
-- standalone Python packaging;
-- playlists;
-- download queue;
-- matching;
-- sync planner/executor;
+- standalone Python packaging or installer;
+- local folder scanner;
+- Yandex ↔ local matching;
+- missing-track analysis;
+- download system;
+- sync planner UI;
 - metadata editor;
-- local library UI;
-- experimental upload.
+- playback/player;
+- Yandex playlist creation/editing/upload;
+- destructive local-file operations.
 
-## Критерии готовности
+These belong to later roadmap stages and must not be pulled into v0.3 opportunistically.
 
-- первый sign-in сохраняет token только в secure credential backend;
-- повторный запуск не требует token;
-- cached tracks доступны до network refresh;
-- failed refresh не очищает cache;
-- track, удалённый из Yandex Liked, исчезает после следующего успешного snapshot;
-- logout очищает credential и cache;
-- поиск и сортировка работают на cached/network data одинаково;
-- Python tests проходят;
-- `flutter analyze` проходит;
-- Flutter widget tests проходят;
-- ручной Windows test plan пройден.
+## Success scenario
+
+Launch → saved session → cached Likes + playlist list → open real playlist → cached/network tracks → search/sort → refresh → restart → offline cached access → logout.

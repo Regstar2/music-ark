@@ -136,22 +136,26 @@ class YandexMusicDownloadProvider(DownloadProvider):
             if not tracks:
                 raise DownloadProviderError(f"Track '{track_id}' is not found.")
             track = tracks[0]
-            infos = track.get_download_info(get_direct_links=True) or []
+            infos = track.get_download_info() or []
             if not infos:
                 raise DownloadProviderError(f"Track '{track_id}' has no download info.")
 
-            selected = infos[0]
+            mp3_infos = [item for item in infos if str(getattr(item, "codec", "")).lower() == "mp3"]
+            candidates = mp3_infos or list(infos)
+            selected = candidates[0]
             if quality == "best":
-                selected = max(infos, key=lambda item: getattr(item, "bitrate_in_kbps", 0))
+                selected = max(candidates, key=lambda item: getattr(item, "bitrate_in_kbps", 0))
             elif quality.isdigit():
                 target = int(quality)
-                nearest = sorted(
-                    infos,
+                selected = min(
+                    candidates,
                     key=lambda item: abs(getattr(item, "bitrate_in_kbps", 0) - target),
                 )
-                selected = nearest[0]
 
-            link = getattr(selected, "direct_link", None)
+            get_direct_link = getattr(selected, "get_direct_link", None)
+            if not callable(get_direct_link):
+                raise DownloadProviderError(f"Track '{track_id}' download info cannot resolve a direct link.")
+            link = get_direct_link()
             if not link:
                 raise DownloadProviderError(f"Track '{track_id}' has no direct link.")
             return str(link)

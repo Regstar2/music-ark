@@ -15,7 +15,12 @@ from .classifier import VariantClassifier
 from .metadata import MetadataVariantDetector
 from .models import VariantResult, VariantStatus
 from .policy import ANALYZER_VERSION, SAMPLE_RATE
-from .reference import ReferenceAudioResolver, file_fingerprint
+from .reference import (
+    ReferenceAcquisitionError,
+    ReferenceAudioAcquirer,
+    ReferenceAudioResolver,
+    file_fingerprint,
+)
 from .storage import VariantStorageRepository
 
 
@@ -24,6 +29,12 @@ _TECHNICAL_REASONS = {
     "decode_error",
     "local_file_missing",
     "reference_file_missing",
+    "reference_audio_missing",
+    "reference_download_failed",
+    "reference_download_invalid",
+    "reference_auth_missing",
+    "reference_provider_unavailable",
+    "reference_unavailable",
     "alignment_failed",
     "audio_too_short",
     "insufficient_aligned_overlap",
@@ -43,6 +54,7 @@ class VariantDetectionService:
         provider_id: str = "yandex_music",
         audio_verifier: AudioVerifier | None = None,
         reference_resolver: ReferenceAudioResolver | None = None,
+        reference_acquirer: ReferenceAudioAcquirer | None = None,
     ) -> None:
         self._base_dir = base_dir
         self._provider_id = provider_id
@@ -52,6 +64,10 @@ class VariantDetectionService:
         self._metadata = MetadataVariantDetector()
         self._audio = audio_verifier or AudioVerifier()
         self._resolver = reference_resolver or ReferenceAudioResolver(
+            self._database_path,
+            base_dir,
+        )
+        self._acquirer = reference_acquirer or ReferenceAudioAcquirer(
             self._database_path,
             base_dir,
         )
@@ -71,12 +87,13 @@ class VariantDetectionService:
             "providerId": self._provider_id,
             "ffmpegAvailable": self._audio.available,
             "audioVerificationAvailable": self._audio.available,
+            "referenceAutoAcquisition": True,
             "sampleRate": SAMPLE_RATE,
             "analyzerVersion": ANALYZER_VERSION,
             "unavailableMessage": (
                 None
                 if self._audio.available
-                else "Аудиосравнение недоступно: ffmpeg не найден"
+                else "Аудиосравнение недоступно: встроенный декодер не найден"
             ),
         }
 
@@ -130,10 +147,12 @@ class VariantDetectionService:
                 reference_fp = file_fingerprint(reference.path)
             except OSError:
                 reference = None
+                reference_fp = ""
 
         existing = self._storage.get(self._provider_id, external_id, local_id)
         if (
-            not force
+            reference is not None
+            and not force
             and existing is not None
             and int(existing.get("analyzerVersion") or 0) == ANALYZER_VERSION
             and existing.get("providerVariantFingerprint") == provider_fp
@@ -159,6 +178,45 @@ class VariantDetectionService:
                 reference.path if reference else None,
             )
             return self._save(result, cached=False)
+
+        reference_acquired = False
+        if reference is None and self._audio.available:
+            try:
+                reference = self._acquirer.acquire(self._provider_id, external_id)
+                reference_fp = file_fingerprint(reference.path)
+                reference_acquired = True
+                self._audit.append(
+                    AuditEvent(
+                        event_type="variant_reference_acquired",
+                        entity_type="provider_track",
+                        entity_id=f"{self._provider_id}:{external_id}",
+                        status="success",
+                        details=f"reference_path={reference.path}",
+                    )
+                )
+            except (ReferenceAcquisitionError, OSError) as exc:
+                reason = self._reference_acquisition_reason(exc)
+                result = self._technical_result(
+                    external_id,
+                    local_id,
+                    VariantStatus.NOT_CHECKED,
+                    metadata,
+                    (reason,),
+                    provider_fp,
+                    local_fp,
+                    "",
+                    None,
+                )
+                self._audit.append(
+                    AuditEvent(
+                        event_type="variant_reference_acquire",
+                        entity_type="provider_track",
+                        entity_id=f"{self._provider_id}:{external_id}",
+                        status="failed",
+                        details=str(exc),
+                    )
+                )
+                return self._save(result, cached=False)
 
         if reference is None:
             status, reasons = self._classifier.classify(
@@ -205,6 +263,20 @@ class VariantDetectionService:
                 None,
             )
             return self._save(result, cached=False)
+
+        # A reference may have appeared since a prior NOT_CHECKED result. Only successful
+        # reference-bound results are cacheable, so first acquisition always reaches audio.
+        if (
+            not reference_acquired
+            and not force
+            and existing is not None
+            and int(existing.get("analyzerVersion") or 0) == ANALYZER_VERSION
+            and existing.get("providerVariantFingerprint") == provider_fp
+            and existing.get("localAudioFingerprint") == local_fp
+            and existing.get("referenceAudioFingerprint") == reference_fp
+            and self._cacheable(existing)
+        ):
+            return {"result": existing, "cached": True, "capabilities": self.capabilities()}
 
         try:
             comparison = self._audio.compare(reference.path, local_path)
@@ -265,6 +337,7 @@ class VariantDetectionService:
                 "medianWindowSimilarity": round(comparison.median_window_similarity, 6),
                 "lowSimilarityWindowRatio": round(comparison.low_similarity_window_ratio, 6),
                 "windowCount": comparison.window_count,
+                "referenceAcquired": reference_acquired,
             }
         )
         result = VariantResult(
@@ -287,6 +360,9 @@ class VariantDetectionService:
 
     def run_all_available(self) -> dict[str, Any]:
         pairs = self._storage.list_matched_pairs(self._provider_id)
+        # Batch remains bounded to already-cached references. A per-track Verify action
+        # may acquire one missing reference on demand; the batch never silently downloads
+        # an entire library.
         available_ids = [
             str(pair["externalId"])
             for pair in pairs
@@ -396,6 +472,19 @@ class VariantDetectionService:
     def _cacheable(existing: dict[str, Any]) -> bool:
         reasons = {str(item) for item in existing.get("variantReasons", [])}
         return not bool(reasons & _TECHNICAL_REASONS)
+
+    @staticmethod
+    def _reference_acquisition_reason(exc: Exception) -> str:
+        text = str(exc).strip().casefold()
+        if "token" in text and ("not configured" in text or "missing" in text):
+            return "reference_auth_missing"
+        if "dependency is missing" in text or "provider_not_supported" in text:
+            return "reference_provider_unavailable"
+        if "not found" in text or "is not found" in text or "no download info" in text:
+            return "reference_unavailable"
+        if "invalid" in text:
+            return "reference_download_invalid"
+        return "reference_download_failed"
 
     @staticmethod
     def _technical_reason(exc: Exception) -> str:

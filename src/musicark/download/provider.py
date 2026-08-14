@@ -60,8 +60,9 @@ class LocalImportProvider(DownloadProvider):
 class YandexMusicDownloadProvider(DownloadProvider):
     """Download backend for Yandex track acquisition via download-system."""
 
-    def __init__(self, base_dir: Path | None = None) -> None:
+    def __init__(self, base_dir: Path | None = None, token: str | None = None) -> None:
         self._base_dir = base_dir
+        self._token = token.strip() if token else None
 
     @property
     def provider_id(self) -> str:
@@ -69,13 +70,15 @@ class YandexMusicDownloadProvider(DownloadProvider):
 
     def execute(self, task: DownloadTask) -> LocalAudioFile:
         track_id = self._extract_track_id(task)
+        if not track_id.isdigit():
+            raise DownloadProviderError(f"Invalid Yandex track id '{track_id}'.")
         target_folder = Path(task.target_folder)
         target_folder.mkdir(parents=True, exist_ok=True)
         quality = str(task.raw_payload.get("quality", "best")).lower() if task.raw_payload else "best"
 
         filename = f"yandex_{track_id}.mp3"
         destination = target_folder / filename
-        if destination.exists():
+        if destination.exists() and destination.is_file() and destination.stat().st_size > 0:
             return build_local_audio_file(destination)
 
         direct_link = self._resolve_direct_link(track_id, quality=quality)
@@ -98,6 +101,8 @@ class YandexMusicDownloadProvider(DownloadProvider):
         raise DownloadProviderError(f"Cannot resolve Yandex track id from source '{source}'.")
 
     def _resolve_token(self) -> str:
+        if self._token:
+            return self._token
         token = os.getenv("YANDEX_MUSIC_TOKEN", "").strip()
         if token:
             return token
@@ -156,12 +161,23 @@ class YandexMusicDownloadProvider(DownloadProvider):
             raise DownloadProviderError(f"Failed to resolve download link for track '{track_id}'.") from exc
 
     def _download_to_file(self, direct_link: str, destination: Path) -> None:
+        temporary = destination.with_name(destination.name + ".part")
         try:
+            temporary.unlink(missing_ok=True)
             response = requests.get(direct_link, timeout=60, stream=True)
             response.raise_for_status()
-            with destination.open("wb") as output:
+            with temporary.open("wb") as output:
                 for chunk in response.iter_content(chunk_size=65536):
                     if chunk:
                         output.write(chunk)
+            if not temporary.is_file() or temporary.stat().st_size <= 0:
+                raise DownloadProviderError(f"Downloaded track is empty: '{destination}'.")
+            temporary.replace(destination)
         except Exception as exc:  # noqa: BLE001
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if isinstance(exc, DownloadProviderError):
+                raise
             raise DownloadProviderError(f"Failed to download track into '{destination}'.") from exc

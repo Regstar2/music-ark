@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.4.0"
-description = "MusicArk cache-first Yandex and local music library desktop app"
+version = "0.5.0"
+description = "MusicArk cache-first Yandex, local library, and offline matching desktop app"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]

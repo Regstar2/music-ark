@@ -190,7 +190,7 @@ class LocalLibraryV04Tests(unittest.TestCase):
             self.assertEqual(count, 1)
             self.assertEqual(found[0]["fileName"], "Zulu.mp3")
 
-    def test_v03_database_migrates_to_13_and_preserves_yandex_cache(self) -> None:
+    def test_v03_database_migrates_to_current_schema_and_preserves_yandex_cache(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             db_path = Path(tmp) / ".musicark" / "musicark.db"
             db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,7 +236,7 @@ class LocalLibraryV04Tests(unittest.TestCase):
                 item = conn.execute("SELECT payload_json FROM provider_collection_items WHERE external_id='101'").fetchone()
                 roots = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_library_roots'").fetchone()
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(local_audio_files)")}
-            self.assertEqual(version, "1.3.0")
+            self.assertEqual(version, "1.4.0")
             self.assertEqual(liked[0], 1)
             self.assertIn("Keep me", item[0])
             self.assertIsNotNone(roots)

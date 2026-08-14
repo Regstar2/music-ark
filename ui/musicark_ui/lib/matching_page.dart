@@ -49,12 +49,11 @@ class _MatchingPageState extends State<MatchingPage> {
         sort: _sort,
       );
       final capabilities = await widget.bridge.variantCapabilities();
-      final variants = await widget.bridge.variantResults(limit: 1000);
       if (!mounted) return;
       setState(() {
         _summary = summary;
         _variantCapabilities = capabilities;
-        _items = _mergeVariants(_mapItems(results['items']), _mapItems(variants['items']));
+        _items = _ensureVariantRows(_mapItems(results['items']));
         _total = _asInt(results['count']);
       });
     } catch (error) {
@@ -122,12 +121,11 @@ class _MatchingPageState extends State<MatchingPage> {
         search: _search,
         sort: _sort,
       );
-      final variants = await widget.bridge.variantResults(limit: 1000);
       if (!mounted) return;
       setState(() {
         _items = [
           ..._items,
-          ..._mergeVariants(_mapItems(result['items']), _mapItems(variants['items'])),
+          ..._ensureVariantRows(_mapItems(result['items'])),
         ];
         _total = _asInt(result['count']);
       });
@@ -710,20 +708,13 @@ class _CandidateCard extends StatelessWidget {
   }
 }
 
-List<Map<String, dynamic>> _mergeVariants(
-  List<Map<String, dynamic>> rows,
-  List<Map<String, dynamic>> variants,
-) {
-  final byIdentity = <String, Map<String, dynamic>>{};
-  for (final variant in variants) {
-    final key = '${variant['externalId']}:${variant['localFileId']}';
-    byIdentity[key] = variant;
-  }
+List<Map<String, dynamic>> _ensureVariantRows(List<Map<String, dynamic>> rows) {
   return rows.map((row) {
     final copy = Map<String, dynamic>.from(row);
-    if ('${row['status'] ?? ''}' == 'matched' && row['localFileId'] != null) {
-      final key = '${row['externalId']}:${row['localFileId']}';
-      copy['variant'] = byIdentity[key] ?? {
+    if ('${copy['status'] ?? ''}' == 'matched' &&
+        copy['localFileId'] != null &&
+        copy['variant'] is! Map) {
+      copy['variant'] = {
         'variantStatus': 'not_checked',
         'status': 'not_checked',
         'variantReasons': ['audio_not_checked'],

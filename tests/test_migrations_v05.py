@@ -1,4 +1,4 @@
-"""v0.4 -> v0.5 forward migration coverage."""
+"""v0.4 -> current forward migration coverage, including preserved v0.5 state."""
 
 from __future__ import annotations
 
@@ -91,8 +91,11 @@ class MatchingMigrationV05Tests(unittest.TestCase):
                 result_table = conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='matching_results'"
                 ).fetchone()
+                variant_table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='track_variant_results'"
+                ).fetchone()
 
-            self.assertEqual(version, "1.4.0")
+            self.assertEqual(version, "1.5.0")
             self.assertEqual(cache_count, 1)
             self.assertEqual(local[0], "Song")
             self.assertEqual(local[1], '["Artist"]')
@@ -100,6 +103,7 @@ class MatchingMigrationV05Tests(unittest.TestCase):
             self.assertEqual(local[3], "artist")
             self.assertEqual(local[4], 40)
             self.assertIsNotNone(result_table)
+            self.assertIsNotNone(variant_table)
 
 
 if __name__ == "__main__":

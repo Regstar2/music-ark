@@ -55,6 +55,10 @@ class MatchingResultQueries:
             JOIN provider_tracks pt
               ON pt.provider_id=mr.provider_id AND pt.external_id=mr.external_id
             LEFT JOIN local_audio_files laf ON laf.id=mr.local_file_id
+            LEFT JOIN track_variant_results tvr
+              ON tvr.provider_id=mr.provider_id
+             AND tvr.external_id=mr.external_id
+             AND tvr.local_file_id=mr.local_file_id
         """
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
@@ -69,7 +73,9 @@ class MatchingResultQueries:
                     SELECT mr.provider_id, mr.external_id, mr.status, mr.local_file_id,
                            mr.confidence, mr.method, mr.score_breakdown_json, mr.reason,
                            mr.manual, mr.updated_at, pt.payload_json,
-                           laf.path, laf.title, laf.artists_json, laf.album, laf.duration_seconds
+                           laf.path, laf.title, laf.artists_json, laf.album, laf.duration_seconds,
+                           tvr.status, tvr.audio_similarity, tvr.variant_reasons_json,
+                           tvr.altered_segments_json, tvr.reference_path, tvr.metadata_score
                     {base_from}
                     WHERE {where_sql}
                     ORDER BY {order_by}
@@ -95,6 +101,14 @@ class MatchingResultQueries:
             score = json.loads(row[6] or "{}")
         except json.JSONDecodeError:
             score = {}
+        try:
+            variant_reasons = json.loads(row[18] or "[]")
+        except json.JSONDecodeError:
+            variant_reasons = []
+        try:
+            altered_segments = json.loads(row[19] or "[]")
+        except json.JSONDecodeError:
+            altered_segments = []
         local = None
         if row[3] is not None:
             local = {
@@ -104,6 +118,21 @@ class MatchingResultQueries:
                 "artists": local_artists if isinstance(local_artists, list) else [],
                 "album": row[14],
                 "durationSeconds": row[15],
+            }
+        variant = None
+        if str(row[2]) == "matched" and row[3] is not None:
+            variant_status = str(row[16] or "not_checked")
+            variant = {
+                "providerId": row[0],
+                "externalId": row[1],
+                "localFileId": int(row[3]),
+                "status": variant_status,
+                "variantStatus": variant_status,
+                "metadataScore": row[21],
+                "audioSimilarity": row[17],
+                "variantReasons": variant_reasons if isinstance(variant_reasons, list) else [],
+                "alteredSegments": altered_segments if isinstance(altered_segments, list) else [],
+                "referencePath": row[20],
             }
         return {
             "providerId": row[0],
@@ -118,4 +147,5 @@ class MatchingResultQueries:
             "updatedAt": row[9],
             "provider": provider if isinstance(provider, dict) else {},
             "local": local,
+            "variant": variant,
         }

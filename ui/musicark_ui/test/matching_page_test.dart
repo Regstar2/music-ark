@@ -70,18 +70,16 @@ class PagingMatchingBridge extends FakeMatchingBridge {
 void main() {
   Future<void> desktop(WidgetTester tester, Widget widget) async {
     await tester.binding.setSurfaceSize(const Size(1600, 950));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(home: widget));
     await tester.pumpAndSettle();
   }
-
-  tearDown(() async {
-    await TestWidgetsFlutterBinding.ensureInitialized().setSurfaceSize(null);
-  });
 
   testWidgets('main navigation opens Matching section', (tester) async {
     final yandex = FakeMusicArkBridge(startSignedIn: true);
     final matching = FakeMatchingBridge();
     await tester.binding.setSurfaceSize(const Size(1600, 950));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MusicArkDesktopApp(bridge: yandex, matchingBridge: matching));
     await tester.pumpAndSettle();
 
@@ -151,7 +149,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('matching-detail')), findsOneWidget);
     expect(find.text('Кандидаты'), findsOneWidget);
-    expect(find.textContaining(r'C:\Music\Song.flac'), findsOneWidget);
+    expect(find.text(r'C:\\Music\\Song.flac'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('matching-accept-2')));
     await tester.pumpAndSettle();

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from array import array
+from collections.abc import Iterable, Sequence
 import math
 from pathlib import Path
 import shutil
 import statistics
 import subprocess
-from typing import Iterable
 
 from .models import AlteredRegion, AudioComparison, DecodedAudio
 from .policy import (
@@ -100,12 +100,13 @@ class FfmpegAudioDecoder(AudioDecoder):
         samples.frombytes(completed.stdout)
         if samples.itemsize != 2:
             raise AudioDecodeError("Unexpected PCM sample width")
-        # ffmpeg emits native little-endian s16le. byteswap only on big-endian hosts.
+        # ffmpeg emits little-endian s16le. Keep the compact array instead of
+        # expanding millions of samples into Python int objects.
         import sys
 
         if sys.byteorder != "little":
             samples.byteswap()
-        return DecodedAudio(tuple(int(v) for v in samples), SAMPLE_RATE)
+        return DecodedAudio(samples, SAMPLE_RATE)  # type: ignore[arg-type]
 
 
 class AudioAligner:
@@ -212,7 +213,7 @@ class AudioVerifier:
         )
 
 
-def _energy_envelope(samples: tuple[int, ...], frame: int) -> list[float]:
+def _energy_envelope(samples: Sequence[int], frame: int) -> list[float]:
     values: list[float] = []
     for start in range(0, len(samples) - frame + 1, frame):
         chunk = samples[start : start + frame]
@@ -245,15 +246,35 @@ def _cosine(left: Iterable[float], right: Iterable[float]) -> float:
     return max(0.0, min(1.0, dot / (na * nb)))
 
 
-def _window_similarity(reference: tuple[int, ...], local: tuple[int, ...], sample_rate: int) -> float:
+def _bounded_scalar_similarity(left: float, right: float, floor: float) -> float:
+    denominator = max(abs(left), abs(right), floor)
+    return max(0.0, min(1.0, 1.0 - abs(left - right) / denominator))
+
+
+def _window_similarity(reference: Sequence[int], local: Sequence[int], sample_rate: int) -> float:
     ref_features = _features(reference, sample_rate)
     local_features = _features(local, sample_rate)
-    return _cosine(ref_features, local_features)
+    envelope_similarity = _cosine(ref_features[:16], local_features[:16])
+    spectral_similarity = _cosine(ref_features[16:26], local_features[16:26])
+    zcr_similarity = _bounded_scalar_similarity(ref_features[-2], local_features[-2], 0.05)
+    derivative_similarity = _bounded_scalar_similarity(ref_features[-1], local_features[-1], 0.05)
+    # Spectrum gets the strongest weight so a same-loudness replacement tone/noise
+    # cannot be hidden by an otherwise similar RMS envelope.
+    return max(
+        0.0,
+        min(
+            1.0,
+            0.25 * envelope_similarity
+            + 0.60 * spectral_similarity
+            + 0.075 * zcr_similarity
+            + 0.075 * derivative_similarity,
+        ),
+    )
 
 
-def _features(samples: tuple[int, ...], sample_rate: int) -> list[float]:
+def _features(samples: Sequence[int], sample_rate: int) -> list[float]:
     if not samples:
-        return [0.0]
+        return [0.0] * 28
     # Loudness envelope: robust to codec and uniform gain changes.
     subframes = 16
     block = max(1, len(samples) // subframes)
@@ -266,7 +287,8 @@ def _features(samples: tuple[int, ...], sample_rate: int) -> list[float]:
         rms = math.sqrt(sum(float(v) * float(v) for v in chunk) / len(chunk))
         envelope.append(math.log1p(rms))
 
-    # A compact spectral signature. Goertzel points avoid a NumPy/ML dependency.
+    # Compact spectral signature. Goertzel avoids a NumPy/ML dependency while
+    # remaining insensitive to waveform phase and uniform volume scaling.
     frequencies = (90.0, 140.0, 220.0, 330.0, 500.0, 750.0, 1100.0, 1600.0, 2300.0, 3200.0)
     spectral = [math.log1p(_goertzel_power(samples, sample_rate, frequency)) for frequency in frequencies]
 
@@ -283,7 +305,7 @@ def _features(samples: tuple[int, ...], sample_rate: int) -> list[float]:
     return [*envelope, *spectral, zcr * 10.0, diff * 10.0]
 
 
-def _goertzel_power(samples: tuple[int, ...], sample_rate: int, frequency: float) -> float:
+def _goertzel_power(samples: Sequence[int], sample_rate: int, frequency: float) -> float:
     # Decimate only enough to reduce CPU while keeping the requested frequency below Nyquist.
     step = 2 if frequency < sample_rate / 4 else 1
     effective_rate = sample_rate / step

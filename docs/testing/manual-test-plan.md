@@ -1,72 +1,107 @@
-# Manual Test Plan — MusicArk v0.4
+# Manual Test Plan — MusicArk v0.5
 
-Use a disposable folder such as `C:\MusicArk-Test`. Do not use the primary personal collection for the first smoke test.
+Use the real cached Yandex Library together with a disposable/local test collection such as `C:\MusicArk-Test`. Do not delete `.musicark\musicark.db`, saved Yandex credentials, or music files for this test.
 
 ## Preconditions
 
-- Windows desktop target is available in Flutter;
-- existing `.musicark\musicark.db` is kept in place;
-- an existing saved Yandex token, if present, is not deleted;
-- `C:\MusicArk-Test` contains a few small audio files, including at least one tagged file and one file without useful title/artist tags.
+- Windows Flutter desktop target works;
+- v0.4 database/local roots are kept in place so migration `1.4.0` is exercised;
+- Yandex Liked is loaded; open/refresh representative playlists so their tracks are cached;
+- Local Library is scanned and includes structured metadata;
+- fixture contains at least 10 obvious matches, 5 harder matches, live/remix/acoustic variants, and same-title/different-artist examples where possible.
 
-## Local Library baseline
+## Migration / regression baseline
 
-1. Launch MusicArk.
-2. Open **Локальная библиотека**.
-3. Click **Добавить папку** and select `C:\MusicArk-Test` through the native folder dialog.
-4. Confirm the root is listed.
-5. Click **Сканировать**.
-6. Confirm tracks appear with title/artist/album/duration where available.
-7. Open one track and verify path, format, bitrate/sample rate when available.
-8. Close the app and launch it again.
-9. Confirm the root and indexed tracks are still present before another scan.
+1. Launch v0.5 against the existing v0.4 database.
+2. Confirm Yandex saved session, Liked, playlists, and cached playlist tracks remain available.
+3. Confirm Local Library roots/tracks/search/sorting remain available.
+4. Do not rescan only to make migration work; `initialize_database()` must upgrade automatically.
 
-## Incremental reconciliation
+## Matching baseline
 
-1. Add one supported audio file to `C:\MusicArk-Test`.
-2. Rescan; expected: `added +1`.
-3. Modify one existing audio file/tag using an external tool.
-4. Rescan; expected: `updated +1` if file size or mtime changed.
-5. Delete one test audio file outside MusicArk.
-6. Rescan; expected: `removed +1` and the row disappears from Local Library.
-7. Rescan again without changes; expected: existing rows are `unchanged` and no duplicates appear.
+1. Open **Сопоставление**.
+2. Confirm Yandex and Local track counts are plausible.
+3. Click **Запустить сопоставление**.
+4. Confirm final counts are shown for matched / conflicts / unmatched.
+5. Open filters **Все**, **Совпало**, **Требует проверки**, **Не найдено**.
+6. Search by Yandex title/artist and local title/artist/path.
+7. Check sorting by confidence, artist, title, and status.
 
-## Error resilience
+## Precision review
 
-- add or create a corrupted file with a supported extension; scan must finish and report an error instead of aborting the whole library;
-- include Unicode/cyrillic names, spaces, and nested folders;
-- verify unknown extensions are ignored;
-- if feasible, include a directory symlink/junction and confirm the scanner does not recursively follow it.
+Inspect at least:
 
-## Root management
+- 10 obvious title+artist matches with close duration;
+- 5 difficult matches with edition/album differences;
+- several `Live`, `Remix`, `Acoustic`, `Instrumental`, or `Remaster` cases;
+- same-title tracks from different artists;
+- multi-artist / `feat.` cases;
+- FLAC+MP3 duplicates where both are plausible.
 
-- add a second independent root and scan it;
-- attempt to add the same root using case/trailing-separator variation: it must be rejected;
-- attempt to add a child of an already indexed root: overlapping roots must be rejected;
-- remove a root in MusicArk and confirm the dialog says only index data is removed;
-- verify the actual music files still exist on disk after root removal.
+Expected policy: false positives are unacceptable. A doubtful case should be `CONFLICT` or `UNMATCHED`, not `MATCHED`.
 
-## Search / sorting / large-list contract
+## Conflict review / manual decisions
 
-- search by title, artist, album, and filename;
-- sort by artist, title, album, duration, and path;
-- on a sufficiently large fixture, confirm additional pages can be loaded without passing the full library through one fixed-size bridge payload.
+1. Open one conflict.
+2. Compare Yandex and local title, artists, album, duration, path, and confidence.
+3. Confirm multiple top candidates are shown when available.
+4. Accept the correct candidate.
+5. Restart MusicArk.
+6. Confirm the result is still matched manually.
+7. Pick another conflict and reject its best wrong candidate.
+8. Run matching again.
+9. Confirm the rejected candidate does not return as the same active best candidate.
+10. If another candidate remains, verify it can be accepted instead.
 
-## Yandex regression
+## Incremental behavior
 
-After the local tests:
+- Run matching twice without Yandex/Local changes: the second run should report unchanged work instead of needlessly recomputing everything.
+- Change metadata of a test local file externally, rescan Local Library, then rerun matching; affected automatic result should be eligible for recalculation.
+- Delete a test local file externally, rescan, then rerun; a link to the removed file must not remain valid.
+- Refresh Yandex metadata/library, then rerun; changed provider metadata must be eligible for recalculation.
+- A manual accepted link must not be overwritten by an ordinary automatic rerun.
 
-1. open **Яндекс Музыка**;
-2. confirm saved session restore still works;
-3. open **Мне нравится**;
-4. open playlist list and one playlist;
-5. refresh Yandex library;
-6. restart and verify cached Yandex data remains available.
+## Duplicate collection identity
+
+Use a Yandex track that appears in Liked and at least one playlist. Matching must show/process it as one provider identity, not one result per collection occurrence.
+
+## Offline / privacy
+
+After Yandex cache and Local Library are populated:
+
+1. disconnect network access;
+2. launch the app;
+3. run matching;
+4. review results and manual decisions.
+
+Matching should continue to work because it is local-only. No local metadata should be sent to Yandex or third-party matching/metadata services.
+
+## Safety regression
+
+During all matching tests verify MusicArk does not:
+
+- rename, move, delete, transcode, or edit tags/artwork of local audio files;
+- like/dislike tracks, edit playlists, upload, or otherwise mutate Yandex Music;
+- remove stored Yandex credentials;
+- delete `.musicark\musicark.db`.
+
+## Automated commands
+
+```powershell
+python -m unittest discover -s tests -v
+cd ui\musicark_ui
+flutter analyze
+flutter test
+```
 
 ## Pass criteria
 
-- no local audio file is modified by MusicArk;
-- no Yandex cache is destroyed by migration `1.3.0`;
-- roots/tracks persist across restart;
-- new / updated / removed / unchanged counts match filesystem changes;
-- Python suite, `flutter analyze`, and `flutter test` are green on the user's Windows environment.
+- migration `1.3.0 → 1.4.0` preserves v0.4 Yandex/Local data;
+- no Cartesian-product behavior is observed in the implementation/scale regression;
+- obvious auto-matches are correct and ambiguous cases are conservative;
+- manual accept/reject persists across restart/rerun;
+- rejected candidates do not immediately return as active best candidates;
+- deleted local files invalidate links;
+- Yandex and Local Library regressions remain working;
+- Python tests, Flutter analyzer, and Flutter tests are green on Windows;
+- real-library precision is reviewed before the version is considered accepted.

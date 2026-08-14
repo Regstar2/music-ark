@@ -1,4 +1,4 @@
-"""JSON process bridge for MusicArk desktop UI (Yandex + v0.4 Local Library)."""
+"""JSON process bridge for MusicArk desktop UI (Yandex + Local + Matching)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 from musicark.core.errors import MusicArkError, StorageError
 from musicark.credentials import CredentialStoreError
 from musicark.local_library.service import LocalLibraryService
+from musicark.matching.service import MatchingService
 from musicark.providers.yandex_music_provider import (
     YandexAuthenticationError,
     YandexMusicError,
@@ -103,11 +104,17 @@ def build_parser() -> argparse.ArgumentParser:
             "playlist_refresh", "library_refresh", "cached", "logout",
             "local_roots", "local_root_add", "local_root_remove", "local_scan",
             "local_tracks", "local_track", "local_stats",
+            "matching_summary", "matching_run", "matching_results", "matching_result",
+            "matching_accept", "matching_reject",
         ),
     )
     parser.add_argument("--playlist-id", default=None)
     parser.add_argument("--root-id", type=int, default=None)
     parser.add_argument("--track-id", type=int, default=None)
+    parser.add_argument("--provider-id", default="yandex_music")
+    parser.add_argument("--external-id", default=None)
+    parser.add_argument("--local-file-id", type=int, default=None)
+    parser.add_argument("--status", default="")
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search", default="")
@@ -115,11 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _required_playlist_id(value: str | None) -> str:
+def _required_text(value: str | None, flag: str) -> str:
     clean = (value or "").strip()
     if not clean:
-        raise BridgeRequestError("--playlist-id is required for this command.")
+        raise BridgeRequestError(f"{flag} is required for this command.")
     return clean
+
+
+def _required_playlist_id(value: str | None) -> str:
+    return _required_text(value, "--playlist-id")
 
 
 def _required_root_id(value: int | None) -> int:
@@ -131,6 +142,12 @@ def _required_root_id(value: int | None) -> int:
 def _required_track_id(value: int | None) -> int:
     if value is None:
         raise BridgeRequestError("--track-id is required for this command.")
+    return int(value)
+
+
+def _required_local_file_id(value: int | None) -> int:
+    if value is None:
+        raise BridgeRequestError("--local-file-id is required for this command.")
     return int(value)
 
 
@@ -162,6 +179,31 @@ def _local_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str,
     raise BridgeRequestError(f"Unknown local command: {args.command}")
 
 
+def _matching_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str, Any]:
+    service = MatchingService(base_dir=base_dir, provider_id=args.provider_id)
+    if args.command == "matching_summary":
+        return service.summary()
+    if args.command == "matching_run":
+        return service.run()
+    if args.command == "matching_results":
+        return service.results(
+            limit=args.limit,
+            offset=args.offset,
+            status=args.status,
+            search=args.search,
+            sort=args.sort,
+        )
+    external_id = _required_text(args.external_id, "--external-id")
+    if args.command == "matching_result":
+        return service.result(external_id)
+    local_file_id = _required_local_file_id(args.local_file_id)
+    if args.command == "matching_accept":
+        return service.accept(external_id, local_file_id)
+    if args.command == "matching_reject":
+        return service.reject(external_id, local_file_id)
+    raise BridgeRequestError(f"Unknown matching command: {args.command}")
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -169,6 +211,8 @@ def main() -> int:
     try:
         if args.command.startswith("local_"):
             payload = _local_payload(args, base_dir)
+        elif args.command.startswith("matching_"):
+            payload = _matching_payload(args, base_dir)
         else:
             service = YandexLibraryService(base_dir=base_dir)
             if args.command == "bootstrap":

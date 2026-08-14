@@ -2,70 +2,84 @@
 
 [Русская версия](README.md)
 
-**Current version: 0.4.0 — Local Library.**
+**Current version: 0.5.0 — Matching.**
 
-MusicArk is a Windows desktop application that combines a Yandex Music library with the user's local music collection. v0.4 adds local folder indexing and persists extracted metadata in the same SQLite database.
+MusicArk is a Windows desktop application that combines a Yandex Music library with a local music collection. v0.5 adds fully local provider-track ↔ local-file matching and stores confidence plus manual decisions in the shared SQLite database.
 
-## What works in v0.4
+## What works in v0.5
 
 ### Yandex Music
 
 - secure Yandex Music OAuth token sign-in through the OS credential store;
-- cache-first session restore;
-- Liked tracks;
-- playlists and playlist tracks;
-- search, sorting, refresh, and offline cache.
+- cache-first session, Liked tracks, playlists, and offline cache;
+- tracks appearing in multiple collections are deduplicated by `(provider_id, external_id)` for matching.
 
 ### Local Library
 
-- a separate Local Library section;
-- native Windows folder picker;
-- multiple source roots;
-- recursive scanning for MP3/FLAC/M4A/MP4/AAC/OGG/Opus/WAV files recognized by the metadata stack;
-- title, artists, album, album artist, duration, and technical metadata via `mutagen`;
-- filename fallback when title tags are missing;
-- incremental new / changed / unchanged / removed reconciliation;
-- unchanged detection by normalized path + file size + mtime_ns without re-hashing the whole collection;
-- SQLite search, sorting, and `limit`/`offset` for large libraries;
-- metadata details and file path view;
-- per-file errors do not abort a scan;
-- directory symlinks/reparse points are not recursively followed.
+- multiple local roots, native Windows folder picker, and recursive scan;
+- structured title, artists, album, album artist, duration, and technical metadata;
+- incremental rescan, SQL search/sort/pagination;
+- MusicArk does not modify audio files.
 
-> **MusicArk v0.4 never modifies or deletes local music files.** Removing a source folder from MusicArk only removes index records. v0.4 does not rename, move, edit tags, transcode, or delete audio files.
-
-## Local Library flow
+### Matching
 
 ```text
-Local Library
-      ↓
-Add Folder
-      ↓
-select C:\Music
-      ↓
-Scan
-      ↓
-metadata → SQLite
-      ↓
-browse / search / sort
+Yandex cache + Local Library
+             ↓
+      MatchingService
+             ↓
+      CandidateGenerator
+             ↓
+         MatchScorer
+             ↓
+       MatchDecision
+             ↓
+ matched / conflict / unmatched
+             ↓
+            SQLite
 ```
 
-Roots and the local index remain in `.musicark/musicark.db` between launches. A rescan reads metadata only for new or changed files and removes stale index rows only after a complete accessible traversal of the source root.
+- a new **Matching** section with summary and Run Matching action;
+- All / Matched / Needs review / Unmatched filters;
+- search, sorting, and `limit`/`offset`;
+- conflict detail with multiple top candidates;
+- manual accept (`match_method=manual`) and persistent rejection;
+- automatic reruns do not overwrite manual matches;
+- a removed local file invalidates the old link;
+- `matcher_version=1` plus fingerprints allows changed data to be recalculated safely.
 
-## v0.4 architecture
+## Matching policy
+
+Candidate generation uses indexed `normalized_title`, `normalized_artists_text`, and duration buckets. At most 40 local candidates reach detailed scoring for each provider track; there is no full `Yandex × Local` Cartesian product.
+
+Normalization uses Unicode NFKC, `casefold`, canonical whitespace/punctuation/dash handling. Multiple artists are compared as an order-independent set. Semantic markers such as `Live`, `Remix`, `Acoustic`, `Instrumental`, `Remaster`, and `Radio Edit` are preserved.
+
+Scoring v1:
 
 ```text
-Flutter desktop
-   ├─ Yandex UI → musicark.mvp_bridge → YandexLibraryService → Yandex provider/cache
-   └─ Local UI  → musicark.mvp_bridge → LocalLibraryService
-                                      → LocalLibraryScanner
-                                      → LocalMetadataReader
-                                      → LocalLibraryStorageRepository
-                                      → shared SQLite
+title    0.50
+artists  0.30
+duration 0.15
+album    0.05
 ```
 
-Local Library is not modeled as a Yandex provider. Folder paths are passed through the child process environment instead of shell command concatenation. The scanner uses `Path`/`os.walk` and contains no destructive filesystem operations.
+Duration is a secondary signal only. Filename is a fallback. The strict `yandex_<track_id>.<ext>` convention remains a very strong exact-ID signal; an incidental number in a path is not an exact match.
 
-The v0.4 forward SQLite migration is `1.3.0`; existing Yandex collection snapshots are preserved.
+Decision policy:
+
+```text
+AUTO MATCH >= 0.90 and best-vs-second margin >= 0.04
+CONFLICT   >= 0.70
+UNMATCHED   < 0.70
+```
+
+When two strong candidates are close, MusicArk chooses `CONFLICT` instead of picking one arbitrarily. Automatic-match precision is the primary quality gate.
+
+## Safety / privacy
+
+v0.5 runs offline after the Yandex cache and Local Library are populated. Local metadata is not sent to Yandex, OpenAI, or third-party matching/metadata APIs. Matching never renames, moves, deletes, or edits audio files and never mutates Yandex Music.
+
+The v0.5 forward SQLite migration is `1.4.0`. Existing `.musicark/musicark.db`, Yandex cache, local index, and credentials must not be deleted.
 
 ## Windows development run
 
@@ -85,11 +99,9 @@ flutter test
 flutter run -d windows
 ```
 
-Do not delete `.musicark/musicark.db`; `initialize_database()` applies migration `1.3.0` automatically. The saved Yandex token also does not need to be removed.
+## Manual Windows validation for v0.5
 
-## Manual Windows validation
-
-Use a disposable folder such as `C:\MusicArk-Test`: add it, scan, restart, then add/change/delete a test audio file and rescan. Finally verify Yandex Likes, playlists, and the persisted Yandex session still work.
+Use the real Yandex Library together with a test local collection such as `C:\MusicArk-Test`. Check obvious exact matches, difficult live/remix/acoustic cases, same-title/different-artist cases, an ambiguous conflict, manual accept/reject, restart, and rerun. Real matching quality is not considered validated until it is checked against the user's actual library.
 
 ## Roadmap
 
@@ -104,6 +116,6 @@ v0.7 — Download
 v0.8 — Sync
 ```
 
-Standalone packaging/installers remain secondary infrastructure work.
+Download, the Missing Tracks product workflow, playback, metadata editing, and sync are outside v0.5.
 
-See `docs/versions/v0.4.0.md`, `docs/architecture/architecture.md`, and `docs/testing/manual-test-plan.md`.
+See `docs/versions/v0.5.0.md`, `docs/architecture/architecture.md`, and `docs/testing/manual-test-plan.md`.

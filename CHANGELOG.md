@@ -2,7 +2,47 @@
 
 All notable project changes are recorded here.
 
-## Unreleased — v0.4.0 Local Library
+## Unreleased — v0.5.0 Matching
+
+### Added
+
+- offline `MatchingService` orchestration with separate candidate-generation, scoring, decision, persistence, and input/index boundaries;
+- unique provider-track materialization from Liked + playlist cache membership by `(provider_id, external_id)`;
+- bounded SQL candidate generation using normalized title, normalized artist-set text, and duration buckets;
+- transparent score breakdown for title, artists, duration, album, filename fallback, exact-id signal, and final confidence;
+- conservative `matched` / `conflict` / `unmatched` decision policy with best-vs-second ambiguity margin;
+- multiple persisted conflict candidates, manual accept, persistent reject, and manual-decision precedence;
+- matcher version and provider/local fingerprints for incremental reruns;
+- stale local-link invalidation when a linked indexed file disappears;
+- bridge commands `matching_summary`, `matching_run`, `matching_results`, `matching_result`, `matching_accept`, and `matching_reject`;
+- Flutter Matching page with summary, filters, search, sorting, pagination, conflict details, accept, and reject;
+- Python normalization/scoring/ambiguity/persistence/scale/migration/identity tests and Flutter widget coverage.
+
+### Changed
+
+- package and Flutter versions advanced to `0.5.0`;
+- SQLite schema advanced from `1.3.0` to `1.4.0` through a forward-only migration;
+- legacy `MatchingEngine` is now a compatibility facade over the v0.5 pipeline rather than the production algorithm;
+- legacy canonical `tracks`, `track_links`, and `match_conflicts` are reused/extended instead of creating a parallel canonical model;
+- exact Yandex-ID matching now recognizes only the strict `yandex_<track_id>.<ext>` filename convention instead of arbitrary numeric path substrings.
+
+### Matching policy
+
+- automatic match: confidence `>= 0.90` and best-vs-second margin `>= 0.04`;
+- conflict: confidence `>= 0.70` when auto-match policy is not satisfied;
+- unmatched: confidence `< 0.70` or no candidates;
+- weights: title `0.50`, artists `0.30`, duration `0.15`, album `0.05`;
+- semantic variants such as live/remix/acoustic/instrumental are preserved and guarded against unsafe auto-collapse;
+- precision of automatic matches is prioritized over recall.
+
+### Safety
+
+- no network dependency is introduced for matching;
+- no local audio file is renamed, moved, deleted, or edited;
+- no Yandex library mutation is performed;
+- v0.4 Yandex cache, Local Library data, and credentials are preserved by migration.
+
+## v0.4.0 — Local Library
 
 ### Added
 

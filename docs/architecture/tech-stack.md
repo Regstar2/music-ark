@@ -1,29 +1,39 @@
 # Технологический стек
 
-## v0.2.0
+## v0.5.0
 
 - Flutter — Windows desktop UI;
-- Dart `^3.11.5` — ограничение `ui/musicark_ui/pubspec.yaml`;
-- Python `>=3.10` — core/provider runtime;
-- SQLite — локальный snapshot/cache библиотеки;
+- Dart `^3.11.5` — UI runtime;
+- Python `>=3.10` — application/provider/local/matching runtime;
+- SQLite — Yandex cache, Local Library index, canonical links and matching results;
 - `yandex-music==3.0.0` — Yandex Music provider integration;
-- `keyring==25.7.0` — доступ к системному credential store для сохранённого токена;
-- `mutagen>=1.47.0` — legacy metadata subsystem, пока не подключён к v0.2 UI;
-- `requests>=2.32.0` — Python HTTP dependency.
+- `keyring==25.7.0` — системный credential store для Yandex token;
+- `mutagen>=1.47.0` — read-only local audio metadata extraction;
+- `requests>=2.32.0` — Python HTTP dependency used by network/provider code.
 
-## Почему стек не переписывается
+## Matching stack
 
-Проект уже подтвердил рабочий end-to-end Yandex provider на Python и Windows Flutter runner. v0.2 расширяет этот вертикальный срез persistence-слоем вместо добавления нового UI/runtime стека.
+v0.5 не добавляет внешнюю fuzzy-matching библиотеку. Title similarity использует Python stdlib `difflib.SequenceMatcher`; deterministic normalization — `unicodedata`/`re`; candidate lookup и persistence — SQLite.
 
-## Persistence boundary
+Это сохраняет matching полностью локальным и не добавляет runtime network dependency.
 
-### Секреты
+## Persistence boundaries
 
-Yandex token хранится через `keyring` в системном credential backend. Он не записывается в SQLite.
+### Secrets
 
-### Library cache
+Yandex token хранится через `keyring` и не записывается в SQLite.
 
-SQLite хранит только нормализованный snapshot полей, необходимых UI. Полный raw provider payload в persistent liked-cache не сохраняется.
+### Yandex cache
+
+`provider_collection_snapshots/items` хранит cache-first библиотеку. Для matching membership материализуется в уникальные `provider_tracks` по `(provider_id, external_id)`.
+
+### Local Library
+
+`local_audio_files` хранит structured tags/technical fields и compact matching index columns. Аудиофайлы остаются read-only.
+
+### Matching
+
+`matching_results`, `track_links` и расширенный `match_conflicts` хранят current result, confirmed links, ranked candidates, score breakdown, matcher version и manual decisions.
 
 ## Зафиксированные версии
 
@@ -33,37 +43,28 @@ SQLite хранит только нормализованный snapshot пол�
 - `requirements-yandex.txt`;
 - `ui/musicark_ui/pubspec.yaml`.
 
-## Что сознательно не входит в v0.2 UI
+## Не входит в v0.5
 
-- download system;
-- matching engine;
-- sync planner/executor;
+- download;
+- Missing Tracks workflow;
+- sync;
 - metadata editor;
-- local library;
-- playlists.
+- playback/player;
+- file rename/move/delete;
+- standalone Python bundling/installer.
 
-## Ограничение среды
-
-Release exe пока не содержит Python runtime. Для запуска нужен checkout MusicArk и Python environment с установленными зависимостями. Устранение этого ограничения — цель отдельной версии v0.3.0.
-
-## Сборка
+## Тестирование
 
 ```powershell
+python -m unittest discover -s tests -v
 cd ui\musicark_ui
-flutter build windows --release
+flutter analyze
+flutter test
 ```
 
 ## Запуск
 
 ```powershell
-flutter run -d windows
-```
-
-## Тестирование
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
 cd ui\musicark_ui
-flutter analyze
-flutter test
+flutter run -d windows
 ```

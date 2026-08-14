@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Callable
 
 _SCHEMA_KEY = "schema_version"
@@ -180,6 +182,122 @@ def _upgrade_local_library(c: object) -> None:
     )
 
 
+def _add_conflict_column(c: object, name: str, declaration: str) -> None:
+    if name not in _table_columns(c, "match_conflicts"):
+        c.execute(f"ALTER TABLE match_conflicts ADD COLUMN {name} {declaration}")
+
+
+def _upgrade_matching_v05(c: object) -> None:
+    """Add indexed normalized local fields and durable matching decisions."""
+    from musicark.matching.normalize import artists_key, normalize_text
+
+    for name, declaration in (
+        ("normalized_title", "TEXT"),
+        ("normalized_artists_text", "TEXT"),
+        ("duration_bucket", "INTEGER"),
+    ):
+        _add_local_column(c, name, declaration)
+
+    rows = c.execute(
+        "SELECT id, path, title, artists_json, duration_seconds FROM local_audio_files ORDER BY id"
+    ).fetchall()
+    for file_id, path, title, artists_json, duration_seconds in rows:
+        try:
+            artists = json.loads(artists_json or "[]")
+        except json.JSONDecodeError:
+            artists = []
+        if not isinstance(artists, list):
+            artists = []
+        normalized_title = normalize_text(title or Path(str(path)).stem)
+        normalized_artists = artists_key(str(item) for item in artists if item)
+        duration_bucket = int(round(float(duration_seconds))) // 5 if duration_seconds is not None else None
+        c.execute(
+            """
+            UPDATE local_audio_files
+            SET normalized_title=?, normalized_artists_text=?, duration_bucket=?
+            WHERE id=?
+            """,
+            (normalized_title, normalized_artists, duration_bucket, int(file_id)),
+        )
+
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_local_audio_files_normalized_title
+        ON local_audio_files(normalized_title)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_local_audio_files_artists_duration
+        ON local_audio_files(normalized_artists_text, duration_bucket)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_local_audio_files_duration_bucket
+        ON local_audio_files(duration_bucket)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_track_links_local_file
+        ON track_links(local_file_id)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_track_links_source_identity
+        ON track_links(source_provider_id, source_external_id)
+        """
+    )
+
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS matching_results (
+            provider_id TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            local_file_id INTEGER,
+            confidence REAL NOT NULL DEFAULT 0,
+            method TEXT NOT NULL DEFAULT 'automatic',
+            score_breakdown_json TEXT NOT NULL DEFAULT '{}',
+            reason TEXT NOT NULL DEFAULT '',
+            matcher_version INTEGER NOT NULL DEFAULT 1,
+            provider_fingerprint TEXT NOT NULL DEFAULT '',
+            local_fingerprint TEXT NOT NULL DEFAULT '',
+            manual INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY(provider_id, external_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_matching_results_status
+        ON matching_results(provider_id, status, confidence DESC)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_matching_results_local_file
+        ON matching_results(local_file_id)
+        """
+    )
+
+    _add_conflict_column(c, "score_breakdown_json", "TEXT NOT NULL DEFAULT '{}'")
+    _add_conflict_column(c, "candidate_rank", "INTEGER NOT NULL DEFAULT 1")
+    _add_conflict_column(c, "matcher_version", "INTEGER NOT NULL DEFAULT 1")
+    _add_conflict_column(c, "updated_at", "TEXT")
+    c.execute("UPDATE match_conflicts SET updated_at=COALESCE(updated_at, created_at)")
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_match_conflicts_identity_status
+        ON match_conflicts(source_provider_id, source_external_id, status, candidate_rank)
+        """
+    )
+
+
 MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     (
         "1.0.0",
@@ -193,6 +311,7 @@ MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     ("1.1.1", (_repair_persistent_library_tables,)),
     ("1.2.0", (_upgrade_collection_metadata,)),
     ("1.3.0", (_upgrade_local_library,)),
+    ("1.4.0", (_upgrade_matching_v05,)),
 ]
 
 

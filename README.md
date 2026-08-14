@@ -2,70 +2,84 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.4.0 — Local Library.**
+**Текущая версия: 0.5.0 — Matching.**
 
-MusicArk — Windows desktop-приложение, которое объединяет библиотеку Яндекс Музыки и локальную музыкальную коллекцию пользователя. v0.4 добавляет вторую сторону продукта: индексирование папок с музыкой с сохранением metadata в общей SQLite БД.
+MusicArk — Windows desktop-приложение для объединения библиотеки Яндекс Музыки и локальной музыкальной коллекции. v0.5 добавляет полностью локальное сопоставление provider tracks с индексированными аудиофайлами и сохраняет уверенность/ручные решения в общей SQLite БД.
 
-## Что работает в v0.4
+## Что работает в v0.5
 
 ### Яндекс Музыка
 
 - безопасный вход по Yandex Music OAuth token через системный credential store;
-- cache-first восстановление сессии;
-- «Мне нравится»;
-- пользовательские плейлисты и их треки;
-- поиск, сортировка, refresh и offline cache.
+- cache-first сессия, «Мне нравится», плейлисты и offline cache;
+- треки разных коллекций дедуплицируются по `(provider_id, external_id)` для matching.
 
 ### Local Library
 
-- отдельный раздел **«Локальная библиотека»**;
-- native Windows folder picker;
-- несколько music roots;
-- рекурсивный scan MP3/FLAC/M4A/MP4/AAC/OGG/Opus/WAV, которые распознаёт metadata stack;
-- чтение title, artists, album, album artist, duration и технических полей через `mutagen`;
-- fallback title из имени файла при отсутствии tags;
-- incremental reconciliation: new / changed / unchanged / removed;
-- быстрый unchanged-check по normalized path + file size + mtime_ns без повторного SHA-256 всей коллекции;
-- SQLite search, sorting и `limit`/`offset` для больших библиотек;
-- detail dialog с metadata и абсолютным путём;
-- per-file errors не останавливают весь scan;
-- symlink/reparse directories не обходятся рекурсивно.
+- несколько локальных roots, native Windows folder picker и recursive scan;
+- структурированные title, artists, album, album artist, duration и технические поля;
+- incremental rescan, SQL search/sort/pagination;
+- MusicArk не изменяет аудиофайлы.
 
-> **MusicArk v0.4 не изменяет и не удаляет локальные музыкальные файлы.** Удаление папки из MusicArk удаляет только записи индекса. v0.4 не переименовывает файлы, не меняет tags, не переносит, не конвертирует и не удаляет музыку.
-
-## Local Library: основной сценарий
+### Сопоставление
 
 ```text
-Локальная библиотека
-        ↓
-Добавить папку
-        ↓
-выбрать C:\Music
-        ↓
-Сканировать
-        ↓
-metadata → SQLite
-        ↓
-поиск / сортировка / просмотр
+Yandex cache + Local Library
+             ↓
+      MatchingService
+             ↓
+      CandidateGenerator
+             ↓
+         MatchScorer
+             ↓
+       MatchDecision
+             ↓
+ matched / conflict / unmatched
+             ↓
+            SQLite
 ```
 
-При следующем запуске roots и индекс остаются в `.musicark/musicark.db`. Повторный scan перечитывает metadata только у новых или изменённых файлов и удаляет из индекса записи файлов, которые действительно исчезли из полностью доступной source folder.
+- новый раздел **«Сопоставление»** с summary и запуском matching;
+- фильтры Все / Совпало / Требует проверки / Не найдено;
+- search, sort и `limit`/`offset`;
+- conflict detail с несколькими top candidates;
+- manual accept (`match_method=manual`) и persistent reject;
+- automatic rerun не перезаписывает manual match;
+- удалённый local file инвалидирует старый link;
+- `matcher_version=1` и fingerprints позволяют безопасно пересчитывать изменившиеся данные.
 
-## Архитектура v0.4
+## Matching policy
+
+Candidate generation использует индексированные `normalized_title`, `normalized_artists_text` и duration buckets. На один provider track detailed scoring получает максимум 40 кандидатов; полного Cartesian product `Yandex × Local` нет.
+
+Normalization: Unicode NFKC, `casefold`, единые пробелы/пунктуация/dash variants. Multiple artists сравниваются как order-independent set. `Live`, `Remix`, `Acoustic`, `Instrumental`, `Remaster`, `Radio Edit` и другие смысловые маркеры не выбрасываются.
+
+Scoring v1:
 
 ```text
-Flutter desktop
-   ├─ Yandex UI → musicark.mvp_bridge → YandexLibraryService → Yandex provider/cache
-   └─ Local UI  → musicark.mvp_bridge → LocalLibraryService
-                                      → LocalLibraryScanner
-                                      → LocalMetadataReader
-                                      → LocalLibraryStorageRepository
-                                      → shared SQLite
+title    0.50
+artists  0.30
+duration 0.15
+album    0.05
 ```
 
-Local Library не является Yandex provider. Пути добавляемых folders передаются bridge через environment, а не через shell-string/argv. Scanner использует `Path`/`os.walk` и не выполняет destructive filesystem operations.
+Duration — только secondary signal. Filename — fallback. Строгий convention `yandex_<track_id>.<ext>` остаётся очень сильным exact-ID signal; случайное число в path не считается exact match.
 
-SQLite forward migration v0.4: `1.3.0`. Существующие Yandex collection snapshots не очищаются.
+Decision policy:
+
+```text
+AUTO MATCH >= 0.90 и margin до второго кандидата >= 0.04
+CONFLICT   >= 0.70
+UNMATCHED   < 0.70
+```
+
+Если два сильных кандидата близки по confidence, MusicArk выбирает `CONFLICT`, а не случайный auto-match. Главный quality gate — precision автоматических совпадений.
+
+## Safety / privacy
+
+v0.5 работает offline после заполнения Yandex cache и Local Library. Локальные metadata не отправляются в Yandex, OpenAI или сторонние matching/metadata APIs. Matching не переименовывает, не перемещает, не удаляет и не редактирует аудиофайлы и не изменяет Яндекс Музыку.
+
+SQLite forward migration v0.5: `1.4.0`. Существующая `.musicark/musicark.db`, Yandex cache, local index и credentials не требуют удаления.
 
 ## Запуск для разработки на Windows
 
@@ -85,11 +99,9 @@ flutter test
 flutter run -d windows
 ```
 
-Не удаляйте существующую `.musicark/musicark.db`: `initialize_database()` автоматически применяет forward migration `1.3.0`. Сохранённый Yandex token также удалять не требуется.
+## Ручная Windows-проверка v0.5
 
-## Ручная Windows-проверка v0.4
-
-Используйте отдельную тестовую папку, например `C:\MusicArk-Test`, а не основную коллекцию. Проверить: add folder → scan → restart → add/change/delete file → rescan, затем убедиться, что Yandex Likes/Playlists и сохранённая сессия продолжают работать.
+Используйте Yandex Library и тестовую локальную коллекцию (например `C:\MusicArk-Test`). Проверить очевидные exact matches, сложные live/remix/acoustic cases, одинаковые title разных artists, конфликт с несколькими candidates, manual accept/reject, restart и rerun. Реальное качество matching нельзя считать подтверждённым до проверки на пользовательской библиотеке.
 
 ## Roadmap
 
@@ -104,6 +116,6 @@ v0.7 — Download
 v0.8 — Sync
 ```
 
-Standalone packaging/installer остаётся второстепенной инфраструктурной задачей.
+Download, Missing Tracks workflow, playback, metadata editing и sync не входят в v0.5.
 
-Подробности: `docs/versions/v0.4.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.
+Подробности: `docs/versions/v0.5.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.

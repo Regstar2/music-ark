@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -31,7 +32,7 @@ class ReferenceAudio:
 
 @dataclass(frozen=True, slots=True)
 class DecodedAudio:
-    samples: tuple[int, ...]
+    samples: Sequence[int]
     sample_rate: int
 
     @property

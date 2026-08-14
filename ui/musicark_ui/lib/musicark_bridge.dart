@@ -59,6 +59,8 @@ class MusicArkBridge implements MusicArkBridgeClient {
       runInShell: false,
       workingDirectory: repoRoot,
       environment: bridgeEnv,
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
     );
     final stdoutText = (result.stdout ?? '').toString().trim();
     final stderrText = (result.stderr ?? '').toString().trim();

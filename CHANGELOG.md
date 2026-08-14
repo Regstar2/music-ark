@@ -26,6 +26,12 @@ All notable project changes are recorded here.
 - old `refresh`/`cached` bridge behavior and legacy eager provider scan remain compatible;
 - documentation and roadmap updated for the v0.3 product boundary.
 
+### Fixed
+
+- updated the legacy platform-bridge schema regression to expect schema `1.2.0` after the v0.3 migration;
+- prevented Flutter sorting dropdown overflow in desktop/widget layouts;
+- removed the analyzer warnings reported by the Windows v0.3 validation run.
+
 ## v0.2.0 — Persistent Library
 
 ### Added

@@ -432,21 +432,48 @@ class _ResultTile extends StatelessWidget {
       ),
       isThreeLine: true,
       trailing: SizedBox(
-        width: 170,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
+        width: status == 'matched' ? 230 : 100,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            Chip(label: Text(statusLabel)),
-            if (status == 'matched')
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
+            _CompactBadge(label: statusLabel),
+            if (status == 'matched') ...[
+              const SizedBox(width: 6),
+              Flexible(
                 child: _VariantBadge(
                   key: Key('variant-badge-${row['externalId']}'),
                   status: '${variant['variantStatus'] ?? 'not_checked'}',
                 ),
               ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactBadge extends StatelessWidget {
+  const _CompactBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.fade,
+          softWrap: false,
+          style: Theme.of(context).textTheme.labelSmall,
         ),
       ),
     );
@@ -459,10 +486,7 @@ class _VariantBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      visualDensity: VisualDensity.compact,
-      label: Text(_variantLabel(status)),
-    );
+    return _CompactBadge(label: _variantLabel(status));
   }
 }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_strings.dart';
 import 'matching_bridge.dart';
 
 class MatchingPage extends StatefulWidget {
@@ -662,7 +663,8 @@ class _VariantDetail extends StatelessWidget {
         if (reasons.isNotEmpty) ...[
           const SizedBox(height: 6),
           const Text('Signals:'),
-          for (final reason in reasons) Text('• $reason'),
+          for (final reason in reasons)
+            Text('• ${AppStrings.variantReason(reason.toString())}'),
         ],
         if (segments.isNotEmpty) ...[
           const SizedBox(height: 6),

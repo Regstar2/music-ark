@@ -36,6 +36,14 @@ class _MusicArkShell extends StatefulWidget {
 
 class _MusicArkShellState extends State<_MusicArkShell> {
   int _index = 0;
+  bool _localLibraryOpened = false;
+
+  void _selectSection(int index) {
+    setState(() {
+      _index = index;
+      if (index == 1) _localLibraryOpened = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +53,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
           NavigationRail(
             key: const Key('main-navigation'),
             selectedIndex: _index,
-            onDestinationSelected: (index) => setState(() => _index = index),
+            onDestinationSelected: _selectSection,
             labelType: NavigationRailLabelType.all,
             leading: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -70,7 +78,9 @@ class _MusicArkShellState extends State<_MusicArkShell> {
               index: _index,
               children: [
                 yandex.MusicArkHomePage(bridge: widget.bridge),
-                LocalLibraryPage(bridge: widget.bridge),
+                _localLibraryOpened
+                    ? LocalLibraryPage(bridge: widget.bridge)
+                    : const SizedBox.shrink(),
               ],
             ),
           ),

@@ -1,24 +1,34 @@
 # MusicArk Roadmap
 
-## Product sequence
+```text
+v0.1 — Yandex Likes MVP
+v0.2 — Persistent Library
+v0.3 — Yandex Library / Playlists
+v0.4 — Local Library
+v0.5 — Matching
+v0.6 — Missing Tracks
+v0.7 — Download
+v0.8 — Sync
+```
 
-| Version | Focus | Status |
-|---|---|---|
-| v0.1 | Yandex Likes MVP | complete |
-| v0.2 | Persistent Library | complete |
-| v0.3 | Yandex Library / Playlists | implementation complete; real Windows/Yandex validation pending |
-| v0.4 | Local Library | next |
-| v0.5 | Matching | planned |
-| v0.6 | Missing Tracks | planned |
-| v0.7 | Download | planned |
-| v0.8 | Sync | planned |
+## v0.4 — Local Library
 
-## v0.3 boundary
+Index one or more user-selected folders, extract local audio metadata, persist roots and tracks, and incrementally reconcile new/changed/deleted files without modifying the underlying audio files.
 
-v0.3 turns the single Liked screen into a cache-first Yandex library with user playlists and ordered playlist snapshots. Playlist bodies are refreshed lazily; a full library refresh updates account, Likes, and playlist metadata.
+## v0.5 — Matching
 
-## Not a current priority
+Compare Yandex and local structured metadata (`title`, `artists`, `album`, `duration`) and produce explicit matches/conflicts. v0.4 stores these fields without creating links prematurely.
 
-Standalone Python packaging, installer work, local scanning, matching, downloading, playback, playlist editing/upload, and sync UI must not displace the product sequence above.
+## v0.6 — Missing Tracks
 
-Next: [[v0.3.0]] → v0.4 Local Library.
+Identify provider tracks that do not have a sufficiently reliable local match.
+
+## v0.7 — Download
+
+Acquire explicitly requested missing tracks through supported download sources/workflows.
+
+## v0.8 — Sync
+
+Build controlled synchronization plans above matching and download results.
+
+Standalone packaging/installer remains secondary infrastructure work and must not displace the product slices above.

@@ -2,7 +2,39 @@
 
 All notable project changes are recorded here.
 
-## Unreleased — v0.3.0 Yandex Library / Playlists
+## Unreleased — v0.4.0 Local Library
+
+### Added
+
+- `LocalLibraryService` application boundary independent from Yandex providers;
+- `LocalLibraryScanner` with recursive, non-symlink traversal and per-file error isolation;
+- read-only `LocalMetadataReader` based on `mutagen`;
+- persistent `local_library_roots` configuration;
+- incremental file reconciliation using normalized path + size + `mtime_ns`;
+- batch/transactional local index persistence and deletion reconciliation;
+- local library bridge commands for roots, scans, tracks, track details, and stats;
+- `limit`/`offset`, SQL search, sorting, and root-aware storage API;
+- native Windows directory picker via Flutter `file_selector`;
+- Local Library desktop page with roots, scan state, results, track list, search, sorting, and details;
+- Python regression tests for empty/nested scans, extension filtering, missing tags, corrupted files, Unicode paths, duplicate/overlapping roots, incremental changes, deletions, idempotency, pagination, unavailable roots, and migration preservation;
+- Flutter widget coverage for Local Library navigation, empty state, folder add/remove, scan result, track display, search, and sorting.
+
+### Changed
+
+- Python package and Flutter app version advanced to `0.4.0`;
+- SQLite schema advanced to `1.3.0` through a forward-only migration;
+- the existing `local_audio_files` table is extended instead of creating a separate database;
+- the v0.4 scanner avoids recalculating SHA-256 for unchanged files;
+- legacy Local Library storage methods remain for compatibility, while the supported v0.4 UI uses the new service/scanner boundary.
+
+### Safety
+
+- Local Library is read-only in v0.4: no rename, move, tag editing, deletion, transcoding, or artwork mutation;
+- removing a source root removes only MusicArk index records;
+- Yandex collection cache and stored credentials are not deleted by the local-library migration;
+- directory symlinks/reparse points are not recursively followed.
+
+## v0.3.0 — Yandex Library / Playlists
 
 ### Added
 

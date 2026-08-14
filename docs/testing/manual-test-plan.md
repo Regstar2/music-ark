@@ -1,57 +1,72 @@
-# Manual Test Plan
+# Manual Test Plan — MusicArk v0.4
 
-## v0.3 Windows + real Yandex validation
+Use a disposable folder such as `C:\MusicArk-Test`. Do not use the primary personal collection for the first smoke test.
 
-Run from a clean checkout of `agent/v0.3-yandex-library` without deleting `.musicark/musicark.db`.
+## Preconditions
 
-### Automated baseline
+- Windows desktop target is available in Flutter;
+- existing `.musicark\musicark.db` is kept in place;
+- an existing saved Yandex token, if present, is not deleted;
+- `C:\MusicArk-Test` contains a few small audio files, including at least one tagged file and one file without useful title/artist tags.
 
-1. `python -m unittest discover -s tests -v`
-2. `flutter pub get`
-3. `flutter analyze`
-4. `flutter test`
+## Local Library baseline
 
-All must be green before release.
+1. Launch MusicArk.
+2. Open **Локальная библиотека**.
+3. Click **Добавить папку** and select `C:\MusicArk-Test` through the native folder dialog.
+4. Confirm the root is listed.
+5. Click **Сканировать**.
+6. Confirm tracks appear with title/artist/album/duration where available.
+7. Open one track and verify path, format, bitrate/sample rate when available.
+8. Close the app and launch it again.
+9. Confirm the root and indexed tracks are still present before another scan.
 
-### Migration / startup
+## Incremental reconciliation
 
-1. Start with an existing v0.2 database containing Liked cache.
-2. Launch v0.3.
-3. Confirm no database deletion/re-login is requested.
-4. Confirm cached Likes appears before network refresh completes.
-5. Confirm existing Liked content remains intact after migration.
+1. Add one supported audio file to `C:\MusicArk-Test`.
+2. Rescan; expected: `added +1`.
+3. Modify one existing audio file/tag using an external tool.
+4. Rescan; expected: `updated +1` if file size or mtime changed.
+5. Delete one test audio file outside MusicArk.
+6. Rescan; expected: `removed +1` and the row disappears from Local Library.
+7. Rescan again without changes; expected: existing rows are `unchanged` and no duplicates appear.
 
-### Real playlists
+## Error resilience
 
-1. With a valid stored session, open `Плейлисты`.
-2. Confirm the list matches the real Yandex account and shows title, track count, owner when available, external ID, and local update time.
-3. Open at least two real playlists, including one with many tracks if available.
-4. Confirm title/artist/album and original ordering match Yandex.
-5. Confirm duration/availability display when supplied by provider data.
-6. Search by title, artist, and album; test original/title/artist sorting.
-7. Search playlist list by title and switch original/title order.
+- add or create a corrupted file with a supported extension; scan must finish and report an error instead of aborting the whole library;
+- include Unicode/cyrillic names, spaces, and nested folders;
+- verify unknown extensions are ignored;
+- if feasible, include a directory symlink/junction and confirm the scanner does not recursively follow it.
 
-### Refresh behavior
+## Root management
 
-1. Add/remove a Liked track in Yandex and refresh Liked.
-2. Add/remove/reorder tracks in one playlist and refresh that playlist.
-3. Create or delete a playlist in Yandex, then use `Обновить библиотеку`.
-4. Confirm a remotely deleted playlist disappears locally.
-5. Confirm full library refresh remains responsive and does not eagerly load every playlist body.
+- add a second independent root and scan it;
+- attempt to add the same root using case/trailing-separator variation: it must be rejected;
+- attempt to add a child of an already indexed root: overlapping roots must be rejected;
+- remove a root in MusicArk and confirm the dialog says only index data is removed;
+- verify the actual music files still exist on disk after root removal.
 
-### Offline fallback
+## Search / sorting / large-list contract
 
-1. Open a playlist successfully once.
-2. Close MusicArk and disconnect network.
-3. Relaunch.
-4. Confirm cached Likes and playlist list are visible.
-5. Open the previously cached playlist and confirm its tracks remain visible.
-6. Trigger refresh and confirm an error banner appears without replacing cached content.
+- search by title, artist, album, and filename;
+- sort by artist, title, album, duration, and path;
+- on a sufficiently large fixture, confirm additional pages can be loaded without passing the full library through one fixed-size bridge payload.
 
-### Credentials/logout
+## Yandex regression
 
-1. Confirm token is not present in SQLite, logs, process argv, Git diff, or generated docs.
-2. Logout.
-3. Confirm next launch shows login and cached Yandex collections are cleared.
+After the local tests:
 
-Record any discrepancy before marking v0.3 complete.
+1. open **Яндекс Музыка**;
+2. confirm saved session restore still works;
+3. open **Мне нравится**;
+4. open playlist list and one playlist;
+5. refresh Yandex library;
+6. restart and verify cached Yandex data remains available.
+
+## Pass criteria
+
+- no local audio file is modified by MusicArk;
+- no Yandex cache is destroyed by migration `1.3.0`;
+- roots/tracks persist across restart;
+- new / updated / removed / unchanged counts match filesystem changes;
+- Python suite, `flutter analyze`, and `flutter test` are green on the user's Windows environment.

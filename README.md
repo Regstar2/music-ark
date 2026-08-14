@@ -2,50 +2,72 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.3.0 — Yandex Library / Playlists.**
+**Текущая версия: 0.4.0 — Local Library.**
 
-MusicArk — desktop-first приложение для сохранения и дальнейшей синхронизации личной музыкальной библиотеки. На этапе v0.3 основной рабочий provider — Яндекс Музыка.
+MusicArk — Windows desktop-приложение, которое объединяет библиотеку Яндекс Музыки и локальную музыкальную коллекцию пользователя. v0.4 добавляет вторую сторону продукта: индексирование папок с музыкой с сохранением metadata в общей SQLite БД.
 
-## Что работает в v0.3
+## Что работает в v0.4
 
-- одноразовый вход по Yandex Music OAuth token с сохранением токена в системном credential store;
-- cache-first запуск без повторного ввода токена;
-- «Мне нравится» с refresh, offline fallback, поиском и сортировкой;
-- список пользовательских плейлистов Яндекс Музыки;
-- открытие плейлиста и просмотр его треков в исходном Yandex-порядке;
-- локальный SQLite snapshot playlist metadata + membership + position;
-- lazy refresh содержимого плейлиста при открытии;
-- «Обновить библиотеку» для account + Likes + playlist metadata без полного N-playlist сканирования;
-- удаление stale playlist cache после подтверждённого полного refresh;
-- offline-доступ к ранее загруженным playlist snapshots;
-- logout очищает credential и provider cache.
+### Яндекс Музыка
 
-## Архитектура v0.3
+- безопасный вход по Yandex Music OAuth token через системный credential store;
+- cache-first восстановление сессии;
+- «Мне нравится»;
+- пользовательские плейлисты и их треки;
+- поиск, сортировка, refresh и offline cache.
+
+### Local Library
+
+- отдельный раздел **«Локальная библиотека»**;
+- native Windows folder picker;
+- несколько music roots;
+- рекурсивный scan MP3/FLAC/M4A/MP4/AAC/OGG/Opus/WAV, которые распознаёт metadata stack;
+- чтение title, artists, album, album artist, duration и технических полей через `mutagen`;
+- fallback title из имени файла при отсутствии tags;
+- incremental reconciliation: new / changed / unchanged / removed;
+- быстрый unchanged-check по normalized path + file size + mtime_ns без повторного SHA-256 всей коллекции;
+- SQLite search, sorting и `limit`/`offset` для больших библиотек;
+- detail dialog с metadata и абсолютным путём;
+- per-file errors не останавливают весь scan;
+- symlink/reparse directories не обходятся рекурсивно.
+
+> **MusicArk v0.4 не изменяет и не удаляет локальные музыкальные файлы.** Удаление папки из MusicArk удаляет только записи индекса. v0.4 не переименовывает файлы, не меняет tags, не переносит, не конвертирует и не удаляет музыку.
+
+## Local Library: основной сценарий
 
 ```text
-Flutter desktop UI
+Локальная библиотека
         ↓
-musicark.mvp_bridge
+Добавить папку
         ↓
-YandexLibraryService
-   ↓             ↓
-Yandex provider  SQLite collection cache
+выбрать C:\Music
         ↓
-   yandex-music
+Сканировать
+        ↓
+metadata → SQLite
+        ↓
+поиск / сортировка / просмотр
 ```
 
-Flutter не знает детали `yandex-music` и SQLite. Объекты сторонней библиотеки остаются внутри provider boundary.
+При следующем запуске roots и индекс остаются в `.musicark/musicark.db`. Повторный scan перечитывает metadata только у новых или изменённых файлов и удаляет из индекса записи файлов, которые действительно исчезли из полностью доступной source folder.
 
-SQLite использует универсальные коллекции:
+## Архитектура v0.4
 
-- `yandex_music / liked`;
-- `yandex_music / playlist:<external_id>`.
+```text
+Flutter desktop
+   ├─ Yandex UI → musicark.mvp_bridge → YandexLibraryService → Yandex provider/cache
+   └─ Local UI  → musicark.mvp_bridge → LocalLibraryService
+                                      → LocalLibraryScanner
+                                      → LocalMetadataReader
+                                      → LocalLibraryStorageRepository
+                                      → shared SQLite
+```
 
-Токен не записывается в SQLite и не передаётся через argv. UI передаёт токен bridge только через environment дочернего процесса при login, после чего используется системное хранилище учётных данных.
+Local Library не является Yandex provider. Пути добавляемых folders передаются bridge через environment, а не через shell-string/argv. Scanner использует `Path`/`os.walk` и не выполняет destructive filesystem operations.
+
+SQLite forward migration v0.4: `1.3.0`. Существующие Yandex collection snapshots не очищаются.
 
 ## Запуск для разработки на Windows
-
-Из корня репозитория:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -63,11 +85,11 @@ flutter test
 flutter run -d windows
 ```
 
-Существующая `.musicark/musicark.db` удалять не нужно: `initialize_database()` применяет forward-only migration `1.2.0` автоматически.
+Не удаляйте существующую `.musicark/musicark.db`: `initialize_database()` автоматически применяет forward migration `1.3.0`. Сохранённый Yandex token также удалять не требуется.
 
-## Проверка реального Yandex
+## Ручная Windows-проверка v0.4
 
-Unit/widget tests не требуют реального аккаунта. Перед закрытием v0.3 вручную на Windows нужно подтвердить: сохранённую сессию, реальные playlists, открытие playlist tracks, refresh, restart/offline cache и logout. Не храните OAuth token в Git.
+Используйте отдельную тестовую папку, например `C:\MusicArk-Test`, а не основную коллекцию. Проверить: add folder → scan → restart → add/change/delete file → rescan, затем убедиться, что Yandex Likes/Playlists и сохранённая сессия продолжают работать.
 
 ## Roadmap
 
@@ -82,6 +104,6 @@ v0.7 — Download
 v0.8 — Sync
 ```
 
-Standalone packaging/installer не является приоритетом текущего этапа.
+Standalone packaging/installer остаётся второстепенной инфраструктурной задачей.
 
-Подробности: `docs/versions/v0.3.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.
+Подробности: `docs/versions/v0.4.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.

@@ -1,4 +1,4 @@
-"""Regression tests for upgrading a real v0.2 collection cache to v0.3."""
+"""Regression tests for upgrading a real v0.2 collection cache through v0.4."""
 
 from __future__ import annotations
 
@@ -33,12 +33,14 @@ class V03MigrationTests(unittest.TestCase):
                 row = conn.execute("SELECT account_json, item_count, refreshed_at, collection_type, content_refreshed_at FROM provider_collection_snapshots WHERE provider_id='yandex_music' AND collection_id='liked'").fetchone()
                 item = conn.execute("SELECT external_id, position, payload_json FROM provider_collection_items WHERE provider_id='yandex_music' AND collection_id='liked'").fetchone()
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(provider_collection_snapshots)")}
+                local_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
-            self.assertEqual(version, "1.2.0")
+            self.assertEqual(version, "1.3.0")
             self.assertEqual(json.loads(row[0])["displayName"], "Tester"); self.assertEqual(row[1], 1)
             self.assertEqual(row[2], "2026-08-11T10:00:00+00:00"); self.assertEqual(row[3], "liked"); self.assertEqual(row[4], row[2])
             self.assertEqual(item[0:2], ("101", 0)); self.assertEqual(json.loads(item[2])["title"], "Existing Like")
             self.assertTrue({"collection_type", "external_id", "title", "owner_name", "metadata_json", "source_position", "active", "content_refreshed_at"}.issubset(columns))
+            self.assertIn("local_library_roots", local_tables)
 
 
 if __name__ == "__main__":

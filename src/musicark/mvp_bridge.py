@@ -1,4 +1,4 @@
-"""JSON process bridge for MusicArk desktop UI (Yandex + Local + Matching)."""
+"""JSON process bridge for MusicArk desktop UI (Yandex + Local + Matching + Variant)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from musicark.providers.yandex_music_provider import (
     YandexMusicError,
     YandexTokenMissingError,
 )
+from musicark.variant.service import VariantDetectionService
 from musicark.yandex_library import YandexLibraryService
 
 
@@ -106,6 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
             "local_tracks", "local_track", "local_stats",
             "matching_summary", "matching_run", "matching_results", "matching_result",
             "matching_accept", "matching_reject",
+            "variant_capabilities", "variant_summary", "variant_run",
+            "variant_run_all_available", "variant_result", "variant_results",
         ),
     )
     parser.add_argument("--playlist-id", default=None)
@@ -119,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search", default="")
     parser.add_argument("--sort", default="artist")
+    parser.add_argument("--force", action="store_true")
     return parser
 
 
@@ -204,6 +208,24 @@ def _matching_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[s
     raise BridgeRequestError(f"Unknown matching command: {args.command}")
 
 
+def _variant_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str, Any]:
+    service = VariantDetectionService(base_dir=base_dir, provider_id=args.provider_id)
+    if args.command == "variant_capabilities":
+        return service.capabilities()
+    if args.command == "variant_summary":
+        return service.summary()
+    if args.command == "variant_results":
+        return service.results(limit=args.limit, offset=args.offset, status=args.status)
+    if args.command == "variant_run_all_available":
+        return service.run_all_available()
+    external_id = _required_text(args.external_id, "--external-id")
+    if args.command == "variant_result":
+        return service.result(external_id)
+    if args.command == "variant_run":
+        return service.run(external_id, force=bool(args.force))
+    raise BridgeRequestError(f"Unknown variant command: {args.command}")
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -213,6 +235,8 @@ def main() -> int:
             payload = _local_payload(args, base_dir)
         elif args.command.startswith("matching_"):
             payload = _matching_payload(args, base_dir)
+        elif args.command.startswith("variant_"):
+            payload = _variant_payload(args, base_dir)
         else:
             service = YandexLibraryService(base_dir=base_dir)
             if args.command == "bootstrap":

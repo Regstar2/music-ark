@@ -1,8 +1,8 @@
 name: musicark_ui
-description: "MusicArk cache-first Yandex Music library desktop MVP."
+description: "MusicArk Yandex and local music library desktop app."
 publish_to: 'none'
 
-version: 0.3.0+1
+version: 0.4.0+1
 
 environment:
   sdk: ^3.11.5
@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

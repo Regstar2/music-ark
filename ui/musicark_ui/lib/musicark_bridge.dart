@@ -12,6 +12,20 @@ abstract interface class MusicArkBridgeClient {
   Future<Map<String, dynamic>> playlistRefresh(String externalId);
   Future<Map<String, dynamic>> libraryRefresh();
   Future<Map<String, dynamic>> logout();
+
+  Future<Map<String, dynamic>> localRoots();
+  Future<Map<String, dynamic>> localRootAdd(String path);
+  Future<Map<String, dynamic>> localRootRemove(int rootId);
+  Future<Map<String, dynamic>> localScan({int? rootId});
+  Future<Map<String, dynamic>> localTracks({
+    int limit = 1000,
+    int offset = 0,
+    String search = '',
+    String sort = 'artist',
+    int? rootId,
+  });
+  Future<Map<String, dynamic>> localTrack(int trackId);
+  Future<Map<String, dynamic>> localStats();
 }
 
 class MusicArkBridge implements MusicArkBridgeClient {
@@ -32,7 +46,34 @@ class MusicArkBridge implements MusicArkBridgeClient {
   @override
   Future<Map<String, dynamic>> logout() => _runBridge('logout');
 
-  Future<Map<String, dynamic>> _runBridge(String command, {String? token, String? playlistId}) async {
+  @override
+  Future<Map<String, dynamic>> localRoots() => _runBridge('local_roots');
+  @override
+  Future<Map<String, dynamic>> localRootAdd(String path) => _runBridge('local_root_add', localRootPath: path);
+  @override
+  Future<Map<String, dynamic>> localRootRemove(int rootId) => _runBridge('local_root_remove', rootId: rootId);
+  @override
+  Future<Map<String, dynamic>> localScan({int? rootId}) => _runBridge('local_scan', rootId: rootId);
+  @override
+  Future<Map<String, dynamic>> localTracks({int limit = 1000, int offset = 0, String search = '', String sort = 'artist', int? rootId}) =>
+      _runBridge('local_tracks', rootId: rootId, limit: limit, offset: offset, search: search, sort: sort);
+  @override
+  Future<Map<String, dynamic>> localTrack(int trackId) => _runBridge('local_track', trackId: trackId);
+  @override
+  Future<Map<String, dynamic>> localStats() => _runBridge('local_stats');
+
+  Future<Map<String, dynamic>> _runBridge(
+    String command, {
+    String? token,
+    String? playlistId,
+    String? localRootPath,
+    int? rootId,
+    int? trackId,
+    int? limit,
+    int? offset,
+    String? search,
+    String? sort,
+  }) async {
     final repoRoot = _resolveRepoRoot();
     final python = await _resolvePythonCommand();
     final srcPath = '$repoRoot${Platform.pathSeparator}src';
@@ -47,11 +88,20 @@ class MusicArkBridge implements MusicArkBridgeClient {
       'PYTHONUTF8': '1',
     };
     bridgeEnv.remove('YANDEX_MUSIC_TOKEN');
+    bridgeEnv.remove('MUSICARK_LOCAL_ROOT');
     if (token != null && token.isNotEmpty) bridgeEnv['YANDEX_MUSIC_TOKEN'] = token;
+    if (localRootPath != null && localRootPath.isNotEmpty) bridgeEnv['MUSICARK_LOCAL_ROOT'] = localRootPath;
+
     final args = <String>[
       ...python.prefixArgs,
       '-m', 'musicark.mvp_bridge', '--base-dir', repoRoot, command,
       if (playlistId != null) ...['--playlist-id', playlistId],
+      if (rootId != null) ...['--root-id', '$rootId'],
+      if (trackId != null) ...['--track-id', '$trackId'],
+      if (limit != null) ...['--limit', '$limit'],
+      if (offset != null) ...['--offset', '$offset'],
+      if (search != null && search.isNotEmpty) ...['--search', search],
+      if (sort != null && sort.isNotEmpty) ...['--sort', sort],
     ];
     final result = await Process.run(
       python.executable,
@@ -152,6 +202,8 @@ class FakeMusicArkBridge implements MusicArkBridgeClient {
   int libraryRefreshCalls = 0;
   int likedRefreshCalls = 0;
   int playlistRefreshCalls = 0;
+  int localScanCalls = 0;
+  final List<Map<String, dynamic>> _localRoots = [];
 
   static const _account = {'provider': 'yandex_music', 'providerUserId': 'test-user', 'displayName': 'Tester'};
   static const _likedTracks = [
@@ -171,6 +223,10 @@ class FakeMusicArkBridge implements MusicArkBridgeClient {
       {'provider_id': 'yandex_music', 'external_id': '203', 'title': 'Monster', 'artists': ['Skillet'], 'album_title': 'Awake', 'duration_seconds': 178, 'availability': 'available'},
     ],
   };
+  static const _localTracks = [
+    {'id': 1, 'rootId': 1, 'path': r'C:\Music\Artist\Song.flac', 'fileName': 'Song.flac', 'title': 'Song', 'artists': ['Artist'], 'album': 'Album', 'durationSeconds': 245.0, 'codec': 'flac', 'bitrate': 900000, 'sampleRate': 44100},
+    {'id': 2, 'rootId': 1, 'path': r'C:\Music\Other.mp3', 'fileName': 'Other.mp3', 'title': 'Other', 'artists': ['Another Artist'], 'album': 'Singles', 'durationSeconds': 180.0, 'codec': 'mp3', 'bitrate': 320000, 'sampleRate': 44100},
+  ];
 
   Map<String, dynamic> _libraryState({required bool signedIn, required String source}) {
     final liked = {
@@ -228,4 +284,36 @@ class FakeMusicArkBridge implements MusicArkBridgeClient {
   }
   @override
   Future<Map<String, dynamic>> logout() async => _libraryState(signedIn: false, source: 'none');
+
+  @override
+  Future<Map<String, dynamic>> localRoots() async => {'count': _localRoots.length, 'items': List<Map<String, dynamic>>.from(_localRoots)};
+  @override
+  Future<Map<String, dynamic>> localRootAdd(String path) async {
+    final root = {'id': _localRoots.length + 1, 'path': path, 'normalizedPath': path.toLowerCase(), 'enabled': true, 'createdAt': '2026-08-14T00:00:00Z', 'lastScannedAt': null};
+    _localRoots.add(root);
+    return {'root': root, 'roots': await localRoots()};
+  }
+  @override
+  Future<Map<String, dynamic>> localRootRemove(int rootId) async {
+    _localRoots.removeWhere((item) => item['id'] == rootId);
+    return {'removed': true, 'roots': await localRoots()};
+  }
+  @override
+  Future<Map<String, dynamic>> localScan({int? rootId}) async {
+    localScanCalls++;
+    return {'added': 2, 'updated': 0, 'removed': 0, 'unchanged': 0, 'errors': 0, 'scanned': 2, 'errorItems': <Map<String, dynamic>>[]};
+  }
+  @override
+  Future<Map<String, dynamic>> localTracks({int limit = 1000, int offset = 0, String search = '', String sort = 'artist', int? rootId}) async {
+    var items = _localRoots.isEmpty ? <Map<String, dynamic>>[] : List<Map<String, dynamic>>.from(_localTracks);
+    final q = search.toLowerCase();
+    if (q.isNotEmpty) {
+      items = items.where((item) => '${item['title']} ${item['artists']} ${item['album']} ${item['fileName']}'.toLowerCase().contains(q)).toList();
+    }
+    return {'count': items.length, 'limit': limit, 'offset': offset, 'items': items};
+  }
+  @override
+  Future<Map<String, dynamic>> localTrack(int trackId) async => {'track': _localTracks.firstWhere((item) => item['id'] == trackId)};
+  @override
+  Future<Map<String, dynamic>> localStats() async => {'total_files': _localRoots.isEmpty ? 0 : _localTracks.length, 'enabled_roots': _localRoots.length, 'by_codec': {'flac': 1, 'mp3': 1}};
 }

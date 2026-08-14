@@ -1,36 +1,32 @@
-# MusicArk Product Scope
+# MVP / Product Scope
 
-## Current product scope: v0.3
+## Current supported product slice: v0.4
 
-The current usable product is a desktop cache-first Yandex Music library.
+MusicArk v0.4 consists of two usable library sources:
 
-Included:
+1. **Yandex Music** — secure session, Liked tracks, playlists, cache-first persistence.
+2. **Local Library** — user-selected Windows folders indexed into the same MusicArk SQLite database.
 
-- secure persistent Yandex session;
-- account information;
-- Liked collection;
-- user playlist metadata;
-- opening one playlist and reading its ordered tracks;
-- local snapshots and offline fallback;
-- search and simple sorting;
-- current-collection refresh and full library metadata refresh;
-- logout cleanup.
+The local-library workflow is intentionally narrow:
 
-## Explicitly out of v0.3
+```text
+Add Folder → Scan → Read metadata → Persist index → Browse/Search/Sort
+```
 
-- standalone Python packaging or installer;
-- local folder scanner;
-- Yandex ↔ local matching;
-- missing-track analysis;
-- download system;
-- sync planner UI;
-- metadata editor;
+Supported local work includes persistent roots, incremental rescans, multiple artists as structured data, track details, error isolation, pagination-ready queries, and safe removal of index roots.
+
+## Explicitly out of scope for v0.4
+
+- Yandex ↔ local matching or fuzzy matching;
+- missing-track detection;
+- downloading or sync;
 - playback/player;
-- Yandex playlist creation/editing/upload;
-- destructive local-file operations.
+- metadata editing;
+- moving, renaming, deleting, or transcoding audio files;
+- duplicate cleanup;
+- album-art downloading;
+- standalone packaging/installer.
 
-These belong to later roadmap stages and must not be pulled into v0.3 opportunistically.
+## Safety requirement
 
-## Success scenario
-
-Launch → saved session → cached Likes + playlist list → open real playlist → cached/network tracks → search/sort → refresh → restart → offline cached access → logout.
+The supported v0.4 Local Library is read-only with respect to user audio files. Destructive filesystem operations are not part of this product slice.

@@ -1,45 +1,85 @@
-# MusicArk Architecture
+# MusicArk Architecture — v0.4
 
-## v0.3 runtime boundary
+## Product boundaries
+
+MusicArk now has two independent library boundaries which share application storage but not provider logic:
 
 ```text
-Flutter desktop UI
-        ↓ JSON subprocess bridge
+Flutter desktop
+        ↓
 musicark.mvp_bridge
-        ↓
-YandexLibraryService
-   ┌────┴──────────────┐
-   ↓                   ↓
-CredentialStore   collection repositories
-   ↓                   ↓
-OS keyring          SQLite
-                       ↑
-YandexMusicProvider ───┘
-        ↓
-   yandex-music
+   ├───────────────────────────────┐
+   ↓                               ↓
+YandexLibraryService        LocalLibraryService
+   ↓                               ↓
+YandexMusicProvider         LocalLibraryScanner
+   ↓                               ↓
+Yandex API/cache            LocalMetadataReader
+                                   ↓
+                           LocalLibraryStorageRepository
+                                   ↓
+                              shared SQLite
 ```
 
-Rules:
+Local Library is deliberately **not** implemented as `YandexMusicProvider` or another remote provider. Common models may be reused in later matching work, but filesystem scanning remains a separate boundary.
 
-1. Flutter uses bridge DTOs only; it never imports provider or SQLite concepts.
-2. `YandexLibraryService` orchestrates session, network phase, cache writes, and cache-first responses.
-3. `YandexMusicProvider` is the only layer that sees third-party `yandex-music` objects.
-4. Tokens stay in the OS credential store. SQLite stores account/library data, never the token.
-5. Provider collections are universal: `liked` and `playlist:<external_id>` share the same snapshot/item tables.
-6. Playlist item `position` is authoritative for original/Yandex order.
-7. Full library refresh is metadata-oriented and does not eagerly request every playlist body.
-8. Network failures must not erase the last successful local snapshot.
+## Local Library layers
 
-## SQLite collection model
+### Flutter
 
-`provider_collection_snapshots` stores collection identity, metadata, source order, activity, metadata refresh time, and content refresh time. `provider_collection_items` stores ordered item payloads.
+`LocalLibraryPage` owns presentation only: roots, search/sort controls, scan state, results, metadata details. Native folder selection is hidden behind `LocalFolderPicker` so widget tests do not require a real Windows dialog.
 
-Migration `1.2.0` is additive over v0.2 (`1.1.1`) and is idempotent. Existing `yandex_music/liked` rows and items are preserved. No user database deletion is required.
+### Process bridge
 
-Playlist deletion after a successful index refresh removes that playlist snapshot and its membership so stale remote collections do not remain active indefinitely.
+`musicark.mvp_bridge` exposes:
 
-## Compatibility
+- `local_roots`;
+- `local_root_add`;
+- `local_root_remove`;
+- `local_scan`;
+- `local_tracks`;
+- `local_track`;
+- `local_stats`.
 
-`PersistentLibraryService`, legacy `YandexMusicProvider.list_playlists()`, and bridge aliases `refresh`/`cached` remain for v0.2/legacy tests. New desktop flows use `YandexLibraryService` and the v0.3 commands.
+Root paths are supplied to the child process through `MUSICARK_LOCAL_ROOT` rather than command-line string concatenation. Track listing exposes `limit`, `offset`, `search`, `sort`, and optional root filtering.
 
-See [[providers]], [[storage]], and [[v0.3.0]].
+### LocalLibraryService
+
+Coordinates roots, scanning, storage queries, and shared DB initialization. It does not contain filesystem traversal or metadata parsing details.
+
+### LocalLibraryScanner
+
+- recursive `os.walk`;
+- supported-extension filtering;
+- no directory symlink/reparse traversal;
+- one-file errors are isolated;
+- current filesystem state is compared against DB state by normalized path;
+- unchanged means file size and `mtime_ns` are unchanged;
+- metadata is read only for new/changed files;
+- missing rows are deleted only after a complete traversal; if the walker reports an access error, deletion reconciliation is suppressed for that scan.
+
+### LocalMetadataReader
+
+Read-only `mutagen` adapter. It extracts matching-relevant tags and technical fields. Missing title falls back to filename stem; missing artist remains empty at storage level and is rendered as `Unknown Artist` in UI.
+
+### LocalLibraryStorageRepository
+
+Uses the existing MusicArk SQLite database. Scan writes use a single transaction with `executemany` and a temporary `seen` table rather than per-file commits or O(n²) comparisons.
+
+## SQLite v1.3.0
+
+`local_library_roots` stores persistent source folders. Existing `local_audio_files` is extended with root identity, normalized path, timestamps, structured metadata, technical fields, availability, and last-seen data. `normalized_path` has a unique index.
+
+Legacy local rows are preserved as `availability='legacy'` instead of being treated as current v0.4 source-root records. Yandex `provider_collection_*` tables are not dropped or cleared by the migration.
+
+## Windows path policy
+
+Comparison keys use a resolved path, normalized separators, trailing-separator removal, and `casefold()` to model case-insensitive Windows identity. Duplicate and parent/child overlapping roots are rejected for a predictable one-file/one-index-row rule.
+
+## Safety boundary
+
+The v0.4 supported path contains no audio-file write API. It never renames, moves, deletes, edits tags, transcodes, or changes artwork. Removing a root deletes only MusicArk index records.
+
+## Preparation for v0.5
+
+Structured local fields include `title`, `artists`, `album`, `duration`, and `path`, which can later be compared with Yandex track snapshots without coupling the two storage domains in v0.4.

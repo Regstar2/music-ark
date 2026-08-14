@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 
+from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.storage.database import initialize_database
 from musicark.variant.models import AudioComparison, ReferenceAudio
 from musicark.variant.reference import ReferenceAcquisitionError
@@ -57,6 +58,24 @@ class _CountingVerifier:
             altered_regions=(),
             window_count=20,
         )
+
+
+class _FakeDownloadInfo:
+    codec = "mp3"
+    bitrate_in_kbps = 320
+
+    def get_direct_link(self) -> str:
+        return "https://example.invalid/reference.mp3"
+
+
+class _FakeTrack:
+    def get_download_info(self):  # type: ignore[no-untyped-def]
+        return [_FakeDownloadInfo()]
+
+
+class _FakeClient:
+    def tracks(self, ids):  # type: ignore[no-untyped-def]
+        return [_FakeTrack()]
 
 
 class VariantReferenceAcquisitionTests(unittest.TestCase):
@@ -179,6 +198,12 @@ class VariantReferenceAcquisitionTests(unittest.TestCase):
         self.assertEqual(0, acquirer.calls)
         self.assertEqual(1, verifier.calls)
         self.assertEqual(str(self.reference), result["referencePath"])
+
+    def test_yandex_download_provider_uses_download_info_direct_link_method(self) -> None:
+        provider = YandexMusicDownloadProvider(token="test-token")
+        provider._build_client = lambda: _FakeClient()  # type: ignore[method-assign]
+        link = provider._resolve_direct_link("12345", quality="best")
+        self.assertEqual("https://example.invalid/reference.mp3", link)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 import time
 from typing import Any
@@ -13,8 +11,10 @@ from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.database import initialize_database
 from musicark.storage.matching_storage import MatchingStorageRepository
 from .candidates import CandidateGenerator
+from .fingerprints import provider_fingerprint
 from .indexer import LocalMatchIndex
 from .input import MatchingInputRepository
+from .manual_state import ManualMatchState
 from .models import MatchDecision, MatchMethod, MatchStatus, ScoredCandidate
 from .policy import AMBIGUITY_MARGIN, AUTO_MATCH_THRESHOLD, CONFLICT_THRESHOLD, MATCHER_VERSION
 from .result_queries import MatchingResultQueries
@@ -41,6 +41,7 @@ class MatchingService:
         self._scorer = MatchScorer()
         self._local_index = LocalMatchIndex(self._database_path)
         self._input = MatchingInputRepository(self._database_path)
+        self._manual_state = ManualMatchState(self._database_path)
 
     def _resolve_database_path(self) -> Path:
         config = load_config(self._base_dir)
@@ -52,22 +53,11 @@ class MatchingService:
 
     @staticmethod
     def _provider_fingerprint(provider: dict[str, Any]) -> str:
-        payload = provider["payload"]
-        relevant = {
-            "provider_id": provider["provider_id"],
-            "external_id": provider["external_id"],
-            "title": payload.get("title"),
-            "artists": payload.get("artists") or [],
-            "album_title": payload.get("album_title") or payload.get("album"),
-            "duration_seconds": payload.get("duration_seconds"),
-        }
-        encoded = json.dumps(
-            relevant,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return provider_fingerprint(
+            str(provider["provider_id"]),
+            str(provider["external_id"]),
+            dict(provider["payload"]),
+        )
 
     def summary(self) -> dict[str, Any]:
         self._input.sync_provider_tracks(self._provider_id)
@@ -86,19 +76,28 @@ class MatchingService:
         )
         batch: list[MatchDecision] = []
         unchanged = 0
+        manual_stale = 0
 
         for provider in providers:
             provider_id = str(provider["provider_id"])
             external_id = str(provider["external_id"])
-            provider_fingerprint = self._provider_fingerprint(provider)
+            provider_fp = self._provider_fingerprint(provider)
             existing = self._repository.get_existing_result(provider_id, external_id)
             if existing and existing.get("manual"):
-                unchanged += 1
+                if self._manual_state.mark_if_stale(
+                    provider_id,
+                    external_id,
+                    existing,
+                    provider_fp,
+                ):
+                    manual_stale += 1
+                else:
+                    unchanged += 1
                 continue
             if (
                 existing
                 and int(existing.get("matcher_version") or 0) == MATCHER_VERSION
-                and existing.get("provider_fingerprint") == provider_fingerprint
+                and existing.get("provider_fingerprint") == provider_fp
                 and existing.get("local_fingerprint") == local_fingerprint
             ):
                 unchanged += 1
@@ -114,7 +113,7 @@ class MatchingService:
             batch.append(
                 self._decide(
                     provider,
-                    provider_fingerprint=provider_fingerprint,
+                    provider_fingerprint=provider_fp,
                     local_fingerprint=local_fingerprint,
                     candidates=scored,
                 )
@@ -133,6 +132,7 @@ class MatchingService:
             "conflicts": summary["conflicts"],
             "unmatched": summary["unmatched"],
             "unchanged": unchanged,
+            "manualStale": manual_stale,
             "invalidated": stale,
             "indexUpdates": index_updates,
             "comparisons": generator.comparison_count,
@@ -149,7 +149,7 @@ class MatchingService:
                 details=(
                     f"matched={result['matched']} conflicts={result['conflicts']} "
                     f"unmatched={result['unmatched']} unchanged={unchanged} "
-                    f"comparisons={generator.comparison_count}"
+                    f"manual_stale={manual_stale} comparisons={generator.comparison_count}"
                 ),
             )
         )
@@ -253,10 +253,12 @@ class MatchingService:
                 for candidate in item["candidates"]
                 if candidate.get("status") != "rejected"
             ]
+        item["stale"] = self._manual_state.is_stale_reason(str(item.get("reason") or ""))
         return {"result": item}
 
     def accept(self, external_id: str, local_file_id: int) -> dict[str, Any]:
         self._repository.accept_manual(self._provider_id, external_id, int(local_file_id))
+        self._manual_state.store_reference(self._provider_id, external_id)
         self._audit.append(
             AuditEvent(
                 event_type="matching_manual_accept",

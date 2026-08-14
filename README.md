@@ -1,55 +1,92 @@
 # MusicArk
 
-MusicArk — desktop-приложение для работы с личной музыкальной коллекцией. Текущий перезапуск проекта ограничен одним сценарием: вход по токену Яндекс Музыки и просмотр списка «Мне нравится».
+MusicArk — Windows desktop-приложение для личной музыкальной коллекции. Версия **v0.2.0 Persistent Library** развивает подтверждённый v0.1.0: после первого входа токен сохраняется в защищённом системном хранилище, библиотека «Мне нравится» кэшируется локально и доступна сразу при следующем запуске.
 
 **Русский** · [English](README_EN.md)
 
-## О проекте
+## Что работает в v0.2.0
 
-Проект перезапущен с минимального вертикального среза вместо развития прежнего набора несвязанных функций. Существующие модули загрузок, синхронизации, метаданных и локальной библиотеки остаются в репозитории как legacy-код, но не входят в поддерживаемый MVP-сценарий.
+- первый вход по Yandex Music OAuth token;
+- безопасное сохранение токена через Python `keyring` / Windows Credential Locker;
+- автоматическое восстановление сессии после перезапуска приложения;
+- SQLite snapshot списка «Мне нравится»;
+- показ локального cache до завершения сетевого refresh;
+- сохранение cache при сетевой ошибке;
+- корректное удаление из cache треков, убранных из «Мне нравится»;
+- отображение количества треков и времени последнего обновления;
+- поиск по названию, исполнителю и альбому;
+- сортировка по порядку Яндекса, названию или исполнителю;
+- refresh с подсчётом добавленных/удалённых треков;
+- logout с удалением сохранённого токена и cached library.
 
-Текущий поток:
+Legacy download/matching/sync/metadata/local-library код остаётся в репозитории, но не возвращён в поддерживаемый UI.
+
+## Архитектура
 
 ```text
 Flutter UI
-  -> token in child-process environment
-  -> Python mvp_bridge
-  -> YandexMusicProvider
-  -> yandex-music
-  -> liked tracks
-  -> Flutter list
+  -> musicark.mvp_bridge subprocess
+       -> SystemCredentialStore -> Windows Credential Locker
+       -> PersistentLibraryService
+            -> YandexMusicProvider -> yandex-music
+            -> LikedCacheRepository -> SQLite
 ```
 
-## Статус проекта
+Токен при первом входе передаётся дочернему Python-процессу через environment, а не через argv. После успешного входа следующие процессы получают его из системного credential store. В SQLite токен не записывается.
 
-Стадия: **MVP restart, v0.1.0**.
+## Требования
 
-В текущей ветке реализованы UI входа, проверка токена и чтение «Мне нравится». Автоматические тесты добавлены, но реальный сетевой сценарий с пользовательским токеном и Windows release-сборка должны быть пройдены вручную на машине разработчика.
+- Windows;
+- Python >= 3.10;
+- Flutter SDK с Windows desktop support;
+- Visual Studio C++ toolchain, требуемый `flutter doctor`;
+- Git;
+- интернет для первого входа и обновления Яндекс Музыки.
 
-## Возможности
+## Полный запуск из новой PowerShell-сессии
 
-- ввод токена Яндекс Музыки непосредственно в приложении;
-- проверка токена через существующий `YandexMusicProvider`;
-- получение текущего списка «Мне нравится» без записи в SQLite;
-- отображение названия, исполнителей и альбома;
-- обновление списка без повторного ввода токена в рамках текущего запуска;
-- выход с очисткой токена из состояния UI;
-- передача токена Python-процессу через environment, а не через аргументы командной строки;
-- поиск корня репозитория из debug/release-каталога и поддержка `MUSICARK_REPO_ROOT`;
-- поиск Python через `python`, `py -3` и `MUSICARK_PYTHON`.
-
-## Быстрый старт
-
-### 1. Клонирование
+Для текущей ветки разработки v0.2.0:
 
 ```powershell
-git clone https://github.com/Regstar2/music-ark.git
-cd music-ark
+cd C:\Base\projects\MusicArk
+
+git fetch origin
+git switch agent/v0.2-persistent-library
+git pull
+
+git status
+
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m pip install -r requirements-yandex.txt
+
+python -c "import keyring; print(keyring.get_keyring())"
+python -c "import musicark.mvp_bridge; print('MVP bridge import OK')"
+python -m unittest discover -s tests -p "test_*.py" -v
+
+$env:Path = "C:\Base\tools\flutter\bin;$env:Path"
+$env:MUSICARK_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+$env:MUSICARK_REPO_ROOT = (Get-Location).Path
+
+flutter --version
+flutter doctor -v
+flutter config --enable-windows-desktop
+flutter devices
+
+cd .\ui\musicark_ui
+
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d windows
 ```
 
-### 2. Python-окружение
+Если `.venv` ещё не существует:
 
 ```powershell
+cd C:\Base\projects\MusicArk
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -57,155 +94,73 @@ python -m pip install -e .
 python -m pip install -r requirements-yandex.txt
 ```
 
-Если PowerShell запрещает активацию скрипта, можно выполнить команды через Python из venv напрямую:
+## Что проверить вручную
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m pip install -r requirements-yandex.txt
-$env:MUSICARK_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
-```
+### Первый запуск
 
-### 3. Flutter-зависимости
+1. Открывается форма входа.
+2. Ввести действующий Yandex Music token.
+3. Нажать **«Войти»**.
+4. Проверить имя аккаунта и несколько треков.
+5. Проверить поиск и сортировку.
 
-```powershell
-cd ui\musicark_ui
-flutter doctor
-flutter config --enable-windows-desktop
-flutter pub get
-```
+### Повторный запуск
 
-### 4. Запуск для тестирования
+Закрыть приложение и снова выполнить:
 
 ```powershell
 flutter run -d windows
 ```
 
-В открывшемся окне:
+Ожидаемый результат:
 
-1. вставьте токен Яндекс Музыки;
-2. нажмите **«Войти»**;
-3. проверьте имя аккаунта;
-4. проверьте список **«Мне нравится»**;
-5. нажмите кнопку обновления и убедитесь, что список загружается повторно;
-6. нажмите **«Выйти»** и убедитесь, что приложение возвращается к форме входа.
+- token повторно не запрашивается;
+- cached «Мне нравится» появляется автоматически;
+- затем MusicArk выполняет refresh;
+- время последнего обновления меняется после успешного запроса.
 
-## Требования
+### Offline/cache
 
-- Windows desktop;
-- Python `>=3.10` — ограничение из `pyproject.toml`;
-- Flutter SDK с Dart, удовлетворяющим `^3.11.5` из `ui/musicark_ui/pubspec.yaml`;
-- стандартный Windows C++ toolchain, который требует Flutter для desktop-сборки;
-- доступ к Яндекс Музыке и действующий токен;
-- интернет-соединение для реального входа и чтения библиотеки.
+После хотя бы одного успешного входа временно отключить сеть и снова запустить приложение.
 
-Проверьте среду перед запуском:
+Ожидаемый результат: cached library остаётся на экране, а ошибка refresh не удаляет список.
 
-```powershell
-python --version
-flutter --version
-flutter doctor -v
-```
+### Удаление из «Мне нравится»
 
-## Установка
+1. Удалить тестовый трек из «Мне нравится» в Яндекс Музыке.
+2. Нажать refresh в MusicArk.
+3. Проверить, что трек исчез из локального snapshot и счётчик показывает удаление.
 
-Для разработки используется editable-установка Python-пакета:
+### Logout
 
-```powershell
-python -m pip install -e .
-python -m pip install -r requirements-yandex.txt
-```
+Нажать **«Выйти»**.
 
-Flutter-пакеты устанавливаются отдельно:
+Ожидаемый результат:
+
+- token удаляется из Windows credential store;
+- локальный snapshot очищается;
+- появляется форма входа;
+- при следующем запуске нужен token.
+
+## Тесты
+
+Python:
 
 ```powershell
-cd ui\musicark_ui
-flutter pub get
+cd C:\Base\projects\MusicArk
+.\.venv\Scripts\Activate.ps1
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Приложение пока не поставляется как автономный installer.
-
-## Использование
-
-### Вход
-
-Токен вводится в поле приложения. После успешной проверки MusicArk запрашивает список лайков через `YandexMusicProvider.list_tracks()`.
-
-### Обновление
-
-Кнопка обновления повторно получает «Мне нравится» с тем же токеном, который хранится только в памяти текущего процесса Flutter.
-
-### Выход
-
-Кнопка **«Выйти»** удаляет токен из состояния текущего UI и возвращает форму входа.
-
-## Конфигурация
-
-Поддерживаются две переменные среды для среды разработки:
-
-| Переменная | Назначение |
-|---|---|
-| `MUSICARK_PYTHON` | полный путь к Python, если `python` или `py -3` недоступны через PATH |
-| `MUSICARK_REPO_ROOT` | полный путь к корню репозитория, если автоматический поиск не подходит |
-
-Пример:
+Flutter:
 
 ```powershell
-$env:MUSICARK_PYTHON = "C:\Path\To\python.exe"
-$env:MUSICARK_REPO_ROOT = "C:\Base\music-ark"
-flutter run -d windows
+cd C:\Base\projects\MusicArk\ui\musicark_ui
+flutter analyze
+flutter test
 ```
 
-Токен не требуется записывать в `.env`, `local.properties` или README для нового MVP-сценария.
-
-## Приватность
-
-MVP не сохраняет введённый токен в SQLite или конфигурационный файл. Flutter передаёт токен дочернему Python-процессу через переменную среды `YANDEX_MUSIC_TOKEN`.
-
-Python-провайдер по-прежнему поддерживает legacy fallback к `YANDEX_MUSIC_TOKEN` процесса и `local.properties`, но новый UI не записывает токен в эти места.
-
-Не публикуйте токен в Git, issue, логах или скриншотах.
-
-## Диагностика
-
-### Python не найден
-
-Проверьте:
-
-```powershell
-python --version
-py -3 --version
-```
-
-Если Python установлен, но не находится автоматически:
-
-```powershell
-$env:MUSICARK_PYTHON = "C:\Path\To\python.exe"
-```
-
-### Корень репозитория не найден
-
-Запускайте приложение из checkout репозитория либо задайте:
-
-```powershell
-$env:MUSICARK_REPO_ROOT = "C:\Path\To\music-ark"
-```
-
-### Яндекс отклоняет токен
-
-Введите новый действующий токен. MusicArk не исправляет и не обновляет токен автоматически.
-
-### Flutter не видит Windows
-
-Проверьте:
-
-```powershell
-flutter config --enable-windows-desktop
-flutter doctor -v
-flutter devices
-```
-
-## Сборка
+## Release build
 
 Из `ui\musicark_ui`:
 
@@ -217,78 +172,79 @@ flutter test
 flutter build windows --release
 ```
 
-Ожидаемый исполняемый файл по текущему `windows/CMakeLists.txt`:
-
-```text
-ui\musicark_ui\build\windows\x64\runner\Release\musicark_ui.exe
-```
-
-Запуск собранной версии:
+Запуск:
 
 ```powershell
+$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
+$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
 .\build\windows\x64\runner\Release\musicark_ui.exe
 ```
 
-Release-сборка пока **не автономна**: ей нужен доступ к checkout репозитория и установленному Python с зависимостями MusicArk.
+Release-сборка v0.2.0 пока не автономна: рядом по-прежнему требуется checkout MusicArk и установленный Python environment. Автономная Windows-упаковка запланирована отдельной версией.
 
-## Тестирование
+## Где хранятся данные
 
-### Python
+При стандартном запуске из checkout:
 
-Из корня репозитория:
+- настройки/SQLite: `C:\Base\projects\MusicArk\.musicark\`;
+- cache «Мне нравится»: таблицы `provider_collection_snapshots` и `provider_collection_items` в MusicArk SQLite;
+- Yandex token: системный credential store Windows, service `MusicArk`, username `yandex_music_token`.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m unittest discover -s tests -p "test_*.py" -v
-```
+Token не должен появляться в Git, README, issue, логах или SQLite.
 
-Если venv не активирован:
+## Диагностика
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
-```
-
-### Flutter
+Проверка credential backend:
 
 ```powershell
-cd ui\musicark_ui
-flutter analyze
-flutter test
+python -m keyring diagnose
+python -c "import keyring; print(keyring.get_keyring())"
 ```
 
-### Полная ручная проверка MVP
-
-После автоматических тестов:
+Проверка Python:
 
 ```powershell
-flutter run -d windows
+python --version
+where.exe python
 ```
 
-Пройдите сценарий из [`docs/testing/manual-test-plan.md`](docs/testing/manual-test-plan.md).
+Если Flutter не найден:
+
+```powershell
+$env:Path = "C:\Base\tools\flutter\bin;$env:Path"
+flutter --version
+```
+
+Если MusicArk не находит Python:
+
+```powershell
+$env:MUSICARK_PYTHON = "C:\Base\projects\MusicArk\.venv\Scripts\python.exe"
+```
+
+Если не определяется корень checkout:
+
+```powershell
+$env:MUSICARK_REPO_ROOT = "C:\Base\projects\MusicArk"
+```
 
 ## Документация
 
-- [Идея проекта](docs/product/idea.md)
-- [Scope MVP](docs/product/mvp-scope.md)
+- [MVP scope](docs/product/mvp-scope.md)
 - [Roadmap](docs/product/roadmap.md)
-- [Технологический стек](docs/architecture/tech-stack.md)
-- [Архитектура](docs/architecture/architecture.md)
-- [Индекс версий](docs/versions/versions-index.md)
-- [v0.1.0](docs/versions/v0.1.0.md)
-- [Ручной тест-план](docs/testing/manual-test-plan.md)
+- [Architecture](docs/architecture/architecture.md)
+- [Versions](docs/versions/versions-index.md)
+- [Manual test plan](docs/testing/manual-test-plan.md)
 - [Release checklist](docs/release/release-checklist.md)
 - [CHANGELOG](CHANGELOG.md)
 
-## Ограничения
+## Ограничения v0.2.0
 
-- токен пока вводится вручную;
-- токен не сохраняется между запусками;
-- release-сборка не включает Python runtime и Python-зависимости;
-- UI поддерживает только сценарий Яндекс Музыки → «Мне нравится»;
-- legacy-модули загрузки, sync, metadata и local library не считаются частью текущего MVP;
-- реальный сетевой сценарий зависит от неофициальной библиотеки `yandex-music`;
-- сборка и реальный вход должны быть подтверждены на Windows-машине разработчика после получения изменений.
+- поддерживается только Яндекс Музыка → «Мне нравится»;
+- token всё ещё вводится вручную при первом входе;
+- release build не включает Python runtime;
+- playlists/download/matching/sync/local-library UI ещё не возвращены;
+- интеграция с Яндекс Музыкой использует неофициальную библиотеку `yandex-music`.
 
 ## Лицензия
 
-Лицензия проекта пока не выбрана, и файла `LICENSE` в репозитории нет. До выбора лицензии не следует считать код разрешённым для распространения или повторного использования.
+Файл `LICENSE` пока отсутствует.

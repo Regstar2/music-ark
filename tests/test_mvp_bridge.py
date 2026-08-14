@@ -1,8 +1,7 @@
-"""Tests for the minimal Yandex likes MVP bridge."""
+"""Tests for the persistent-library process bridge."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -11,55 +10,39 @@ import sys
 import tempfile
 import unittest
 
-from musicark.mvp_bridge import liked_tracks, login
-from musicark.providers.models import ProviderTrack
+from musicark.mvp_bridge import bootstrap, cached, login, logout, refresh
 
 
-@dataclass
-class FakeYandexProvider:
-    account: dict
-    tracks: list[ProviderTrack]
+class FakePersistentLibraryService:
+    def bootstrap(self) -> dict:
+        return {"session": {"hasStoredToken": True}, "library": {"source": "cache", "count": 1}}
 
-    def auth_check(self) -> dict:
-        return self.account
+    def login(self, token: str) -> dict:
+        return {
+            "session": {"hasStoredToken": True, "tokenEchoForTest": token},
+            "library": {"source": "network", "count": 1},
+        }
 
-    def list_tracks(self) -> list[ProviderTrack]:
-        return self.tracks
+    def refresh(self) -> dict:
+        return {"session": {"hasStoredToken": True}, "library": {"source": "network", "count": 2}}
+
+    def cached(self) -> dict:
+        return {"session": {"hasStoredToken": True}, "library": {"source": "cache", "count": 1}}
+
+    def logout(self) -> dict:
+        return {"session": {"hasStoredToken": False}, "library": {"source": "none", "count": 0}}
 
 
 class MvpBridgeTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.provider = FakeYandexProvider(
-            account={
-                "provider": "yandex_music",
-                "providerUserId": "u-1",
-                "displayName": "Tester",
-            },
-            tracks=[
-                ProviderTrack(
-                    provider_id="yandex_music",
-                    external_id="101",
-                    title="Courtesy Call",
-                    artists=("Thousand Foot Krutch",),
-                    album_title="The End Is Where We Begin",
-                    duration_seconds=238,
-                )
-            ],
-        )
+        self.service = FakePersistentLibraryService()
 
-    def test_login_returns_account_identity(self) -> None:
-        result = login(provider=self.provider)
-        self.assertEqual(result["providerUserId"], "u-1")
-        self.assertEqual(result["displayName"], "Tester")
-
-    def test_liked_tracks_returns_track_payload(self) -> None:
-        result = liked_tracks(provider=self.provider)
-        self.assertEqual(result["count"], 1)
-        self.assertEqual(result["tracks"][0]["external_id"], "101")
-        self.assertEqual(
-            result["tracks"][0]["artists"],
-            ("Thousand Foot Krutch",),
-        )
+    def test_bridge_actions_delegate_to_persistent_service(self) -> None:
+        self.assertEqual(bootstrap(self.service)["library"]["source"], "cache")
+        self.assertEqual(login("secret", self.service)["session"]["tokenEchoForTest"], "secret")
+        self.assertEqual(refresh(self.service)["library"]["count"], 2)
+        self.assertEqual(cached(self.service)["library"]["source"], "cache")
+        self.assertFalse(logout(self.service)["session"]["hasStoredToken"])
 
     def test_module_entrypoint_imports_cleanly_in_fresh_process(self) -> None:
         """Catch import-order cycles hidden by in-process unittest discovery."""

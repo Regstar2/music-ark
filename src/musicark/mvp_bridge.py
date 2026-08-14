@@ -1,24 +1,26 @@
-"""Minimal JSON bridge for the MusicArk Yandex likes MVP.
+"""JSON process bridge for the MusicArk persistent-library desktop MVP.
 
-The desktop UI passes the Yandex token through the child-process environment.
-The token is never accepted as a command-line argument and is never persisted
-by this module.
+The sign-in token is accepted only through the child-process environment. After
+successful sign-in it is stored by ``SystemCredentialStore`` and later bridge
+commands use the OS credential store; no token is placed in argv or SQLite.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 from enum import Enum
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
 
+from musicark.core.errors import StorageError
+from musicark.credentials import CredentialStoreError
+from musicark.persistent_library import PersistentLibraryService
 from musicark.providers.yandex_music_provider import (
     YandexAuthenticationError,
     YandexMusicError,
-    YandexMusicProvider,
     YandexTokenMissingError,
 )
 
@@ -27,26 +29,29 @@ class BridgeErrorCode(str, Enum):
     TOKEN_MISSING = "token_missing"
     AUTHENTICATION_FAILED = "authentication_failed"
     YANDEX_REQUEST_FAILED = "yandex_request_failed"
+    CREDENTIAL_STORE_FAILED = "credential_store_failed"
+    CACHE_FAILED = "cache_failed"
     UNEXPECTED_ERROR = "unexpected_error"
 
 
-def login(
-    base_dir: Path | None = None,
-    provider: YandexMusicProvider | None = None,
-) -> dict[str, Any]:
-    """Validate the current Yandex token and return account identity."""
-    active_provider = provider or YandexMusicProvider(base_dir=base_dir)
-    return active_provider.auth_check()
+def bootstrap(service: PersistentLibraryService) -> dict[str, Any]:
+    return service.bootstrap()
 
 
-def liked_tracks(
-    base_dir: Path | None = None,
-    provider: YandexMusicProvider | None = None,
-) -> dict[str, Any]:
-    """Return the current user's liked tracks without writing them to SQLite."""
-    active_provider = provider or YandexMusicProvider(base_dir=base_dir)
-    tracks = [asdict(track) for track in active_provider.list_tracks()]
-    return {"count": len(tracks), "tracks": tracks}
+def login(token: str, service: PersistentLibraryService) -> dict[str, Any]:
+    return service.login(token)
+
+
+def refresh(service: PersistentLibraryService) -> dict[str, Any]:
+    return service.refresh()
+
+
+def cached(service: PersistentLibraryService) -> dict[str, Any]:
+    return service.cached()
+
+
+def logout(service: PersistentLibraryService) -> dict[str, Any]:
+    return service.logout()
 
 
 def _error_payload(exc: Exception) -> dict[str, Any]:
@@ -56,15 +61,14 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
         code = BridgeErrorCode.AUTHENTICATION_FAILED
     elif isinstance(exc, YandexMusicError):
         code = BridgeErrorCode.YANDEX_REQUEST_FAILED
+    elif isinstance(exc, CredentialStoreError):
+        code = BridgeErrorCode.CREDENTIAL_STORE_FAILED
+    elif isinstance(exc, StorageError):
+        code = BridgeErrorCode.CACHE_FAILED
     else:
         code = BridgeErrorCode.UNEXPECTED_ERROR
 
-    return {
-        "error": {
-            "code": code.value,
-            "message": str(exc),
-        }
-    }
+    return {"error": {"code": code.value, "message": str(exc)}}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,9 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-dir",
         default=None,
-        help="Repository root used by provider-local configuration fallback.",
+        help="Repository root used for MusicArk local data/config resolution.",
     )
-    parser.add_argument("command", choices=("login", "likes"))
+    parser.add_argument(
+        "command",
+        choices=("bootstrap", "login", "refresh", "cached", "logout"),
+    )
     return parser
 
 
@@ -84,11 +91,19 @@ def main() -> int:
     base_dir = Path(args.base_dir) if args.base_dir else None
 
     try:
-        if args.command == "login":
-            payload = login(base_dir=base_dir)
+        service = PersistentLibraryService(base_dir=base_dir)
+        if args.command == "bootstrap":
+            payload = bootstrap(service)
+        elif args.command == "login":
+            token = os.getenv("YANDEX_MUSIC_TOKEN", "").strip()
+            payload = login(token, service)
+        elif args.command == "refresh":
+            payload = refresh(service)
+        elif args.command == "cached":
+            payload = cached(service)
         else:
-            payload = liked_tracks(base_dir=base_dir)
-    except Exception as exc:  # noqa: BLE001 - bridge converts errors at process boundary.
+            payload = logout(service)
+    except Exception as exc:  # noqa: BLE001 - process boundary normalizes errors.
         print(json.dumps(_error_payload(exc), ensure_ascii=False))
         return 2
 

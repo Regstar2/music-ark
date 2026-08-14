@@ -1,16 +1,83 @@
-"""Forward-only SQLite schema migrations for desktop MVP (v1.0).
-
-Reads/writes ``app_metadata.schema_version``.
-"""
+"""Forward-only SQLite schema migrations for MusicArk desktop data."""
 
 from __future__ import annotations
 
 from typing import Callable
 
 _SCHEMA_KEY = "schema_version"
-
-# Semantic versions applied in ascending order once when the stored version is strictly older.
 MigrationFn = Callable[[object], None]  # sqlite3.Connection
+
+_SNAPSHOT_COLUMNS = {
+    "provider_id",
+    "collection_id",
+    "account_json",
+    "item_count",
+    "refreshed_at",
+}
+_ITEM_COLUMNS = {
+    "provider_id",
+    "collection_id",
+    "external_id",
+    "position",
+    "payload_json",
+}
+
+
+def _table_columns(c: object, table_name: str) -> set[str]:
+    rows = c.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _create_persistent_library_tables(c: object) -> None:
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_collection_snapshots (
+            provider_id TEXT NOT NULL,
+            collection_id TEXT NOT NULL,
+            account_json TEXT NOT NULL DEFAULT '{}',
+            item_count INTEGER NOT NULL DEFAULT 0,
+            refreshed_at TEXT NOT NULL,
+            PRIMARY KEY(provider_id, collection_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_collection_items (
+            provider_id TEXT NOT NULL,
+            collection_id TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(provider_id, collection_id, external_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_provider_collection_items_position
+        ON provider_collection_items(provider_id, collection_id, position)
+        """
+    )
+
+
+def _repair_persistent_library_tables(c: object) -> None:
+    """Repair cache-only tables created by older experimental local schemas.
+
+    These tables contain rebuildable provider cache data only. If an older
+    local experiment created a table with the same name but incompatible
+    columns, preserving it would make the v0.2 INSERT statements fail forever.
+    """
+    snapshot_columns = _table_columns(c, "provider_collection_snapshots")
+    item_columns = _table_columns(c, "provider_collection_items")
+
+    if snapshot_columns and not _SNAPSHOT_COLUMNS.issubset(snapshot_columns):
+        c.execute("DROP TABLE provider_collection_snapshots")
+    if item_columns and not _ITEM_COLUMNS.issubset(item_columns):
+        c.execute("DROP TABLE provider_collection_items")
+
+    _create_persistent_library_tables(c)
+
 
 MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     (
@@ -23,6 +90,14 @@ MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
                 """
             ),
         ),
+    ),
+    (
+        "1.1.0",
+        (_create_persistent_library_tables,),
+    ),
+    (
+        "1.1.1",
+        (_repair_persistent_library_tables,),
     ),
 ]
 

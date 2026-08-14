@@ -1,7 +1,8 @@
 """Decoded-audio comparison primitives for v0.5.1 variant detection.
 
-The module deliberately avoids byte/codec hashes. ffmpeg normalizes supported input
-formats to one mono signed-16 PCM stream; comparison then operates on decoded audio.
+The module deliberately avoids byte/codec hashes. A bundled ffmpeg runtime
+normalizes supported input formats to one mono signed-16 PCM stream;
+comparison then operates on decoded audio.
 """
 
 from __future__ import annotations
@@ -47,9 +48,26 @@ class AudioDecoder(ABC):
     def decode(self, path: Path) -> DecodedAudio: ...
 
 
+def _resolve_ffmpeg_executable() -> str | None:
+    """Prefer MusicArk's packaged ffmpeg binary, then fall back to PATH.
+
+    ``imageio-ffmpeg`` publishes platform wheels containing an ffmpeg binary on
+    supported desktop targets. This keeps audio verification self-contained for
+    packaged/dev installs and removes the requirement for users to install
+    ffmpeg separately.
+    """
+
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe  # type: ignore[import-not-found]
+
+        return str(get_ffmpeg_exe())
+    except (ImportError, RuntimeError, OSError):
+        return shutil.which("ffmpeg")
+
+
 class FfmpegAudioDecoder(AudioDecoder):
     def __init__(self, executable: str | None = None) -> None:
-        self._executable = executable or shutil.which("ffmpeg")
+        self._executable = executable if executable is not None else _resolve_ffmpeg_executable()
 
     @property
     def available(self) -> bool:
@@ -57,7 +75,7 @@ class FfmpegAudioDecoder(AudioDecoder):
 
     def decode(self, path: Path) -> DecodedAudio:
         if not self._executable:
-            raise AudioDecoderUnavailable("Аудиосравнение недоступно: ffmpeg не найден")
+            raise AudioDecoderUnavailable("Аудиосравнение недоступно: встроенный декодер не найден")
         if not path.is_file():
             raise AudioDecodeError(f"Audio file is missing: {path}")
         command = [

@@ -68,7 +68,10 @@ void main() {
     bridge.variants['201'] = variantFixture(
       'altered',
       similarity: 0.94,
-      reasons: const ['localized_audio_differences'],
+      reasons: const [
+        'localized_audio_differences',
+        'possible_clean_or_censored_variant',
+      ],
       segments: const [
         {
           'startSeconds': 72.0,
@@ -92,6 +95,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('variant-detail-status')), findsOneWidget);
     expect(find.text('Status: ALTERED'), findsOneWidget);
+    expect(find.text('• Обнаружены локальные отличия в аудио.'), findsOneWidget);
+    expect(
+      find.text('• Возможна версия с цензурой или без цензуры.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('possible_clean_or_censored_variant'), findsNothing);
     expect(find.byKey(const Key('variant-altered-region-0')), findsOneWidget);
     expect(find.text('1:12–1:14 (31%)'), findsOneWidget);
   });

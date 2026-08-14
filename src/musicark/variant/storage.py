@@ -212,25 +212,31 @@ class VariantStorageRepository:
     ) -> dict[str, Any]:
         page_limit = max(1, min(int(limit), 1000))
         page_offset = max(0, int(offset))
-        where = ["tvr.provider_id=?"]
+        where = ["tvr.provider_id=?", "mr.status='matched'", "mr.local_file_id=tvr.local_file_id"]
         params: list[Any] = [provider_id]
         valid_statuses = {item.value for item in VariantStatus}
         if status in valid_statuses:
             where.append("tvr.status=?")
             params.append(status)
         where_sql = " AND ".join(where)
+        active_from = """
+            FROM track_variant_results tvr
+            JOIN matching_results mr
+              ON mr.provider_id=tvr.provider_id
+             AND mr.external_id=tvr.external_id
+        """
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 total = int(
                     conn.execute(
-                        f"SELECT COUNT(*) FROM track_variant_results tvr WHERE {where_sql}",
+                        f"SELECT COUNT(*) {active_from} WHERE {where_sql}",
                         params,
                     ).fetchone()[0]
                 )
                 rows = conn.execute(
                     f"""
                     SELECT tvr.external_id, tvr.local_file_id
-                    FROM track_variant_results tvr
+                    {active_from}
                     WHERE {where_sql}
                     ORDER BY tvr.updated_at DESC, tvr.external_id
                     LIMIT ? OFFSET ?
@@ -264,10 +270,14 @@ class VariantStorageRepository:
                 )
                 rows = conn.execute(
                     """
-                    SELECT status, COUNT(*)
-                    FROM track_variant_results
-                    WHERE provider_id=?
-                    GROUP BY status
+                    SELECT tvr.status, COUNT(*)
+                    FROM track_variant_results tvr
+                    JOIN matching_results mr
+                      ON mr.provider_id=tvr.provider_id
+                     AND mr.external_id=tvr.external_id
+                     AND mr.local_file_id=tvr.local_file_id
+                    WHERE tvr.provider_id=? AND mr.status='matched'
+                    GROUP BY tvr.status
                     """,
                     (provider_id,),
                 ).fetchall()

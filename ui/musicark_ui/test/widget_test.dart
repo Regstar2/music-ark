@@ -1,26 +1,27 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/main.dart';
 
 void main() {
-  testWidgets('desktop app renders dashboard shell', (WidgetTester tester) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 1200));
+  testWidgets('login loads liked tracks', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
     await tester.pumpWidget(
       const MusicArkDesktopApp(bridge: FakeMusicArkBridge()),
     );
+
+    expect(find.text('Вход в Яндекс Музыку'), findsOneWidget);
+    expect(find.text('Мне нравится'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'test-token');
+    await tester.tap(find.text('Войти'));
     await tester.pumpAndSettle();
 
-    expect(find.text('MusicArk Desktop v1.0'), findsOneWidget);
-    expect(find.text('Dashboard'), findsAtLeastNWidgets(1));
-    expect(find.text('Run Yandex Scan'), findsOneWidget);
+    expect(find.text('Мне нравится'), findsOneWidget);
+    expect(find.text('Tester'), findsOneWidget);
+    expect(find.text('Courtesy Call'), findsOneWidget);
+    expect(find.textContaining('Thousand Foot Krutch'), findsOneWidget);
+
     await tester.binding.setSurfaceSize(null);
   });
 }

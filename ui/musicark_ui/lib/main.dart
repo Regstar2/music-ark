@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'app_strings.dart';
+
 void main() {
   runApp(const MusicArkDesktopApp());
 }
@@ -10,14 +12,17 @@ void main() {
 class MusicArkDesktopApp extends StatelessWidget {
   const MusicArkDesktopApp({super.key, this.bridge});
 
-  final MusicArkBridge? bridge;
+  final MusicArkBridgeClient? bridge;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MusicArk Desktop MVP',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue)),
-      home: MusicArkHomePage(bridge: bridge ?? const MusicArkBridge()),
+      title: AppStrings.appTitle,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
+      ),
+      home: MusicArkHomePage(bridge: bridge ?? MusicArkBridge()),
     );
   }
 }
@@ -25,987 +30,331 @@ class MusicArkDesktopApp extends StatelessWidget {
 class MusicArkHomePage extends StatefulWidget {
   const MusicArkHomePage({super.key, required this.bridge});
 
-  final MusicArkBridge bridge;
+  final MusicArkBridgeClient bridge;
 
   @override
   State<MusicArkHomePage> createState() => _MusicArkHomePageState();
 }
 
 class _MusicArkHomePageState extends State<MusicArkHomePage> {
-  late final MusicArkBridge _bridge;
-  final TextEditingController _localScanPathController = TextEditingController();
-  final TextEditingController _dbPathController = TextEditingController();
-  final TextEditingController _logLevelController = TextEditingController();
+  final TextEditingController _tokenController = TextEditingController();
 
-  /// Metadata Editor (v0.10)
-  final TextEditingController _metaFileIdController = TextEditingController();
-  final TextEditingController _metaTitleController = TextEditingController();
-  final TextEditingController _metaArtistController = TextEditingController();
-  final TextEditingController _metaAlbumController = TextEditingController();
-  final TextEditingController _metaTrackController = TextEditingController();
-  final TextEditingController _metaYearController = TextEditingController();
-  final TextEditingController _metaGenreController = TextEditingController();
-  final TextEditingController _metaCoverPathController = TextEditingController();
-  final TextEditingController _metaBulkIdsController = TextEditingController();
-  bool _metaWriteConfirmed = false;
-  bool _metaClearCover = false;
-  String? _metaResolvedPathHint;
-
-  /// Experimental Yandex upload (v0.11); persisted in `.musicark/config.json`.
-  bool _experimentalYandexUpload = false;
-  final TextEditingController _uploadProbeLocalIdController = TextEditingController();
-  final TextEditingController _uploadProbeOriginalIdController = TextEditingController();
-  bool _uploadProbeConfirmed = false;
-
-  /// v1.0 MVP dashboard shortcuts (bridge actions).
-  final TextEditingController _mvpTrackIdController = TextEditingController();
-  final TextEditingController _mvpDlFolderController =
-      TextEditingController(text: '.musicark/downloads/yandex');
-  final TextEditingController _mvpDlQualityController =
-      TextEditingController(text: 'best');
-  final TextEditingController _mvpPlanIdController = TextEditingController();
-  bool _mvpDownloadConfirmed = false;
-  bool _mvpSafeSyncConfirmed = false;
-
-  int _tabIndex = 0;
-  bool _loading = true;
-  bool _runningAction = false;
-  String? _error;
-  Map<String, dynamic> _snapshot = const {};
-
-  static const List<_NavItem> _tabs = [
-    _NavItem('Dashboard', Icons.dashboard),
-    _NavItem('Collection', Icons.library_music),
-    _NavItem('Local Library', Icons.folder),
-    _NavItem('Providers', Icons.cloud),
-    _NavItem('Download Queue', Icons.download),
-    _NavItem('Sync Plan', Icons.sync_alt),
-    _NavItem('Conflicts', Icons.warning_amber),
-    _NavItem('Logs', Icons.receipt_long),
-    _NavItem('Metadata', Icons.edit_note),
-    _NavItem('Settings', Icons.settings),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _bridge = widget.bridge;
-    _refresh();
-  }
+  bool _busy = false;
+  bool _tokenVisible = false;
+  String? _sessionToken;
+  String? _errorMessage;
+  String? _errorDetails;
+  Map<String, dynamic>? _account;
+  List<Map<String, dynamic>> _tracks = const [];
 
   @override
   void dispose() {
-    _localScanPathController.dispose();
-    _dbPathController.dispose();
-    _logLevelController.dispose();
-    _metaFileIdController.dispose();
-    _metaTitleController.dispose();
-    _metaArtistController.dispose();
-    _metaAlbumController.dispose();
-    _metaTrackController.dispose();
-    _metaYearController.dispose();
-    _metaGenreController.dispose();
-    _metaCoverPathController.dispose();
-    _metaBulkIdsController.dispose();
-    _uploadProbeLocalIdController.dispose();
-    _uploadProbeOriginalIdController.dispose();
-    _mvpTrackIdController.dispose();
-    _mvpDlFolderController.dispose();
-    _mvpDlQualityController.dispose();
-    _mvpPlanIdController.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
 
-  Future<void> _refresh() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final snapshot = await _bridge.snapshot();
-      final hints = snapshot['mvp_hints'];
-      if (hints is Map<String, dynamic>) {
-        final lp = hints['latest_sync_plan_id']?.toString();
-        if (lp != null &&
-            lp.isNotEmpty &&
-            _mvpPlanIdController.text.trim().isEmpty) {
-          _mvpPlanIdController.text = lp;
-        }
-      }
-      _dbPathController.text = (snapshot['settings']?['database_path'] ?? '').toString();
-      _logLevelController.text = (snapshot['settings']?['log_level'] ?? '').toString();
-      final sx = snapshot['settings'];
-      final rawExp =
-          sx is Map<String, dynamic> ? sx['experimental_yandex_upload'] : null;
-      final expOn =
-          rawExp == true ||
-          rawExp == 1 ||
-          (rawExp is String &&
-              {'true', '1', 'yes', 'on'}.contains(rawExp.trim().toLowerCase()));
+  Future<void> _signIn() async {
+    final token = _tokenController.text.trim();
+    if (token.isEmpty) {
       setState(() {
-        _snapshot = snapshot;
-        _experimentalYandexUpload = expOn;
+        _errorMessage = AppStrings.tokenRequired;
+        _errorDetails = null;
       });
-    } catch (err) {
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _errorMessage = null;
+      _errorDetails = null;
+    });
+
+    try {
+      final account = await widget.bridge.login(token);
+      final likes = await widget.bridge.likes(token);
+      final tracks = _parseTracks(likes);
+
+      if (!mounted) return;
       setState(() {
-        _error = '$err';
+        _sessionToken = token;
+        _account = account;
+        _tracks = tracks;
+        _tokenController.clear();
+      });
+    } on MusicArkBridgeException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = _messageForBridgeError(error.code);
+        _errorDetails = error.message;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = AppStrings.unexpectedError;
+        _errorDetails = error.toString();
       });
     } finally {
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _runAction(String name, {String? path}) async {
+  Future<void> _refreshLikes() async {
+    final token = _sessionToken;
+    if (token == null || token.isEmpty) return;
+
     setState(() {
-      _runningAction = true;
-      _error = null;
+      _busy = true;
+      _errorMessage = null;
+      _errorDetails = null;
     });
+
     try {
-      await _bridge.action(name, path: path);
+      final likes = await widget.bridge.likes(token);
+      if (mounted) setState(() => _tracks = _parseTracks(likes));
+    } on MusicArkBridgeException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Action `$name` completed.')),
-        );
+        setState(() {
+          _errorMessage = _messageForBridgeError(error.code);
+          _errorDetails = error.message;
+        });
       }
-      await _refresh();
-    } catch (err) {
-      setState(() {
-        _error = '$err';
-      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = AppStrings.unexpectedError;
+          _errorDetails = error.toString();
+        });
+      }
     } finally {
-      setState(() {
-        _runningAction = false;
-      });
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _saveSettings() async {
+  List<Map<String, dynamic>> _parseTracks(Map<String, dynamic> likes) {
+    final rawTracks = likes['tracks'];
+    if (rawTracks is! List) return const [];
+    return rawTracks
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
+  void _logout() {
     setState(() {
-      _runningAction = true;
-      _error = null;
+      _sessionToken = null;
+      _account = null;
+      _tracks = const [];
+      _errorMessage = null;
+      _errorDetails = null;
+      _tokenController.clear();
     });
-    try {
-      await _bridge.updateSettings(
-        databasePath: _dbPathController.text.trim(),
-        logLevel: _logLevelController.text.trim(),
-        experimentalYandexUpload: _experimentalYandexUpload,
-      );
-      await _refresh();
-    } catch (err) {
-      setState(() {
-        _error = '$err';
-      });
-    } finally {
-      setState(() {
-        _runningAction = false;
-      });
+  }
+
+  String _messageForBridgeError(String code) {
+    switch (code) {
+      case 'token_missing':
+        return AppStrings.tokenMissing;
+      case 'authentication_failed':
+        return AppStrings.authenticationFailed;
+      case 'yandex_request_failed':
+        return AppStrings.yandexRequestFailed;
+      case 'python_not_found':
+        return AppStrings.pythonNotFound;
+      case 'repo_root_not_found':
+        return AppStrings.repoRootNotFound;
+      default:
+        return AppStrings.unexpectedError;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final body = _loading
-        ? const Center(child: CircularProgressIndicator())
-        : _error != null
-            ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-            : _buildTabBody();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('MusicArk Desktop v1.0'),
-        actions: [
-          IconButton(onPressed: _runningAction ? null : _refresh, icon: const Icon(Icons.refresh)),
-        ],
-      ),
-      body: Row(
-        children: [
-          NavigationRail(
-            selectedIndex: _tabIndex,
-            onDestinationSelected: (idx) => setState(() {
-              _tabIndex = idx;
-            }),
-            labelType: NavigationRailLabelType.all,
-            destinations: _tabs
-                .map((item) => NavigationRailDestination(icon: Icon(item.icon), label: Text(item.title)))
-                .toList(),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
+      appBar: AppBar(title: const Text(AppStrings.appTitle)),
+      body: _account == null ? _buildLogin() : _buildLikes(),
+    );
+  }
+
+  Widget _buildLogin() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(24),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildActionBar(),
+                  Text(
+                    AppStrings.loginTitle,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 12),
-                  Expanded(child: body),
+                  Text(AppStrings.loginDescription),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: _tokenController,
+                    obscureText: !_tokenVisible,
+                    enabled: !_busy,
+                    onSubmitted: (_) {
+                      if (!_busy) _signIn();
+                    },
+                    decoration: InputDecoration(
+                      labelText: AppStrings.tokenLabel,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        onPressed: _busy
+                            ? null
+                            : () => setState(
+                                  () => _tokenVisible = !_tokenVisible,
+                                ),
+                        icon: Icon(
+                          _tokenVisible ? Icons.visibility_off : Icons.visibility,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _busy ? null : _signIn,
+                    child: Text(_busy ? AppStrings.signingIn : AppStrings.signIn),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    _ErrorPanel(
+                      message: _errorMessage!,
+                      details: _errorDetails,
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildActionBar() {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+  Widget _buildLikes() {
+    final displayName =
+        (_account?['displayName'] ?? _account?['providerUserId'] ?? '').toString();
+
+    return Column(
       children: [
-        ElevatedButton(
-          onPressed: _runningAction ? null : () => _runAction('scan_yandex'),
-          child: const Text('Run Yandex Scan'),
-        ),
-        SizedBox(
-          width: 260,
-          child: TextField(
-            controller: _localScanPathController,
-            decoration: const InputDecoration(labelText: 'Local scan path'),
-          ),
-        ),
-        ElevatedButton(
-          onPressed: _runningAction
-              ? null
-              : () => _runAction('scan_local', path: _localScanPathController.text.trim()),
-          child: const Text('Run Local Scan'),
-        ),
-        ElevatedButton(
-          onPressed: _runningAction ? null : () => _runAction('match_run'),
-          child: const Text('Run Matching'),
-        ),
-        ElevatedButton(
-          onPressed: _runningAction ? null : () => _runAction('sync_plan'),
-          child: const Text('Build Sync Plan'),
-        ),
-      ],
-    );
-  }
-
-  void _showJsonDialog(String title, Map<String, dynamic> data) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: 480,
-          child: SingleChildScrollView(
-            child: SelectableText(JsonEncoder.withIndent('  ').convert(data)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _runYandexAuthCheck() async {
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final res = await _bridge.action('yandex_auth_check');
-      if (!mounted) {
-        return;
-      }
-      _showJsonDialog('Yandex auth check', Map<String, dynamic>.from(res));
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Future<void> _runMvpDownloadEnqueue() async {
-    if (!_mvpDownloadConfirmed) {
-      setState(() => _error = 'Confirm enqueue and download first.');
-      return;
-    }
-    final ext = _mvpTrackIdController.text.trim();
-    if (ext.isEmpty) {
-      setState(() => _error = 'Enter a Yandex track external id.');
-      return;
-    }
-    final folder = _mvpDlFolderController.text.trim();
-    final qual = _mvpDlQualityController.text.trim().isEmpty
-        ? 'best'
-        : _mvpDlQualityController.text.trim();
-
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final payload = <String, dynamic>{
-        'confirm': true,
-        'external_id': ext,
-        'quality': qual,
-      };
-      if (folder.isNotEmpty) {
-        payload['target_folder'] = folder;
-      }
-      final res = await _bridge.action(
-        'download_enqueue_run',
-        payload: payload,
-      );
-      if (!mounted) {
-        return;
-      }
-      final task = res['task'];
-      final status = task is Map ? task['status'] : res.toString();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('download_enqueue_run: $status')),
-      );
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Future<void> _runMvpSafeSyncExecute() async {
-    if (!_mvpSafeSyncConfirmed) {
-      setState(() => _error = 'Confirm safe sync execution first.');
-      return;
-    }
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final rawPlan = _mvpPlanIdController.text.trim();
-      final payload = <String, dynamic>{
-        'confirm': true,
-        if (rawPlan.isNotEmpty) 'plan_id': rawPlan,
-      };
-      final res = await _bridge.action(
-        'sync_execute_safe',
-        payload: payload,
-      );
-      if (!mounted) {
-        return;
-      }
-      final sum = res['summary'] as Map?;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'sync_execute_safe: executed=${sum?['executed_count'] ?? '—'}, '
-            'skipped=${sum?['skipped_count'] ?? '—'}, errors=${sum?['error_count'] ?? '—'}',
-          ),
-        ),
-      );
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Widget _buildTabBody() {
-    switch (_tabIndex) {
-      case 0:
-        return _buildDashboard();
-      case 1:
-        return _buildTable(_listOfMaps('collection'));
-      case 2:
-        return _buildTable(_listOfMaps('local_library'));
-      case 3:
-        return _buildTable(_listOfMaps('providers'));
-      case 4:
-        return _buildTable(_listOfMaps('download_queue'));
-      case 5:
-        return _buildTable(_listOfMaps('sync_plans'));
-      case 6:
-        return _buildTable(_listOfMaps('conflicts'));
-      case 7:
-        return _buildTable(_listOfMaps('logs'));
-      case 8:
-        return _buildMetadataEditor();
-      case 9:
-        return _buildSettings();
-      default:
-        return const SizedBox.shrink();
-    }
-  }
-
-  Future<void> _loadMetadataFromDisk() async {
-    final raw = _metaFileIdController.text.trim();
-    final id = int.tryParse(raw);
-    if (id == null) {
-      setState(() => _error = 'Metadata: enter numeric local file id (from Local Library list).');
-      return;
-    }
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final row = await _bridge.action('metadata_get', payload: {'local_file_id': id});
-      final tags = row['tags'] as Map<String, dynamic>? ?? const {};
-      _metaTitleController.text = '${tags['title'] ?? ''}';
-      _metaArtistController.text = '${tags['artist'] ?? ''}';
-      _metaAlbumController.text = '${tags['album'] ?? ''}';
-      _metaTrackController.text = '${tags['track_number'] ?? ''}';
-      _metaYearController.text = '${tags['year'] ?? ''}';
-      _metaGenreController.text = '${tags['genre'] ?? ''}';
-      setState(() {
-        _metaResolvedPathHint = row['path']?.toString();
-        _metaClearCover = false;
-      });
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Future<void> _saveMetadataToDisk() async {
-    if (_metaResolvedPathHint == null) {
-      setState(() => _error = 'Load tags once so the bridge resolves the indexed path, then edit and save.');
-      return;
-    }
-    if (!_metaWriteConfirmed) {
-      setState(() => _error = 'Check the confirmation box before writing tags to disk.');
-      return;
-    }
-    final raw = _metaFileIdController.text.trim();
-    final id = int.tryParse(raw);
-    if (id == null) {
-      setState(() => _error = 'Metadata: invalid file id.');
-      return;
-    }
-    final payload = <String, dynamic>{
-      'confirm': true,
-      'local_file_id': id,
-      'title': _metaTitleController.text.trim(),
-      'artist': _metaArtistController.text.trim(),
-      'album': _metaAlbumController.text.trim(),
-      'genre': _metaGenreController.text.trim(),
-    };
-    final tr = _metaTrackController.text.trim();
-    if (tr.isNotEmpty) {
-      final tn = int.tryParse(tr.split('/').first.trim());
-      if (tn != null) {
-        payload['track_number'] = tn;
-      }
-    }
-    final y = _metaYearController.text.trim();
-    if (y.isNotEmpty) {
-      final yi = int.tryParse(y.length >= 4 ? y.substring(0, 4) : y);
-      if (yi != null) {
-        payload['year'] = yi;
-      }
-    }
-    final cov = _metaCoverPathController.text.trim();
-    if (cov.isNotEmpty) {
-      payload['cover_image_path'] = cov;
-    }
-    if (_metaClearCover) {
-      payload['clear_cover'] = true;
-    }
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final res = await _bridge.action('metadata_update', payload: payload);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              res['backup_path'] != null
-                  ? 'Saved. Backup: ${res['backup_path']}'
-                  : 'Metadata saved.',
-            ),
-          ),
-        );
-      }
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Future<void> _saveMetadataBulk() async {
-    if (!_metaWriteConfirmed) {
-      setState(() => _error = 'Check the confirmation box for bulk edits.');
-      return;
-    }
-    final parts = _metaBulkIdsController.text.trim().split(RegExp(r'[\s,;]+'));
-    final ids = <int>[];
-    for (final p in parts) {
-      if (p.isEmpty) {
-        continue;
-      }
-      final v = int.tryParse(p);
-      if (v == null) {
-        setState(() => _error = 'Bulk ids: invalid token "$p".');
-        return;
-      }
-      ids.add(v);
-    }
-    if (ids.length < 2) {
-      setState(() => _error = 'Bulk update needs at least two numeric ids (comma/space-separated).');
-      return;
-    }
-    final payload = <String, dynamic>{
-      'confirm': true,
-      'local_file_ids': ids,
-      'title': _metaTitleController.text.trim(),
-      'artist': _metaArtistController.text.trim(),
-      'album': _metaAlbumController.text.trim(),
-      'genre': _metaGenreController.text.trim(),
-    };
-    final tr = _metaTrackController.text.trim();
-    if (tr.isNotEmpty) {
-      final tn = int.tryParse(tr.split('/').first.trim());
-      if (tn != null) {
-        payload['track_number'] = tn;
-      }
-    }
-    final y = _metaYearController.text.trim();
-    if (y.isNotEmpty) {
-      final yi = int.tryParse(y.length >= 4 ? y.substring(0, 4) : y);
-      if (yi != null) {
-        payload['year'] = yi;
-      }
-    }
-    final cov = _metaCoverPathController.text.trim();
-    if (cov.isNotEmpty) {
-      payload['cover_image_path'] = cov;
-    }
-    if (_metaClearCover) {
-      payload['clear_cover'] = true;
-    }
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final report = await _bridge.action('metadata_bulk_update', payload: payload);
-      if (mounted) {
-        final okList = report['succeeded'] as List<dynamic>? ?? const [];
-        final badList = report['failed'] as List<dynamic>? ?? const [];
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Bulk: OK ${okList.length}, failed ${badList.length}.'),
-          ),
-        );
-      }
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Widget _buildMetadataEditor() {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
-      children: [
-        const Text(
-          'Loads tags from disk via mutagen (MP3, FLAC, M4A/AAC/MP4; OGG text-only, no cover). '
-          'A full-file backup copy is written under .musicark/metadata_backups before each save.',
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _metaFileIdController,
-          decoration: const InputDecoration(
-            labelText: 'Local file ID',
-            helperText: 'Same id shown in Local Library tab',
-          ),
-          keyboardType: TextInputType.number,
-        ),
-        const SizedBox(height: 8),
-        if (_metaResolvedPathHint != null) Text('Path: $_metaResolvedPathHint'),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ElevatedButton(
-              onPressed: _runningAction ? null : _loadMetadataFromDisk,
-              child: const Text('Load tags from file'),
-            ),
-            ElevatedButton(
-              onPressed: _runningAction ? null : _saveMetadataToDisk,
-              style: ElevatedButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('Save to file + DB'),
-            ),
-          ],
-        ),
-        TextField(controller: _metaTitleController, decoration: const InputDecoration(labelText: 'Title')),
-        TextField(controller: _metaArtistController, decoration: const InputDecoration(labelText: 'Artist')),
-        TextField(controller: _metaAlbumController, decoration: const InputDecoration(labelText: 'Album')),
-        TextField(
-          controller: _metaTrackController,
-          decoration: const InputDecoration(labelText: 'Track number'),
-          keyboardType: TextInputType.number,
-        ),
-        TextField(
-          controller: _metaYearController,
-          decoration: const InputDecoration(labelText: 'Year'),
-          keyboardType: TextInputType.number,
-        ),
-        TextField(controller: _metaGenreController, decoration: const InputDecoration(labelText: 'Genre')),
-        TextField(
-          controller: _metaCoverPathController,
-          decoration: const InputDecoration(
-            labelText: 'JPEG cover image path',
-            helperText: 'Optional; JPEG recommended for portability',
-          ),
-        ),
-        CheckboxListTile(
-          value: _metaClearCover,
-          onChanged: (v) => setState(() => _metaClearCover = v ?? false),
-          title: const Text('Clear embedded cover'),
-        ),
-        CheckboxListTile(
-          value: _metaWriteConfirmed,
-          onChanged: (v) => setState(() => _metaWriteConfirmed = v ?? false),
-          title: const Text('Confirm writing metadata to disk (required)'),
-          controlAffinity: ListTileControlAffinity.leading,
-        ),
-        const Divider(height: 32),
-        const Text(
-          'Bulk edit: Same field values applied to multiple files — each file is backed up. '
-          'Requires at least two ids.',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _metaBulkIdsController,
-          decoration: const InputDecoration(
-            labelText: 'Bulk IDs',
-            helperText: 'Comma or whitespace separated local file IDs',
-          ),
-        ),
-        const SizedBox(height: 8),
-        ElevatedButton(
-          onPressed: _runningAction ? null : _saveMetadataBulk,
-          child: const Text('Bulk apply fields'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDashboard() {
-    final dashboard =
-        (_snapshot['dashboard'] as Map<String, dynamic>? ?? const {});
-    final hints =
-        (_snapshot['mvp_hints'] as Map<String, dynamic>?) ?? const {};
-    final schema = hints['schema_version']?.toString() ?? '—';
-
-    var allZero = dashboard.isEmpty;
-    if (dashboard.isNotEmpty) {
-      allZero = true;
-      for (final v in dashboard.values) {
-        final n = v is int ? v : int.tryParse('$v') ?? 0;
-        if (n != 0) {
-          allZero = false;
-          break;
-        }
-      }
-    }
-
-    final cards = dashboard.entries
-        .map(
-          (entry) =>
-              _DashboardCard(title: entry.key, value: '${entry.value}'),
-        )
-        .toList();
-
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
-      children: [
-        Text(
-          'Stable desktop MVP (v1.0) — schema $schema',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Authenticate, scan remote and local collections, build a sync plan, then run downloads '
-          '(single track below or safe planner ops). Use the toolbar for bulk scans.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        if (allZero && !_loading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'Counts are zero — run Yandex / local scans from the bar above.',
-            ),
-          ),
-        Card(
+        Material(
+          elevation: 1,
           child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
               children: [
-                const Text(
-                  'Guided MVP',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.likedTracks,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      if (displayName.isNotEmpty) Text(displayName),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: _runningAction ? null : _runYandexAuthCheck,
-                      icon: const Icon(Icons.verified_user),
-                      label: const Text('Yandex auth check'),
+                Text(AppStrings.trackCount(_tracks.length)),
+                const SizedBox(width: 12),
+                IconButton(
+                  tooltip: AppStrings.refresh,
+                  onPressed: _busy ? null : _refreshLikes,
+                  icon: const Icon(Icons.refresh),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : _logout,
+                  child: const Text(AppStrings.logout),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_errorMessage != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: _ErrorPanel(
+              message: _errorMessage!,
+              details: _errorDetails,
+            ),
+          ),
+        Expanded(
+          child: _busy
+              ? const Center(child: CircularProgressIndicator())
+              : _tracks.isEmpty
+                  ? const Center(child: Text(AppStrings.emptyLikes))
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _tracks.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) =>
+                          _TrackTile(track: _tracks[index]),
                     ),
-                  ],
-                ),
-                const Divider(height: 24),
-                const Text(
-                  'Single-track download',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                TextField(
-                  controller: _mvpTrackIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'Yandex external track id',
-                  ),
-                ),
-                TextField(
-                  controller: _mvpDlFolderController,
-                  decoration:
-                      const InputDecoration(labelText: 'Target folder'),
-                ),
-                TextField(
-                  controller: _mvpDlQualityController,
-                  decoration:
-                      const InputDecoration(labelText: 'Quality hint'),
-                ),
-                CheckboxListTile(
-                  value: _mvpDownloadConfirmed,
-                  onChanged: (v) =>
-                      setState(() => _mvpDownloadConfirmed = v ?? false),
-                  title: const Text(
-                    'Confirm network download via downloadEnqueueRun',
-                  ),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-                ElevatedButton.icon(
-                  onPressed: _runningAction ? null : _runMvpDownloadEnqueue,
-                  icon: const Icon(Icons.cloud_download),
-                  label: const Text('download_enqueue_run'),
-                ),
-                const Divider(height: 24),
-                const Text(
-                  'Safe sync execute',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                TextField(
-                  controller: _mvpPlanIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'Plan id (empty → latest)',
-                  ),
-                ),
-                CheckboxListTile(
-                  value: _mvpSafeSyncConfirmed,
-                  onChanged: (v) =>
-                      setState(() => _mvpSafeSyncConfirmed = v ?? false),
-                  title: const Text('Confirm sync_execute_safe'),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-                ElevatedButton.icon(
-                  onPressed:
-                      _runningAction ? null : _runMvpSafeSyncExecute,
-                  icon: const Icon(Icons.play_circle_outline),
-                  label: const Text('sync_execute_safe'),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Counts',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
-          children: cards,
         ),
       ],
     );
-  }
-
-  Widget _buildSettings() {
-    return ListView(
-      children: [
-        TextField(
-          controller: _dbPathController,
-          decoration: const InputDecoration(labelText: 'Database path'),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _logLevelController,
-          decoration: const InputDecoration(labelText: 'Log level'),
-        ),
-        const SizedBox(height: 8),
-        SwitchListTile(
-          title: const Text('Experimental Yandex upload / restore probes (v0.11)'),
-          subtitle: const Text(
-            'Adds upload_candidate / replace_candidate to sync plans and enables probe actions.',
-          ),
-          value: _experimentalYandexUpload,
-          onChanged: (v) => setState(() => _experimentalYandexUpload = v),
-        ),
-        const SizedBox(height: 12),
-        ElevatedButton(
-          onPressed: _runningAction ? null : _saveSettings,
-          child: const Text('Save settings'),
-        ),
-        const Divider(height: 32),
-        const Text(
-          'Experimental upload probe (typically returns not_supported: yandex-music has no Client upload API)',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        TextField(
-          controller: _uploadProbeLocalIdController,
-          decoration: const InputDecoration(
-            labelText: 'Indexed local_file_id',
-          ),
-          keyboardType: TextInputType.number,
-        ),
-        TextField(
-          controller: _uploadProbeOriginalIdController,
-          decoration: const InputDecoration(labelText: 'Original Yandex track external id'),
-        ),
-        CheckboxListTile(
-          title: const Text('I confirm an explicit upload probe (may bill API / violate ToS risks)'),
-          value: _uploadProbeConfirmed,
-          onChanged: (v) => setState(() => _uploadProbeConfirmed = v ?? false),
-          controlAffinity: ListTileControlAffinity.leading,
-        ),
-        ElevatedButton(
-          onPressed: _runningAction ? null : _runExperimentalYandexProbe,
-          style: ElevatedButton.styleFrom(foregroundColor: Colors.deepOrange),
-          child: const Text('Run experimental_yandex_upload'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _runExperimentalYandexProbe() async {
-    if (!_experimentalYandexUpload) {
-      setState(() => _error = 'Enable the experimental toggle and Save settings first.');
-      return;
-    }
-    if (!_uploadProbeConfirmed) {
-      setState(() => _error = 'Confirm the upload probe checkbox.');
-      return;
-    }
-    final lid = int.tryParse(_uploadProbeLocalIdController.text.trim());
-    if (lid == null) {
-      setState(() => _error = 'Local file id must be a number.');
-      return;
-    }
-    final orig = _uploadProbeOriginalIdController.text.trim();
-    if (orig.isEmpty) {
-      setState(() => _error = 'Original external id is required.');
-      return;
-    }
-    setState(() {
-      _runningAction = true;
-      _error = null;
-    });
-    try {
-      final res = await _bridge.action(
-        'experimental_yandex_upload',
-        payload: {
-          'confirm': true,
-          'local_file_id': lid,
-          'original_external_id': orig,
-        },
-      );
-      if (!mounted) {
-        return;
-      }
-      final status = res['status'];
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('experimental_yandex_upload: $status (${res['mapping'] ?? ''})')),
-      );
-      await _refresh();
-    } catch (err) {
-      setState(() => _error = '$err');
-    } finally {
-      setState(() => _runningAction = false);
-    }
-  }
-
-  Widget _buildTable(List<Map<String, dynamic>> rows) {
-    if (rows.isEmpty) {
-      return const Center(child: Text('No data yet.'));
-    }
-    final columns = rows.first.keys.toList();
-    return ListView.builder(
-      itemCount: rows.length,
-      itemBuilder: (context, index) {
-        final row = rows[index];
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final col in columns)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text('$col: ${row[col]}'),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  List<Map<String, dynamic>> _listOfMaps(String key) {
-    final raw = _snapshot[key];
-    if (raw is! List) {
-      return const [];
-    }
-    return raw.map((item) => Map<String, dynamic>.from(item as Map)).toList();
   }
 }
 
-class _DashboardCard extends StatelessWidget {
-  const _DashboardCard({required this.title, required this.value});
+class _TrackTile extends StatelessWidget {
+  const _TrackTile({required this.track});
 
-  final String title;
-  final String value;
+  final Map<String, dynamic> track;
 
   @override
   Widget build(BuildContext context) {
+    final title = (track['title'] ?? '').toString().trim();
+    final rawArtists = track['artists'];
+    final artists = rawArtists is List
+        ? rawArtists.map((value) => value.toString()).join(', ')
+        : rawArtists?.toString() ?? '';
+    final album = (track['album_title'] ?? '').toString().trim();
+    final subtitleParts = <String>[
+      if (artists.isNotEmpty) artists else AppStrings.unknownArtist,
+      if (album.isNotEmpty) album,
+    ];
+
+    return ListTile(
+      leading: const Icon(Icons.music_note),
+      title: Text(title.isEmpty ? AppStrings.unknownTitle : title),
+      subtitle: Text(subtitleParts.join(' · ')),
+      dense: true,
+    );
+  }
+}
+
+class _ErrorPanel extends StatelessWidget {
+  const _ErrorPanel({required this.message, this.details});
+
+  final String message;
+  final String? details;
+
+  @override
+  Widget build(BuildContext context) {
+    final detailText = details?.trim();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(value, style: Theme.of(context).textTheme.headlineSmall),
+            Text(
+              message,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+            if (detailText != null && detailText.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              SelectableText(
+                detailText,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
       ),
@@ -1013,135 +362,195 @@ class _DashboardCard extends StatelessWidget {
   }
 }
 
-class _NavItem {
-  const _NavItem(this.title, this.icon);
-
-  final String title;
-  final IconData icon;
+abstract interface class MusicArkBridgeClient {
+  Future<Map<String, dynamic>> login(String token);
+  Future<Map<String, dynamic>> likes(String token);
 }
 
-class MusicArkBridge {
-  const MusicArkBridge();
+class MusicArkBridge implements MusicArkBridgeClient {
+  @override
+  Future<Map<String, dynamic>> login(String token) => _runBridge('login', token);
 
-  Future<Map<String, dynamic>> snapshot() {
-    return _runBridge(['snapshot']);
-  }
+  @override
+  Future<Map<String, dynamic>> likes(String token) => _runBridge('likes', token);
 
-  Future<Map<String, dynamic>> action(
-    String name, {
-    String? path,
-    Map<String, dynamic>? payload,
-  }) {
-    final args = ['action', '--name', name];
-    if (path != null && path.isNotEmpty) {
-      args.addAll(['--path', path]);
-    }
-    if (payload != null && payload.isNotEmpty) {
-      args.addAll(['--payload', jsonEncode(payload)]);
-    }
-    return _runBridge(args);
-  }
-
-  Future<Map<String, dynamic>> updateSettings({
-    required String databasePath,
-    required String logLevel,
-    required bool experimentalYandexUpload,
-  }) {
-    return _runBridge([
-      'settings-update',
-      '--database-path',
-      databasePath,
-      '--log-level',
-      logLevel,
-      '--experimental-yandex-upload',
-      experimentalYandexUpload ? 'true' : 'false',
-    ]);
-  }
-
-  Future<Map<String, dynamic>> _runBridge(List<String> bridgeArgs) async {
-    final repoRoot = Directory.current.parent.parent.absolute.path;
+  Future<Map<String, dynamic>> _runBridge(String command, String token) async {
+    final repoRoot = _resolveRepoRoot();
+    final python = await _resolvePythonCommand();
     final srcPath = '$repoRoot${Platform.pathSeparator}src';
     final existingPythonPath = Platform.environment['PYTHONPATH'];
-    final mergedPythonPath = (existingPythonPath == null || existingPythonPath.isEmpty)
-        ? srcPath
-        : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath';
-    final args = ['-m', 'musicark.platform_bridge', '--base-dir', repoRoot, ...bridgeArgs];
-    final bridgeEnv = <String, String>{
-      ...Platform.environment,
-      'PYTHONPATH': mergedPythonPath,
-      'PYTHONIOENCODING': 'utf-8',
-      'PYTHONUTF8': '1',
-    };
+    final mergedPythonPath =
+        existingPythonPath == null || existingPythonPath.isEmpty
+            ? srcPath
+            : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath';
+
     final result = await Process.run(
-      'python',
-      args,
-      runInShell: true,
+      python.executable,
+      [
+        ...python.prefixArgs,
+        '-m',
+        'musicark.mvp_bridge',
+        '--base-dir',
+        repoRoot,
+        command,
+      ],
+      runInShell: false,
       workingDirectory: repoRoot,
-      environment: bridgeEnv,
+      environment: {
+        ...Platform.environment,
+        'PYTHONPATH': mergedPythonPath,
+        'PYTHONIOENCODING': 'utf-8',
+        'PYTHONUTF8': '1',
+        'YANDEX_MUSIC_TOKEN': token,
+      },
     );
+
     final stdoutText = (result.stdout ?? '').toString().trim();
     final stderrText = (result.stderr ?? '').toString().trim();
-    if (result.exitCode != 0) {
-      throw Exception(stderrText.isEmpty ? stdoutText : stderrText);
-    }
-    if (stdoutText.isEmpty) {
-      return const {};
-    }
-    final payload = jsonDecode(stdoutText);
-    if (payload is Map<String, dynamic>) {
-      if (payload.containsKey('error')) {
-        throw Exception(payload['error'].toString());
+    Map<String, dynamic>? payload;
+    if (stdoutText.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(stdoutText);
+        if (decoded is Map) payload = Map<String, dynamic>.from(decoded);
+      } on FormatException {
+        payload = null;
       }
-      return payload;
     }
-    throw Exception('Bridge returned invalid payload.');
+
+    final rawError = payload?['error'];
+    if (rawError is Map) {
+      final error = Map<String, dynamic>.from(rawError);
+      throw MusicArkBridgeException(
+        (error['code'] ?? 'unexpected_error').toString(),
+        (error['message'] ?? stderrText).toString(),
+      );
+    }
+    if (result.exitCode != 0) {
+      throw MusicArkBridgeException(
+        'unexpected_error',
+        stderrText.isNotEmpty ? stderrText : stdoutText,
+      );
+    }
+    if (payload == null) {
+      throw MusicArkBridgeException(
+        'unexpected_error',
+        stderrText.isNotEmpty ? stderrText : 'Bridge returned invalid JSON.',
+      );
+    }
+    return payload;
+  }
+
+  String _resolveRepoRoot() {
+    final override = Platform.environment['MUSICARK_REPO_ROOT']?.trim();
+    if (override != null && override.isNotEmpty) {
+      final directory = Directory(override);
+      if (_looksLikeRepoRoot(directory)) return directory.absolute.path;
+    }
+
+    final candidates = <Directory>{
+      Directory.current.absolute,
+      File(Platform.resolvedExecutable).parent.absolute,
+    };
+    for (final start in candidates) {
+      var current = start;
+      while (true) {
+        if (_looksLikeRepoRoot(current)) return current.path;
+        final parent = current.parent;
+        if (parent.path == current.path) break;
+        current = parent;
+      }
+    }
+    throw const MusicArkBridgeException(
+      'repo_root_not_found',
+      AppStrings.repoRootNotFound,
+    );
+  }
+
+  bool _looksLikeRepoRoot(Directory directory) {
+    final separator = Platform.pathSeparator;
+    return File('${directory.path}${separator}pyproject.toml').existsSync() &&
+        File(
+          '${directory.path}${separator}src${separator}musicark${separator}mvp_bridge.py',
+        ).existsSync();
+  }
+
+  Future<_PythonCommand> _resolvePythonCommand() async {
+    final override = Platform.environment['MUSICARK_PYTHON']?.trim();
+    if (override != null && override.isNotEmpty) return _PythonCommand(override);
+
+    final candidates = Platform.isWindows
+        ? const [
+            _PythonCommand('python'),
+            _PythonCommand('py', prefixArgs: ['-3']),
+          ]
+        : const [
+            _PythonCommand('python3'),
+            _PythonCommand('python'),
+          ];
+
+    for (final candidate in candidates) {
+      try {
+        final result = await Process.run(
+          candidate.executable,
+          [...candidate.prefixArgs, '--version'],
+          runInShell: false,
+        );
+        if (result.exitCode == 0) return candidate;
+      } on ProcessException {
+        // Try the next known Python launcher.
+      }
+    }
+    throw const MusicArkBridgeException(
+      'python_not_found',
+      AppStrings.pythonNotFound,
+    );
   }
 }
 
-class FakeMusicArkBridge extends MusicArkBridge {
-  const FakeMusicArkBridge();
+class _PythonCommand {
+  const _PythonCommand(this.executable, {this.prefixArgs = const []});
+
+  final String executable;
+  final List<String> prefixArgs;
+}
+
+class MusicArkBridgeException implements Exception {
+  const MusicArkBridgeException(this.code, this.message);
+
+  final String code;
+  final String message;
 
   @override
-  Future<Map<String, dynamic>> snapshot() async {
-    return {
-      'dashboard': {'providers': 1, 'remote_tracks': 2, 'local_files': 3},
-      'mvp_hints': {
-        'schema_version': '1.0.0',
-        'latest_sync_plan_id': null,
+  String toString() => '$code: $message';
+}
+
+class FakeMusicArkBridge implements MusicArkBridgeClient {
+  const FakeMusicArkBridge({
+    this.account = const {
+      'provider': 'yandex_music',
+      'providerUserId': 'test-user',
+      'displayName': 'Tester',
+    },
+    this.tracks = const [
+      {
+        'provider_id': 'yandex_music',
+        'external_id': '101',
+        'title': 'Courtesy Call',
+        'artists': ['Thousand Foot Krutch'],
+        'album_title': 'The End Is Where We Begin',
       },
-      'collection': [],
-      'local_library': [],
-      'providers': [],
-      'download_queue': [],
-      'sync_plans': [],
-      'conflicts': [],
-      'logs': [],
-      'settings': {
-        'database_path': '.musicark/musicark.db',
-        'log_level': 'INFO',
-        'experimental_yandex_upload': false,
-      },
-    };
-  }
+    ],
+  });
+
+  final Map<String, dynamic> account;
+  final List<Map<String, dynamic>> tracks;
 
   @override
-  Future<Map<String, dynamic>> action(String name, {String? path, Map<String, dynamic>? payload}) async {
-    return {'status': 'ok', 'name': name, 'payload Echo': payload};
-  }
+  Future<Map<String, dynamic>> login(String token) async => account;
 
   @override
-  Future<Map<String, dynamic>> updateSettings({
-    required String databasePath,
-    required String logLevel,
-    required bool experimentalYandexUpload,
-  }) async {
-    return {
-      'saved_to': '.musicark/config.json',
-      'settings': {
-        'database_path': databasePath,
-        'log_level': logLevel,
-        'experimental_yandex_upload': experimentalYandexUpload,
-      },
-    };
-  }
+  Future<Map<String, dynamic>> likes(String token) async => {
+        'count': tracks.length,
+        'tracks': tracks,
+      };
 }

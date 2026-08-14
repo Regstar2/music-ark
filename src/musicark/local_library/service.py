@@ -108,14 +108,21 @@ class LocalLibraryService:
         sort: str = "artist",
         root_id: int | None = None,
     ) -> dict[str, Any]:
+        page_limit = max(1, min(int(limit), 5000))
+        page_offset = max(0, int(offset))
         items, total = self._repository.list_tracks(
-            limit=max(1, min(int(limit), 5000)),
-            offset=max(0, int(offset)),
+            limit=page_limit,
+            offset=page_offset,
             search=search,
             sort=sort,
             root_id=root_id,
         )
-        return {"count": total, "limit": limit, "offset": offset, "items": items}
+        return {
+            "count": total,
+            "limit": page_limit,
+            "offset": page_offset,
+            "items": items,
+        }
 
     def track(self, track_id: int) -> dict[str, Any]:
         item = self._repository.get_track(track_id)

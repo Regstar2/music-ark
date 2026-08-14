@@ -11,7 +11,7 @@ _DASH_TRANSLATION = str.maketrans({
 })
 _NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
 _ARTIST_SEPARATOR = re.compile(
-    r"\s*(?:,|;|&|\+|\bx\b|\bfeat(?:uring)?\.?\b|\bft\.?\b)\s*",
+    r"(?:\s*[,;&+]\s*|\s+\bx\b\s+|\s+\bfeat(?:uring)?\.?\s+|\s+\bft\.?\s+)",
     re.IGNORECASE,
 )
 _VERSION_MARKERS = frozenset(

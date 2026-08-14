@@ -8,7 +8,19 @@ from typing import Any
 from musicark.core.config import load_config
 from musicark.storage.database import initialize_database
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
+from .models import LocalLibraryRoot
 from .scanner import LocalLibraryScanner
+
+
+def _root_payload(root: LocalLibraryRoot) -> dict[str, Any]:
+    return {
+        "id": root.id,
+        "path": root.path,
+        "normalizedPath": root.normalized_path,
+        "enabled": root.enabled,
+        "createdAt": root.created_at,
+        "lastScannedAt": root.last_scanned_at,
+    }
 
 
 class LocalLibraryService:
@@ -33,29 +45,12 @@ class LocalLibraryService:
         return root / raw
 
     def roots(self) -> dict[str, Any]:
-        items = [root.__dict__ if hasattr(root, "__dict__") else {
-            "id": root.id,
-            "path": root.path,
-            "normalizedPath": root.normalized_path,
-            "enabled": root.enabled,
-            "createdAt": root.created_at,
-            "lastScannedAt": root.last_scanned_at,
-        } for root in self._repository.list_roots()]
+        items = [_root_payload(root) for root in self._repository.list_roots()]
         return {"count": len(items), "items": items}
 
     def add_root(self, path: str) -> dict[str, Any]:
         root = self._repository.add_root(Path(path))
-        return {
-            "root": {
-                "id": root.id,
-                "path": root.path,
-                "normalizedPath": root.normalized_path,
-                "enabled": root.enabled,
-                "createdAt": root.created_at,
-                "lastScannedAt": root.last_scanned_at,
-            },
-            "roots": self.roots(),
-        }
+        return {"root": _root_payload(root), "roots": self.roots()}
 
     def remove_root(self, root_id: int) -> dict[str, Any]:
         removed = self._repository.remove_root(root_id)
@@ -73,7 +68,28 @@ class LocalLibraryService:
         errors: list[dict[str, str]] = []
         per_root: list[dict[str, Any]] = []
         for root in roots:
-            result = self._scanner.scan(root)
+            try:
+                result = self._scanner.scan(root)
+            except ValueError as exc:
+                error = {"path": root.path, "error": str(exc)}
+                total["errors"] += 1
+                if len(errors) < 100:
+                    errors.append(error)
+                per_root.append(
+                    {
+                        "rootId": root.id,
+                        "path": root.path,
+                        "added": 0,
+                        "updated": 0,
+                        "removed": 0,
+                        "unchanged": 0,
+                        "errors": 1,
+                        "scanned": 0,
+                        "errorItems": [error],
+                    }
+                )
+                continue
+
             data = result.as_dict()
             per_root.append({"rootId": root.id, "path": root.path, **data})
             for key in total:

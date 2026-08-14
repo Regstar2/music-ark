@@ -153,8 +153,12 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       final removed = result['removed'] ?? 0;
       final unchanged = result['unchanged'] ?? 0;
       final errors = result['errors'] ?? 0;
+      final errorItems = _maps(result['errorItems']);
+      final firstError = errorItems.isEmpty
+          ? ''
+          : ' Первая ошибка: ${errorItems.first['path'] ?? 'unknown'} — ${errorItems.first['error'] ?? 'unknown error'}';
       setState(() {
-        _status = 'Сканирование завершено — добавлено: $added, обновлено: $updated, удалено: $removed, без изменений: $unchanged, ошибок: $errors.';
+        _status = 'Сканирование завершено — добавлено: $added, обновлено: $updated, удалено: $removed, без изменений: $unchanged, ошибок: $errors.$firstError';
       });
       await _reload(preserveStatus: true);
     } on MusicArkBridgeException catch (e) {

@@ -384,6 +384,24 @@ class FakeMatchingBridge implements MatchingBridgeClient {
     } else {
       items.sort((a, b) => ((b['confidence'] as num?) ?? 0).compareTo((a['confidence'] as num?) ?? 0));
     }
+    items = items.map((item) {
+      final copy = Map<String, dynamic>.from(item);
+      if (copy['status'] == 'matched' && copy['localFileId'] != null) {
+        final externalId = '${copy['externalId']}';
+        copy['variant'] = variants[externalId] ?? {
+          'providerId': 'yandex_music',
+          'externalId': externalId,
+          'localFileId': copy['localFileId'],
+          'status': 'not_checked',
+          'variantStatus': 'not_checked',
+          'variantReasons': ['audio_not_checked'],
+          'alteredSegments': <Map<String, dynamic>>[],
+          'audioSimilarity': null,
+          'referencePath': null,
+        };
+      }
+      return copy;
+    }).toList();
     final total = items.length;
     final safeOffset = offset < 0 ? 0 : (offset > total ? total : offset);
     final requestedEnd = safeOffset + (limit < 0 ? 0 : limit);
@@ -421,6 +439,7 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       'reason': 'manual_accept',
       'local': {'id': localFileId, ...local},
     };
+    variants.remove(externalId);
     return matchingResult(externalId);
   }
 
@@ -520,8 +539,8 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       items = items.where((item) => item['variantStatus'] == status).toList();
     }
     final total = items.length;
-    final safeOffset = offset.clamp(0, total);
-    final safeEnd = (safeOffset + limit).clamp(safeOffset, total);
+    final safeOffset = offset.clamp(0, total).toInt();
+    final safeEnd = (safeOffset + limit).clamp(safeOffset, total).toInt();
     return {
       'count': total,
       'limit': limit,

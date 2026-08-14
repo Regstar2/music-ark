@@ -919,7 +919,7 @@ class _TrackTile extends StatelessWidget {
         [
           artists.isEmpty ? AppStrings.unknownArtist : artists,
           if (album.isNotEmpty) album,
-          if (duration != null) duration,
+          ?duration,
           if (availability.isNotEmpty) availability,
         ].join(' · '),
       ),

@@ -440,7 +440,7 @@ class _ResultTile extends StatelessWidget {
           children: [
             _CompactBadge(label: statusLabel),
             if (status == 'matched') ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               SizedBox(
                 width: 100,
                 child: FittedBox(
@@ -473,7 +473,7 @@ class _CompactBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         child: Text(
           label,
           maxLines: 1,

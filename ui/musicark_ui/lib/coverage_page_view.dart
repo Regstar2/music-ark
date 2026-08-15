@@ -30,38 +30,46 @@ extension _CoveragePageView on _CoveragePageState {
             ],
           ),
         ),
-        if (_summary != null) _Summary(summary: summary),
+        if (_summary != null)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: _Summary(summary: summary),
+          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _StatusChip(
-                key: const Key('coverage-filter-missing'),
-                selected: _status == 'missing',
-                label: 'Missing ${_asInt(summary['missing'])}',
-                onSelected: () => _setStatus('missing'),
-              ),
-              _StatusChip(
-                key: const Key('coverage-filter-review'),
-                selected: _status == 'needs_review',
-                label: 'Review ${_asInt(summary['needsReview'])}',
-                onSelected: () => _setStatus('needs_review'),
-              ),
-              _StatusChip(
-                key: const Key('coverage-filter-not-analyzed'),
-                selected: _status == 'not_analyzed',
-                label: 'Not analyzed ${_asInt(summary['notAnalyzed'])}',
-                onSelected: () => _setStatus('not_analyzed'),
-              ),
-              _StatusChip(
-                key: const Key('coverage-filter-covered'),
-                selected: _status == 'covered',
-                label: 'Covered ${_asInt(summary['covered'])}',
-                onSelected: () => _setStatus('covered'),
-              ),
-            ],
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _StatusChip(
+                  key: const Key('coverage-filter-missing'),
+                  selected: _status == 'missing',
+                  label: 'Missing ${_asInt(summary['missing'])}',
+                  onSelected: () => _setStatus('missing'),
+                ),
+                const SizedBox(width: 8),
+                _StatusChip(
+                  key: const Key('coverage-filter-review'),
+                  selected: _status == 'needs_review',
+                  label: 'Review ${_asInt(summary['needsReview'])}',
+                  onSelected: () => _setStatus('needs_review'),
+                ),
+                const SizedBox(width: 8),
+                _StatusChip(
+                  key: const Key('coverage-filter-not-analyzed'),
+                  selected: _status == 'not_analyzed',
+                  label: 'Not analyzed ${_asInt(summary['notAnalyzed'])}',
+                  onSelected: () => _setStatus('not_analyzed'),
+                ),
+                const SizedBox(width: 8),
+                _StatusChip(
+                  key: const Key('coverage-filter-covered'),
+                  selected: _status == 'covered',
+                  label: 'Covered ${_asInt(summary['covered'])}',
+                  onSelected: () => _setStatus('covered'),
+                ),
+              ],
+            ),
           ),
         ),
         Padding(

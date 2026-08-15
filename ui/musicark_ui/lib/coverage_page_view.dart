@@ -158,7 +158,7 @@ extension _CoveragePageView on _CoveragePageState {
                   ],
                   onChanged: (value) {
                     if (value == null) return;
-                    setState(() {
+                    _updateView(() {
                       _sort = value;
                       _offset = 0;
                     });
@@ -189,7 +189,7 @@ extension _CoveragePageView on _CoveragePageState {
                     ),
                   ],
                   onChanged: (value) {
-                    setState(() {
+                    _updateView(() {
                       _userAction = value ?? '';
                       _offset = 0;
                     });
@@ -229,7 +229,7 @@ extension _CoveragePageView on _CoveragePageState {
                       ),
                     ],
                     onChanged: (value) {
-                      setState(() {
+                      _updateView(() {
                         _variantStatus = value ?? '';
                         _offset = 0;
                       });
@@ -268,18 +268,22 @@ extension _CoveragePageView on _CoveragePageState {
         Expanded(child: _body(summary)),
         _Pagination(
           offset: _offset,
-          limit: _pageSize,
+          limit: _pageLimit,
           total: _total,
           onPrevious: _offset <= 0 || _loading
               ? null
               : () {
-                  setState(() => _offset = _offset > _pageSize ? _offset - _pageSize : 0);
+                  _updateView(
+                    () => _offset = _offset > _pageLimit
+                        ? _offset - _pageLimit
+                        : 0,
+                  );
                   _reloadTracks(refreshSummary: false);
                 },
-          onNext: _offset + _pageSize >= _total || _loading
+          onNext: _offset + _pageLimit >= _total || _loading
               ? null
               : () {
-                  setState(() => _offset += _pageSize);
+                  _updateView(() => _offset += _pageLimit);
                   _reloadTracks(refreshSummary: false);
                 },
         ),
@@ -323,7 +327,7 @@ extension _CoveragePageView on _CoveragePageState {
           item: item,
           selected: _selected.contains(id),
           onSelectionChanged: item['coverageStatus'] == 'missing'
-              ? (value) => setState(() {
+              ? (value) => _updateView(() {
                   if (value) {
                     _selected.add(id);
                   } else {

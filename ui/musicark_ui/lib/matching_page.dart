@@ -433,18 +433,23 @@ class _ResultTile extends StatelessWidget {
       ),
       isThreeLine: true,
       trailing: SizedBox(
-        width: status == 'matched' ? 230 : 100,
-        child: Row(
+        width: 100,
+        child: Column(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _CompactBadge(label: statusLabel),
             if (status == 'matched') ...[
-              const SizedBox(width: 6),
-              Flexible(
-                child: _VariantBadge(
-                  key: Key('variant-badge-${row['externalId']}'),
-                  status: '${variant['variantStatus'] ?? 'not_checked'}',
+              const SizedBox(height: 4),
+              SizedBox(
+                width: 100,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: _VariantBadge(
+                    key: Key('variant-badge-${row['externalId']}'),
+                    status: '${variant['variantStatus'] ?? 'not_checked'}',
+                  ),
                 ),
               ),
             ],

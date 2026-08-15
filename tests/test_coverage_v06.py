@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -33,24 +34,25 @@ class CoverageV06Tests(unittest.TestCase):
         external_id: str | None = None,
         position: int = 0,
     ) -> None:
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO provider_collection_snapshots(
-                    provider_id, collection_id, account_json, item_count,
-                    refreshed_at, collection_type, external_id, title,
-                    metadata_json, source_position, active
-                ) VALUES (?, ?, '{}', 0, datetime('now'), ?, ?, ?, '{}', ?, 1)
-                """,
-                (
-                    PROVIDER,
-                    collection_id,
-                    collection_type,
-                    external_id,
-                    title,
-                    position,
-                ),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO provider_collection_snapshots(
+                        provider_id, collection_id, account_json, item_count,
+                        refreshed_at, collection_type, external_id, title,
+                        metadata_json, source_position, active
+                    ) VALUES (?, ?, '{}', 0, datetime('now'), ?, ?, ?, '{}', ?, 1)
+                    """,
+                    (
+                        PROVIDER,
+                        collection_id,
+                        collection_type,
+                        external_id,
+                        title,
+                        position,
+                    ),
+                )
 
     @staticmethod
     def _payload(
@@ -80,46 +82,48 @@ class CoverageV06Tests(unittest.TestCase):
         storage_external_id: str | None = None,
     ) -> dict[str, object]:
         payload = self._payload(external_id, title)
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO provider_collection_items(
-                    provider_id, collection_id, external_id, position, payload_json
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    PROVIDER,
-                    collection_id,
-                    storage_external_id or external_id,
-                    position,
-                    json.dumps(payload),
-                ),
-            )
-            conn.execute(
-                """
-                UPDATE provider_collection_snapshots
-                SET item_count=item_count+1
-                WHERE provider_id=? AND collection_id=?
-                """,
-                (PROVIDER, collection_id),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO provider_collection_items(
+                        provider_id, collection_id, external_id, position, payload_json
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        PROVIDER,
+                        collection_id,
+                        storage_external_id or external_id,
+                        position,
+                        json.dumps(payload),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE provider_collection_snapshots
+                    SET item_count=item_count+1
+                    WHERE provider_id=? AND collection_id=?
+                    """,
+                    (PROVIDER, collection_id),
+                )
         return payload
 
     def _local(self, name: str = "local.flac") -> int:
         path = self.root / name
         path.write_bytes(b"owned-test-audio")
-        with sqlite3.connect(self.db) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO local_audio_files(
-                    path, sha256, file_size, duration_seconds, codec, metadata_json,
-                    modified_ns, title, artists_json, album, availability, updated_at
-                ) VALUES (?, 'sha', ?, 180, 'flac', '{}', ?, 'Song', '["Artist"]',
-                          'Album', 'available', datetime('now'))
-                """,
-                (str(path), path.stat().st_size, path.stat().st_mtime_ns),
-            )
-            return int(cursor.lastrowid)
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO local_audio_files(
+                        path, sha256, file_size, duration_seconds, codec, metadata_json,
+                        modified_ns, title, artists_json, album, availability, updated_at
+                    ) VALUES (?, 'sha', ?, 180, 'flac', '{}', ?, 'Song', '["Artist"]',
+                              'Album', 'available', datetime('now'))
+                    """,
+                    (str(path), path.stat().st_size, path.stat().st_mtime_ns),
+                )
+                return int(cursor.lastrowid)
 
     def _automatic_result(
         self,
@@ -132,37 +136,38 @@ class CoverageV06Tests(unittest.TestCase):
     ) -> None:
         local_fp = MatchingStorageRepository(self.db).local_library_fingerprint()
         provider_fp = provider_fingerprint(PROVIDER, external_id, payload)
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO matching_results(
-                    provider_id, external_id, status, local_file_id, confidence,
-                    method, reason, matcher_version, provider_fingerprint,
-                    local_fingerprint, manual
-                ) VALUES (?, ?, ?, ?, ?, 'automatic', ?, ?, ?, ?, 0)
-                """,
-                (
-                    PROVIDER,
-                    external_id,
-                    status,
-                    local_file_id,
-                    0.98 if status == "matched" else 0.0,
-                    reason,
-                    MATCHER_VERSION,
-                    provider_fp,
-                    local_fp,
-                ),
-            )
-            if status == "matched" and local_file_id is not None:
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
                 conn.execute(
                     """
-                    INSERT INTO track_links(
-                        track_id, source_provider_id, source_external_id,
-                        local_file_id, confidence, match_method
-                    ) VALUES (1, ?, ?, ?, 0.98, 'automatic')
+                    INSERT INTO matching_results(
+                        provider_id, external_id, status, local_file_id, confidence,
+                        method, reason, matcher_version, provider_fingerprint,
+                        local_fingerprint, manual
+                    ) VALUES (?, ?, ?, ?, ?, 'automatic', ?, ?, ?, ?, 0)
                     """,
-                    (PROVIDER, external_id, local_file_id),
+                    (
+                        PROVIDER,
+                        external_id,
+                        status,
+                        local_file_id,
+                        0.98 if status == "matched" else 0.0,
+                        reason,
+                        MATCHER_VERSION,
+                        provider_fp,
+                        local_fp,
+                    ),
                 )
+                if status == "matched" and local_file_id is not None:
+                    conn.execute(
+                        """
+                        INSERT INTO track_links(
+                            track_id, source_provider_id, source_external_id,
+                            local_file_id, confidence, match_method
+                        ) VALUES (1, ?, ?, ?, 0.98, 'automatic')
+                        """,
+                        (PROVIDER, external_id, local_file_id),
+                    )
 
     def _service(self) -> LibraryCoverageService:
         return LibraryCoverageService(database_path=self.db)
@@ -189,8 +194,6 @@ class CoverageV06Tests(unittest.TestCase):
     def test_every_variant_status_remains_identity_covered(self) -> None:
         self._snapshot("liked", title="Мне нравится", collection_type="liked")
         statuses = ["same", "altered", "different_version", "uncertain", "not_checked"]
-        with sqlite3.connect(self.db) as conn:
-            pass
         payloads = []
         local_ids = []
         for i, status in enumerate(statuses, start=1):
@@ -203,16 +206,17 @@ class CoverageV06Tests(unittest.TestCase):
                 external_id, payload, "matched", local_file_id=local_id
             )
 
-        with sqlite3.connect(self.db) as conn:
-            for (external_id, _payload, status), local_id in zip(payloads, local_ids):
-                conn.execute(
-                    """
-                    INSERT INTO track_variant_results(
-                        provider_id, external_id, local_file_id, status
-                    ) VALUES (?, ?, ?, ?)
-                    """,
-                    (PROVIDER, external_id, local_id, status),
-                )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                for (external_id, _payload, status), local_id in zip(payloads, local_ids):
+                    conn.execute(
+                        """
+                        INSERT INTO track_variant_results(
+                            provider_id, external_id, local_file_id, status
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (PROVIDER, external_id, local_id, status),
+                    )
 
         summary = self._service().summary()
         self.assertEqual(summary["covered"], 5)
@@ -283,11 +287,12 @@ class CoverageV06Tests(unittest.TestCase):
         self._automatic_result("9", payload, "unmatched")
         self.assertEqual(self._service().summary()["total"], 1)
 
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "DELETE FROM provider_collection_items WHERE provider_id=? AND collection_id='liked'",
-                (PROVIDER,),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "DELETE FROM provider_collection_items WHERE provider_id=? AND collection_id='liked'",
+                    (PROVIDER,),
+                )
         self.assertEqual(self._service().summary()["total"], 0)
 
     def test_user_actions_persist_and_reset(self) -> None:
@@ -323,27 +328,28 @@ class CoverageV06Tests(unittest.TestCase):
         self._snapshot("liked", title="Мне нравится", collection_type="liked")
         self._member("liked", "99", title="Manual", position=0)
         local_id = self._local()
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO matching_results(
-                    provider_id, external_id, status, local_file_id, confidence,
-                    method, reason, matcher_version, provider_fingerprint,
-                    local_fingerprint, manual
-                ) VALUES (?, '99', 'matched', ?, 1.0, 'manual',
-                          'manual_match_stale:local_metadata', ?, '', '', 1)
-                """,
-                (PROVIDER, local_id, MATCHER_VERSION),
-            )
-            conn.execute(
-                """
-                INSERT INTO track_links(
-                    track_id, source_provider_id, source_external_id, local_file_id,
-                    confidence, match_method
-                ) VALUES (1, ?, '99', ?, 1.0, 'manual')
-                """,
-                (PROVIDER, local_id),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO matching_results(
+                        provider_id, external_id, status, local_file_id, confidence,
+                        method, reason, matcher_version, provider_fingerprint,
+                        local_fingerprint, manual
+                    ) VALUES (?, '99', 'matched', ?, 1.0, 'manual',
+                              'manual_match_stale:local_metadata', ?, '', '', 1)
+                    """,
+                    (PROVIDER, local_id, MATCHER_VERSION),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO track_links(
+                        track_id, source_provider_id, source_external_id, local_file_id,
+                        confidence, match_method
+                    ) VALUES (1, ?, '99', ?, 1.0, 'manual')
+                    """,
+                    (PROVIDER, local_id),
+                )
 
         summary = self._service().summary()
         self.assertEqual(summary["needsReview"], 1)
@@ -361,26 +367,27 @@ class CoverageV06Tests(unittest.TestCase):
         local_id = self._local()
         local_fp = MatchingStorageRepository(self.db).local_library_fingerprint()
         provider_fp = provider_fingerprint(PROVIDER, "100", payload)
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                UPDATE matching_results
-                SET status='matched', local_file_id=?, confidence=.98,
-                    provider_fingerprint=?, local_fingerprint=?,
-                    matcher_version=?, reason='auto_threshold_and_margin'
-                WHERE provider_id=? AND external_id='100'
-                """,
-                (local_id, provider_fp, local_fp, MATCHER_VERSION, PROVIDER),
-            )
-            conn.execute(
-                """
-                INSERT INTO track_links(
-                    track_id, source_provider_id, source_external_id, local_file_id,
-                    confidence, match_method
-                ) VALUES (1, ?, '100', ?, .98, 'automatic')
-                """,
-                (PROVIDER, local_id),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE matching_results
+                    SET status='matched', local_file_id=?, confidence=.98,
+                        provider_fingerprint=?, local_fingerprint=?,
+                        matcher_version=?, reason='auto_threshold_and_margin'
+                    WHERE provider_id=? AND external_id='100'
+                    """,
+                    (local_id, provider_fp, local_fp, MATCHER_VERSION, PROVIDER),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO track_links(
+                        track_id, source_provider_id, source_external_id, local_file_id,
+                        confidence, match_method
+                    ) VALUES (1, ?, '100', ?, .98, 'automatic')
+                    """,
+                    (PROVIDER, local_id),
+                )
 
         self.assertEqual(
             self._service().tracks(status="missing", user_action="wanted")["count"], 0

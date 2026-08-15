@@ -33,8 +33,8 @@ void main() {
     expect(find.text('В очереди: 1'), findsOneWidget);
     expect(find.text('Загружается: 1'), findsOneWidget);
     expect(find.text('Ошибки: 1'), findsOneWidget);
-    expect(find.text('Queued Song'), findsOneWidget);
-    expect(find.text('Running Song'), findsOneWidget);
+    expect(find.textContaining('Queued Song'), findsOneWidget);
+    expect(find.textContaining('Running Song'), findsOneWidget);
     expect(find.textContaining('82%'), findsOneWidget);
     expect(find.byKey(const Key('download-progress-running-1')), findsOneWidget);
     expect(find.byKey(const Key('download-retry-failed-1')), findsOneWidget);

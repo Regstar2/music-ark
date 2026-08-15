@@ -65,7 +65,11 @@ class CoverageActionStore:
         external_ids: Iterable[str],
         action: str,
     ) -> dict[str, Any]:
-        clean_ids = list(dict.fromkeys(str(item).strip() for item in external_ids if str(item).strip()))
+        clean_ids = list(
+            dict.fromkeys(
+                str(item).strip() for item in external_ids if str(item).strip()
+            )
+        )
         if len(clean_ids) > 5000:
             raise ValueError("At most 5000 provider tracks can be updated at once.")
         clean_action = action.strip().casefold()
@@ -135,11 +139,11 @@ class CoverageActionStore:
                             ELSE pci.external_id
                         END
                     FROM provider_collection_items pci
-                    LEFT JOIN provider_collection_snapshots pcs
+                    JOIN provider_collection_snapshots pcs
                       ON pcs.provider_id=pci.provider_id
                      AND pcs.collection_id=pci.collection_id
                     WHERE pci.provider_id=?
-                      AND COALESCE(pcs.active, 1)=1
+                      AND pcs.active=1
                       AND CASE
                             WHEN json_valid(pci.payload_json)
                             THEN COALESCE(
@@ -156,4 +160,3 @@ class CoverageActionStore:
         except sqlite3.Error as exc:
             raise StorageError("Failed to validate active provider identities.") from exc
         return {str(row[0]) for row in rows}
-

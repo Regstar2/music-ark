@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from musicark.core.config import load_config
-from musicark.matching.input import MatchingInputRepository
 from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.database import initialize_database
 from musicark.storage.matching_storage import MatchingStorageRepository
@@ -32,7 +31,6 @@ class LibraryCoverageService:
         self._provider_id = provider_id
         self._database_path = database_path or self._resolve_database_path()
         initialize_database(self._database_path)
-        self._input = MatchingInputRepository(self._database_path)
         self._repository = CoverageRepository(self._database_path)
         self._matching_repository = MatchingStorageRepository(self._database_path)
         self._audit = AuditLogRepository(self._database_path)
@@ -45,13 +43,7 @@ class LibraryCoverageService:
         root = self._base_dir if self._base_dir is not None else Path.home()
         return root / raw
 
-    def _sync_active_identities(self) -> None:
-        # Reuse the same v0.5 adapter. This does not run the matching engine; it only
-        # aligns provider_tracks with the active cached Yandex dataset.
-        self._input.sync_provider_tracks(self._provider_id)
-
     def summary(self, *, collection_id: str = "") -> dict[str, Any]:
-        self._sync_active_identities()
         return self._repository.summary(
             provider_id=self._provider_id,
             collection_id=collection_id,
@@ -69,7 +61,6 @@ class LibraryCoverageService:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        self._sync_active_identities()
         items, total = self._repository.list_tracks(
             provider_id=self._provider_id,
             collection_id=collection_id,
@@ -89,7 +80,6 @@ class LibraryCoverageService:
         }
 
     def track(self, external_id: str) -> dict[str, Any]:
-        self._sync_active_identities()
         item = self._repository.get_track(
             provider_id=self._provider_id,
             external_id=external_id,
@@ -133,7 +123,6 @@ class LibraryCoverageService:
         }
 
     def collections(self) -> dict[str, Any]:
-        self._sync_active_identities()
         return {
             "items": self._repository.collections(provider_id=self._provider_id)
         }

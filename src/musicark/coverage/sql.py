@@ -32,10 +32,10 @@ def coverage_base_cte() -> str:
             END AS collection_title
         FROM provider_collection_items pci
         JOIN ctx ON ctx.provider_id=pci.provider_id
-        LEFT JOIN provider_collection_snapshots pcs
+        JOIN provider_collection_snapshots pcs
           ON pcs.provider_id=pci.provider_id
          AND pcs.collection_id=pci.collection_id
-        WHERE COALESCE(pcs.active, 1)=1
+        WHERE pcs.active=1
     ),
     memberships AS (
         SELECT provider_id, external_id, collection_id,
@@ -202,4 +202,3 @@ def coverage_base_cte() -> str:
          AND pta.external_id=s.external_id
     )
     """
-

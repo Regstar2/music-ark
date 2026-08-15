@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.6.0"
-description = "MusicArk cache-first Yandex, local library, identity matching, variant verification, and coverage desktop app"
+version = "0.7.0"
+description = "MusicArk cache-first Yandex, local library, identity matching, coverage, and authorized download desktop app"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]
@@ -20,6 +20,7 @@ dependencies = [
 musicark = "musicark.cli:main"
 musicark-bridge = "musicark.platform_bridge:main"
 musicark-mvp-bridge = "musicark.mvp_bridge:main"
+musicark-download-bridge = "musicark.download.bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

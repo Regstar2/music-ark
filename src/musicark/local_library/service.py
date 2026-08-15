@@ -1,4 +1,4 @@
-"""Application orchestration for MusicArk v0.4 local music libraries."""
+"""Application orchestration for MusicArk local music libraries."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 from musicark.core.config import load_config
 from musicark.storage.database import initialize_database
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
+from .indexer import LocalFileIndexer
 from .models import LocalLibraryRoot
 from .scanner import LocalLibraryScanner
 
@@ -29,12 +30,14 @@ class LocalLibraryService:
         base_dir: Path | None = None,
         repository: LocalLibraryStorageRepository | None = None,
         scanner: LocalLibraryScanner | None = None,
+        indexer: LocalFileIndexer | None = None,
     ) -> None:
         self._base_dir = base_dir
-        database_path = self._resolve_database_path()
-        initialize_database(database_path)
-        self._repository = repository or LocalLibraryStorageRepository(database_path)
+        self._database_path = self._resolve_database_path()
+        initialize_database(self._database_path)
+        self._repository = repository or LocalLibraryStorageRepository(self._database_path)
         self._scanner = scanner or LocalLibraryScanner(self._repository)
+        self._indexer = indexer or LocalFileIndexer(self._database_path, self._repository)
 
     def _resolve_database_path(self) -> Path:
         config = load_config(self._base_dir)
@@ -98,6 +101,13 @@ class LocalLibraryService:
                 if len(errors) < 100:
                     errors.append(dict(item))
         return {**total, "errorItems": errors, "roots": per_root, "stats": self.stats()}
+
+    def index_file(self, path: str | Path, root_id: int) -> dict[str, Any]:
+        """Index one known file through the v0.4 metadata/storage pipeline."""
+        root = next((item for item in self._repository.list_roots() if item.id == int(root_id)), None)
+        if root is None:
+            raise ValueError(f"Local library root {root_id} was not found.")
+        return {"track": self._indexer.index_file(Path(path), root)}
 
     def tracks(
         self,

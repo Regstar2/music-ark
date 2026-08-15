@@ -103,7 +103,7 @@ class YandexDownloadProviderResolutionTests(unittest.TestCase):
             self.assertEqual(cm.exception.code, "invalid_track_id")
             resolve.assert_not_called()
 
-    def test_existing_exact_destination_is_reused_without_direct_link_resolution(self) -> None:
+    def test_valid_existing_exact_destination_is_reused_without_direct_link_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             destination = root / "Artist - Track [yandex_77].mp3"
@@ -120,10 +120,43 @@ class YandexDownloadProviderResolutionTests(unittest.TestCase):
                     "target_filename": destination.name,
                 },
             )
-            with patch.object(provider, "_resolve_direct_link") as resolve:
+            with (
+                patch.object(provider, "_is_valid_existing_audio", return_value=True),
+                patch.object(provider, "_resolve_direct_link") as resolve,
+            ):
                 result = provider.execute(task)
             self.assertEqual(Path(result.path), destination.resolve())
             resolve.assert_not_called()
+
+    def test_invalid_existing_destination_is_not_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "Artist - Track [yandex_88].mp3"
+            destination.write_bytes(b"keep-this-unrelated-file")
+            provider = YandexMusicDownloadProvider(token="secure-token")
+            task = DownloadTask(
+                task_type="provider_download",
+                source_id="88",
+                provider_id="yandex_music_download",
+                target_folder=str(root),
+                status=DownloadStatus.QUEUED,
+                raw_payload={"track_id": "88", "target_filename": destination.name},
+            )
+
+            def fake_download(_link: str, output: Path, **_kwargs: object) -> None:
+                output.write_bytes(b"downloaded")
+
+            with (
+                patch.object(provider, "_is_valid_existing_audio", return_value=False),
+                patch.object(provider, "_resolve_direct_link", return_value="temporary-url"),
+                patch.object(provider, "_download_to_file", side_effect=fake_download),
+            ):
+                result = provider.execute(task)
+
+            collision = root / "Artist - Track [yandex_88] (2).mp3"
+            self.assertEqual(destination.read_bytes(), b"keep-this-unrelated-file")
+            self.assertEqual(collision.read_bytes(), b"downloaded")
+            self.assertEqual(Path(result.path), collision.resolve())
 
 
 if __name__ == "__main__":

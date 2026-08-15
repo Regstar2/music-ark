@@ -270,11 +270,20 @@ class DownloadService:
         task = self._downloads.get_task(task_id)
         if task.status not in {DownloadStatus.FAILED, DownloadStatus.NEEDS_REVIEW}:
             raise DownloadServiceError("Only failed or needs-review downloads can be retried.", code="not_retryable")
+        review_retry = task.status == DownloadStatus.NEEDS_REVIEW
         track = self._coverage.get_track(provider_id=self.SOURCE_PROVIDER, external_id=task.source_id)
-        if track is None or track.get("coverageStatus") != "missing":
+        coverage_status = track.get("coverageStatus") if track else None
+        user_action = track.get("userAction") if track else None
+        if (
+            track is None
+            or coverage_status == "covered"
+            or user_action != "wanted"
+            or (not review_retry and coverage_status != "missing")
+            or (review_retry and coverage_status not in {"missing", "not_analyzed", "needs_review"})
+        ):
             task.status = DownloadStatus.SKIPPED
-            task.error_code = "already_covered"
-            task.error_message = "Track is no longer missing."
+            task.error_code = "already_covered" if coverage_status == "covered" else "not_eligible"
+            task.error_message = "Track is no longer eligible for this retry."
             task.finished_at = _now()
             self._downloads.upsert_task(task)
             return {"task": self._task_payload(task)}
@@ -287,6 +296,7 @@ class DownloadService:
         task.finished_at = None
         task.error_code = None
         task.error_message = None
+        task.raw_payload["review_retry"] = review_retry
         self._downloads.upsert_task(task)
         return {"task": self._task_payload(task)}
 
@@ -322,7 +332,19 @@ class DownloadService:
                 f"Task cannot run from status {task.status.value}.", code="invalid_state"
             )
         current = self._coverage.get_track(provider_id=self.SOURCE_PROVIDER, external_id=task.source_id)
-        if current is None or current.get("coverageStatus") != "missing" or current.get("userAction") != "wanted":
+        ordinary_eligible = bool(
+            current
+            and current.get("coverageStatus") == "missing"
+            and current.get("userAction") == "wanted"
+        )
+        review_retry = bool(task.raw_payload.get("review_retry"))
+        review_retry_eligible = bool(
+            review_retry
+            and current
+            and current.get("coverageStatus") in {"missing", "not_analyzed", "needs_review"}
+            and current.get("userAction") == "wanted"
+        )
+        if not ordinary_eligible and not review_retry_eligible:
             task.status = DownloadStatus.SKIPPED
             task.error_code = "not_missing"
             task.error_message = "Track is no longer an eligible Missing + Wanted item."
@@ -430,6 +452,7 @@ class DownloadService:
             task.result_local_file_id = local_id
             task.finished_at = _now()
             task.cancel_requested = False
+            task.raw_payload.pop("review_retry", None)
             self._downloads.upsert_task(task)
             self._audit_event(
                 "download_completed",

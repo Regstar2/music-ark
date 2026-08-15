@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'coverage_bridge.dart';
+import 'download_bridge.dart';
 import 'matching_bridge.dart';
 
 part 'coverage_page_view.dart';
@@ -13,12 +14,16 @@ class CoveragePage extends StatefulWidget {
     super.key,
     required this.bridge,
     required this.matchingBridge,
+    this.downloadBridge,
     this.onOpenMatching,
+    this.onOpenDownloads,
   });
 
   final CoverageBridgeClient bridge;
   final MatchingBridgeClient matchingBridge;
+  final DownloadBridgeClient? downloadBridge;
   final VoidCallback? onOpenMatching;
+  final VoidCallback? onOpenDownloads;
 
   @override
   State<CoveragePage> createState() => _CoveragePageState();
@@ -198,6 +203,35 @@ class _CoveragePageState extends State<CoveragePage> {
     try {
       await widget.bridge.coverageSetActions(ids, action);
       await _reloadTracks();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _enqueueDownload(String externalId) async {
+    final bridge = widget.downloadBridge;
+    if (bridge == null) return;
+    try {
+      final result = await bridge.enqueue(externalId);
+      if (!mounted) return;
+      final created = result['created'] == true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(created ? 'Добавлено в загрузки.' : 'Трек уже в очереди.')),
+      );
+    } on DownloadBridgeException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+      if (error.code == 'target_required' && widget.onOpenDownloads != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Сначала выберите папку на странице «Загрузки».'),
+            action: SnackBarAction(
+              label: 'Открыть',
+              onPressed: widget.onOpenDownloads!,
+            ),
+          ),
+        );
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }

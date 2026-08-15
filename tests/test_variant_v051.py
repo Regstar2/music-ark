@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import math
 from pathlib import Path
@@ -308,37 +309,37 @@ class VariantServiceTests(unittest.TestCase):
             "duration_seconds": 24,
             "explicit": False,
         }
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "INSERT INTO provider_tracks(provider_id, external_id, payload_json) VALUES (?, ?, ?)",
-                ("yandex_music", "69046542", json.dumps(provider)),
-            )
-            cursor = conn.execute(
-                """
-                INSERT INTO local_audio_files(
-                    path, sha256, file_size, duration_seconds, codec, metadata_json,
-                    modified_ns, title, artists_json, album, availability,
-                    normalized_path, file_name, extension
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(self.local), "legacy-hash", local_stat.st_size, 24.0, "flac", "{}",
-                    local_stat.st_mtime_ns, "Song", '["Artist"]', "Album", "available",
-                    str(self.local).casefold(), self.local.name, ".flac",
-                ),
-            )
-            local_id = int(cursor.lastrowid)
-            conn.execute(
-                """
-                INSERT INTO matching_results(
-                    provider_id, external_id, status, local_file_id, confidence,
-                    method, score_breakdown_json, reason, matcher_version,
-                    provider_fingerprint, local_fingerprint, manual
-                ) VALUES (?, ?, 'matched', ?, 0.99, 'manual', '{}', 'manual_accept', 1, 'p', 'l', 1)
-                """,
-                ("yandex_music", "69046542", local_id),
-            )
-            conn.commit()
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "INSERT INTO provider_tracks(provider_id, external_id, payload_json) VALUES (?, ?, ?)",
+                    ("yandex_music", "69046542", json.dumps(provider)),
+                )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO local_audio_files(
+                        path, sha256, file_size, duration_seconds, codec, metadata_json,
+                        modified_ns, title, artists_json, album, availability,
+                        normalized_path, file_name, extension
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(self.local), "legacy-hash", local_stat.st_size, 24.0, "flac", "{}",
+                        local_stat.st_mtime_ns, "Song", '["Artist"]', "Album", "available",
+                        str(self.local).casefold(), self.local.name, ".flac",
+                    ),
+                )
+                local_id = int(cursor.lastrowid)
+                conn.execute(
+                    """
+                    INSERT INTO matching_results(
+                        provider_id, external_id, status, local_file_id, confidence,
+                        method, score_breakdown_json, reason, matcher_version,
+                        provider_fingerprint, local_fingerprint, manual
+                    ) VALUES (?, ?, 'matched', ?, 0.99, 'manual', '{}', 'manual_accept', 1, 'p', 'l', 1)
+                    """,
+                    ("yandex_music", "69046542", local_id),
+                )
 
     def _service(self, verifier: _CountingVerifier, reference: Path | None = None) -> VariantDetectionService:
         return VariantDetectionService(
@@ -404,36 +405,36 @@ class VariantServiceTests(unittest.TestCase):
     def test_default_reference_resolver_does_not_use_incidental_numbers(self) -> None:
         unrelated = self.root / "Artist 69046542 - Song.mp3"
         unrelated.write_bytes(b"x")
-        with sqlite3.connect(self.db) as conn:
-            stat = unrelated.stat()
-            conn.execute(
-                """
-                INSERT INTO local_audio_files(path, sha256, file_size, duration_seconds, codec,
-                    metadata_json, modified_ns, title, artists_json, availability, normalized_path,
-                    file_name, extension)
-                VALUES (?, 'x', ?, 24, 'mp3', '{}', ?, 'Other', '[]', 'available', ?, ?, '.mp3')
-                """,
-                (str(unrelated), stat.st_size, stat.st_mtime_ns, str(unrelated).casefold(), unrelated.name),
-            )
-            conn.commit()
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                stat = unrelated.stat()
+                conn.execute(
+                    """
+                    INSERT INTO local_audio_files(path, sha256, file_size, duration_seconds, codec,
+                        metadata_json, modified_ns, title, artists_json, availability, normalized_path,
+                        file_name, extension)
+                    VALUES (?, 'x', ?, 24, 'mp3', '{}', ?, 'Other', '[]', 'available', ?, ?, '.mp3')
+                    """,
+                    (str(unrelated), stat.st_size, stat.st_mtime_ns, str(unrelated).casefold(), unrelated.name),
+                )
         resolver = ReferenceAudioResolver(self.db, self.root)
         self.assertIsNone(resolver.resolve("yandex_music", "69046542"))
 
     def test_migration_14_to_15_preserves_existing_data(self) -> None:
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO provider_collection_snapshots(provider_id, collection_id, account_json, item_count, refreshed_at) VALUES ('yandex_music', 'liked', '{}', 1, 'now')"
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO provider_collection_items(provider_id, collection_id, external_id, position, payload_json) VALUES ('yandex_music', 'liked', 'keep-me', 0, '{}')"
-            )
-            conn.execute("DROP TABLE track_variant_results")
-            conn.execute("UPDATE app_metadata SET value='1.4.0' WHERE key='schema_version'")
-            conn.commit()
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO provider_collection_snapshots(provider_id, collection_id, account_json, item_count, refreshed_at) VALUES ('yandex_music', 'liked', '{}', 1, 'now')"
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO provider_collection_items(provider_id, collection_id, external_id, position, payload_json) VALUES ('yandex_music', 'liked', 'keep-me', 0, '{}')"
+                )
+                conn.execute("DROP TABLE track_variant_results")
+                conn.execute("UPDATE app_metadata SET value='1.4.0' WHERE key='schema_version'")
 
         initialize_database(self.db)
 
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             version = conn.execute("SELECT value FROM app_metadata WHERE key='schema_version'").fetchone()[0]
             provider_count = conn.execute("SELECT COUNT(*) FROM provider_collection_items WHERE external_id='keep-me'").fetchone()[0]
             local_count = conn.execute("SELECT COUNT(*) FROM local_audio_files").fetchone()[0]
@@ -443,11 +444,15 @@ class VariantServiceTests(unittest.TestCase):
             table = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='track_variant_results'"
             ).fetchone()
-        self.assertEqual("1.6.0", version)
+            download_settings = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='download_settings'"
+            ).fetchone()
+        self.assertEqual("1.7.0", version)
         self.assertEqual(1, provider_count)
         self.assertGreaterEqual(local_count, 1)
         self.assertEqual(("matched", 1), matching)
         self.assertIsNotNone(table)
+        self.assertIsNotNone(download_settings)
 
 
 if __name__ == "__main__":

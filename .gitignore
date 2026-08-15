@@ -10,6 +10,16 @@ build/
 .musicark/
 *.db
 
+# User/downloaded audio must never be committed from manual validation.
+*.mp3
+*.flac
+*.m4a
+*.mp4
+*.aac
+*.ogg
+*.opus
+*.wav
+
 .env
 .env.*
 !.env.example

@@ -85,7 +85,7 @@ class CoverageBridge implements CoverageBridgeClient {
     List<String>? bulkExternalIds,
   }) async {
     final repoRoot = _resolveRepoRoot();
-    final python = await _resolvePythonCommand();
+    final python = await _resolvePythonCommand(repoRoot);
     final separator = Platform.pathSeparator;
     final srcPath = '$repoRoot${separator}src';
     final existingPythonPath = Platform.environment['PYTHONPATH'];
@@ -204,28 +204,45 @@ class CoverageBridge implements CoverageBridgeClient {
         ).existsSync();
   }
 
-  Future<_PythonCommand> _resolvePythonCommand() async {
+  Future<_PythonCommand> _resolvePythonCommand(String repoRoot) async {
     final override = Platform.environment['MUSICARK_PYTHON']?.trim();
-    if (override != null && override.isNotEmpty) return _PythonCommand(override);
+    if (override != null && override.isNotEmpty) {
+      final explicit = _PythonCommand(override);
+      if (await _pythonWorks(explicit)) return explicit;
+    }
+
+    final separator = Platform.pathSeparator;
+    final repoVenv = Platform.isWindows
+        ? '$repoRoot${separator}.venv${separator}Scripts${separator}python.exe'
+        : '$repoRoot${separator}.venv${separator}bin${separator}python';
+    if (File(repoVenv).existsSync()) {
+      final local = _PythonCommand(repoVenv);
+      if (await _pythonWorks(local)) return local;
+    }
+
     final candidates = Platform.isWindows
         ? const [_PythonCommand('python'), _PythonCommand('py', prefixArgs: ['-3'])]
         : const [_PythonCommand('python3'), _PythonCommand('python')];
     for (final candidate in candidates) {
-      try {
-        final result = await Process.run(
-          candidate.executable,
-          [...candidate.prefixArgs, '--version'],
-          runInShell: false,
-        );
-        if (result.exitCode == 0) return candidate;
-      } on ProcessException {
-        // Try next launcher.
-      }
+      if (await _pythonWorks(candidate)) return candidate;
     }
     throw const CoverageBridgeException(
       'python_not_found',
       'Python was not found.',
     );
+  }
+
+  Future<bool> _pythonWorks(_PythonCommand candidate) async {
+    try {
+      final result = await Process.run(
+        candidate.executable,
+        [...candidate.prefixArgs, '--version'],
+        runInShell: false,
+      );
+      return result.exitCode == 0;
+    } on ProcessException {
+      return false;
+    }
   }
 }
 

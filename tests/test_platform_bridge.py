@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
@@ -27,7 +29,7 @@ class PlatformBridgeTests(unittest.TestCase):
             self.assertIn("mvp_hints", snapshot)
             mh = snapshot["mvp_hints"]
             self.assertIn("schema_version", mh)
-            self.assertEqual(mh["schema_version"], "1.6.0")
+            self.assertEqual(mh["schema_version"], "1.7.0")
             self.assertIn("latest_sync_plan_id", mh)
 
     def test_sync_execute_safe_requires_confirm(self) -> None:
@@ -65,22 +67,20 @@ class PlatformBridgeTests(unittest.TestCase):
                 run_action("metadata_get", base_dir=base_dir, payload={})
 
     def test_metadata_get_missing_on_disk_reports_error(self) -> None:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             base_dir = Path(tmp)
             db_path = base_dir / ".musicark" / "musicark.db"
             initialize_database(db_path)
-            import sqlite3
-
-            with sqlite3.connect(db_path) as conn:
-                conn.execute(
-                    """
-                    INSERT INTO local_audio_files(
-                        path, sha256, file_size, duration_seconds, codec, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (str(base_dir / "missing.mp3"), "a" * 64, 1, 0.0, "mp3", "{}"),
-                )
-                conn.commit()
+            with closing(sqlite3.connect(db_path)) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO local_audio_files(
+                            path, sha256, file_size, duration_seconds, codec, metadata_json
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (str(base_dir / "missing.mp3"), "a" * 64, 1, 0.0, "mp3", "{}"),
+                    )
             with self.assertRaises(MetadataEditorError):
                 run_action("metadata_get", base_dir=base_dir, payload={"local_file_id": 1})
 

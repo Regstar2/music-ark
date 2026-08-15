@@ -1,8 +1,8 @@
 name: musicark_ui
-description: "MusicArk Yandex, local library, identity matching, and variant verification desktop app."
+description: "MusicArk Yandex, local library, identity matching, variant verification, and coverage desktop app."
 publish_to: 'none'
 
-version: 0.5.1+1
+version: 0.6.0+1
 
 environment:
   sdk: ^3.11.5

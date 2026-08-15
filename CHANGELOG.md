@@ -2,7 +2,42 @@
 
 All notable project changes are recorded here.
 
-## Unreleased — v0.5.1 Variant / Altered Track Detection
+## Unreleased — v0.6.0 Missing Tracks / Library Coverage
+
+### Added
+
+- SQL-backed `LibraryCoverageService` / `CoverageRepository` deriving `covered`, `missing`, `needs_review`, and `not_analyzed` from active Yandex membership plus authoritative v0.5 state;
+- strict separation of identity coverage, v0.5.1 variant state, and persistent user triage;
+- global `(provider_id, external_id)` deduplication across Liked/playlists, playlist scopes/order, memberships, search/sort/filter/pagination, and Coverage details/navigation;
+- persistent `wanted` / `ignored` decisions (`no row = unreviewed`) and bulk triage;
+- bridge commands `coverage_summary`, `coverage_tracks`, `coverage_track`, `coverage_collections`, `coverage_set_action`, `coverage_set_actions`, with structured JSON bulk payload and no shell interpolation;
+- schema `1.6.0` forward migration adding only `provider_track_actions` plus its lookup index;
+- Flutter **Недостающие** section, default Missing filter, coverage/analysis summary, secondary variant warnings, triage, bulk actions, and empty states;
+- Python coverage/migration/bridge regression tests and Flutter widget tests.
+
+### Coverage policy
+
+- only a current authoritative `UNMATCHED` without an accepted current local link is `missing`;
+- a current accepted automatic/manual local identity is `covered`;
+- `CONFLICT`, stale manual decisions, and invalid accepted links are `needs_review`;
+- absent/stale automatic matching state is `not_analyzed`;
+- `SAME`, `ALTERED`, `DIFFERENT_VERSION`, `UNCERTAIN`, and `NOT_CHECKED` remain secondary and never turn an accepted identity into Missing;
+- v0.5.1 strict reference cache is never Local Library coverage and never establishes Covered by itself.
+
+### Changed
+
+- Python/Flutter versions advanced to `0.6.0`;
+- provider identity materialization now canonicalizes playlist duplicate storage keys back to payload `external_id`;
+- documentation now matches the tested v0.5.1 contract: an explicit single-track verification may use bounded exact-reference acquisition, without becoming a general download workflow.
+
+### Safety / performance
+
+- no `missing_tracks` copy table: technical coverage remains derived;
+- summary/list/filter/search/sort/pagination are SQL-backed and avoid N+1 provider-track queries;
+- v0.6 adds no download/source-selection execution, filesystem mutation, or Yandex mutation;
+- forward migration preserves Yandex cache, Local Library, matching/manual/conflict state, and variant results.
+
+## v0.5.1 — Variant / Altered Track Detection
 
 ### Added
 
@@ -36,7 +71,7 @@ All notable project changes are recorded here.
 - semantic Live/Remix/Acoustic/Instrumental/Radio Edit mismatches cannot become `SAME` solely because title/artist identity is close;
 - technical decoder/alignment/file failures never become `DIFFERENT_VERSION`;
 - explicit metadata alone never proves clean/censored status;
-- deep audio comparison requires an exact local reference and never triggers an automatic reference download;
+- deep audio comparison requires an exact provider reference; an explicit single-track run may acquire one exact reference on demand, while batch verification remains bounded to already-available references;
 - audio verification begins only after a v0.5 `MATCHED` or manually accepted identity.
 
 ### Safety / performance

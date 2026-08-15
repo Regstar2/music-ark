@@ -101,7 +101,7 @@ class YandexMusicProvider(MusicProvider):
 
             playlist_dict = json.loads(target.to_json())
             fetched_tracks = target.fetch_tracks() if hasattr(target, "fetch_tracks") else []
-            track_payloads = [json.loads(item.to_json()) for item in (fetched_tracks or [])]
+            track_payloads = self._hydrate_playlist_track_payloads(client, fetched_tracks)
             playlist_dict["track_refs"] = [
                 str(item.get("id"))
                 for item in track_payloads
@@ -116,6 +116,66 @@ class YandexMusicProvider(MusicProvider):
             raise
         except Exception as exc:  # noqa: BLE001
             raise YandexMusicError(f"Failed to scan Yandex playlist '{clean_id}'.") from exc
+
+    @staticmethod
+    def _dto_payload(item: Any) -> dict[str, Any]:
+        if isinstance(item, dict):
+            return dict(item)
+        raw = item.to_json() if hasattr(item, "to_json") else item
+        if isinstance(raw, str):
+            parsed = json.loads(raw)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _hydrate_playlist_track_payloads(
+        self,
+        client: Any,
+        fetched_tracks: Any,
+    ) -> list[dict[str, Any]]:
+        """Expand TrackShort playlist rows to full Track metadata with one batch request."""
+        items = list(fetched_tracks or [])
+        payloads: list[dict[str, Any]] = []
+        request_ids: list[str] = []
+
+        for item in items:
+            embedded = getattr(item, "track", None)
+            payload = self._dto_payload(embedded if embedded is not None else item)
+            payloads.append(payload)
+
+            # Some test doubles and API responses may already carry a full Track.
+            if payload.get("title") and payload.get("artists"):
+                continue
+
+            external_id = payload.get("id") or getattr(item, "id", None)
+            if external_id is None:
+                continue
+            request_id = getattr(item, "track_id", None) or str(external_id)
+            request_id = str(request_id)
+            if request_id not in request_ids:
+                request_ids.append(request_id)
+
+        if not request_ids:
+            return payloads
+
+        tracks_method = getattr(client, "tracks", None)
+        if not callable(tracks_method):
+            return payloads
+
+        full_by_external_id: dict[str, dict[str, Any]] = {}
+        for full_track in tracks_method(request_ids) or []:
+            full_payload = self._dto_payload(full_track)
+            external_id = full_payload.get("id")
+            if external_id is not None:
+                full_by_external_id[str(external_id)] = full_payload
+
+        hydrated: list[dict[str, Any]] = []
+        for payload in payloads:
+            external_id = payload.get("id")
+            if external_id is None:
+                hydrated.append(payload)
+                continue
+            hydrated.append(full_by_external_id.get(str(external_id), payload))
+        return hydrated
 
     def auth_check(self) -> dict[str, Any]:
         client = self._build_client()

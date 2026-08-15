@@ -1,4 +1,8 @@
-"""JSON process bridge for MusicArk desktop UI (Yandex + Local + Matching + Variant)."""
+"""JSON process bridge for MusicArk desktop UI.
+
+The process boundary covers Yandex cache, Local Library, v0.5 identity matching,
+v0.5.1 variant verification, and v0.6 Library Coverage.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ from typing import Any
 
 from musicark.core.errors import MusicArkError, StorageError
 from musicark.credentials import CredentialStoreError
+from musicark.coverage.service import LibraryCoverageService
 from musicark.local_library.service import LocalLibraryService
 from musicark.matching.service import MatchingService
 from musicark.providers.yandex_music_provider import (
@@ -109,6 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
             "matching_accept", "matching_reject",
             "variant_capabilities", "variant_summary", "variant_run",
             "variant_run_all_available", "variant_result", "variant_results",
+            "coverage_summary", "coverage_tracks", "coverage_track",
+            "coverage_collections", "coverage_set_action", "coverage_set_actions",
         ),
     )
     parser.add_argument("--playlist-id", default=None)
@@ -117,7 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider-id", default="yandex_music")
     parser.add_argument("--external-id", default=None)
     parser.add_argument("--local-file-id", type=int, default=None)
+    parser.add_argument("--collection-id", default="")
     parser.add_argument("--status", default="")
+    parser.add_argument("--user-action", default="")
+    parser.add_argument("--variant-status", default="")
+    parser.add_argument("--action", default="")
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search", default="")
@@ -226,6 +237,55 @@ def _variant_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[st
     raise BridgeRequestError(f"Unknown variant command: {args.command}")
 
 
+def _coverage_bulk_ids() -> list[str]:
+    raw = os.getenv("MUSICARK_COVERAGE_BULK", "").strip()
+    if not raw:
+        raise BridgeRequestError(
+            "Bulk provider identities are missing from bridge environment."
+        )
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise BridgeRequestError("Bulk coverage payload is invalid JSON.") from exc
+    if not isinstance(decoded, list):
+        raise BridgeRequestError("Bulk coverage payload must be a JSON array.")
+    values = [str(item).strip() for item in decoded if str(item).strip()]
+    if len(values) > 5000:
+        raise BridgeRequestError("Bulk coverage payload is limited to 5000 tracks.")
+    return values
+
+
+def _coverage_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str, Any]:
+    service = LibraryCoverageService(base_dir=base_dir, provider_id=args.provider_id)
+    if args.command == "coverage_summary":
+        return service.summary(collection_id=args.collection_id)
+    if args.command == "coverage_collections":
+        return service.collections()
+    if args.command == "coverage_tracks":
+        return service.tracks(
+            collection_id=args.collection_id,
+            status=args.status or "missing",
+            search=args.search,
+            sort=args.sort,
+            user_action=args.user_action,
+            variant_status=args.variant_status,
+            limit=args.limit,
+            offset=args.offset,
+        )
+
+    if args.command == "coverage_set_actions":
+        action = _required_text(args.action, "--action")
+        return service.set_actions(_coverage_bulk_ids(), action)
+
+    external_id = _required_text(args.external_id, "--external-id")
+    if args.command == "coverage_track":
+        return service.track(external_id)
+    if args.command == "coverage_set_action":
+        action = _required_text(args.action, "--action")
+        return service.set_action(external_id, action)
+    raise BridgeRequestError(f"Unknown coverage command: {args.command}")
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -237,6 +297,8 @@ def main() -> int:
             payload = _matching_payload(args, base_dir)
         elif args.command.startswith("variant_"):
             payload = _variant_payload(args, base_dir)
+        elif args.command.startswith("coverage_"):
+            payload = _coverage_payload(args, base_dir)
         else:
             service = YandexLibraryService(base_dir=base_dir)
             if args.command == "bootstrap":

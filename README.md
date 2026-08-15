@@ -2,9 +2,9 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.5.1 — Variant / Altered Track Detection.**
+**Текущая версия: 0.6.0 — Missing Tracks / Library Coverage.**
 
-MusicArk — Windows desktop-приложение для объединения библиотеки Яндекс Музыки и локальной музыкальной коллекции. v0.5.0 сопоставляет provider tracks с локальными файлами, а v0.5.1 добавляет **отдельную** проверку того, является ли найденная пара той же записью/версией.
+MusicArk — Windows desktop-приложение для объединения библиотеки Яндекс Музыки и локальной музыкальной коллекции. v0.5.0 сопоставляет provider tracks с локальными файлами, v0.5.1 отдельно проверяет версию записи, а v0.6 добавляет **Library Coverage / Missing Tracks** поверх этих authoritative результатов.
 
 ## Что работает
 
@@ -12,7 +12,7 @@ MusicArk — Windows desktop-приложение для объединения 
 
 - безопасный вход по Yandex Music OAuth token через системный credential store;
 - cache-first сессия, «Мне нравится», плейлисты и offline cache;
-- треки разных коллекций дедуплицируются по `(provider_id, external_id)` для matching.
+- треки разных коллекций дедуплицируются по `(provider_id, external_id)` для matching и coverage.
 
 ### Local Library
 
@@ -45,7 +45,7 @@ Yandex cache + Local Library
 - удалённый local file инвалидирует старый link;
 - matcher/provider/local fingerprints позволяют безопасные incremental reruns.
 
-Identity policy не изменён v0.5.1:
+Identity policy не изменён v0.5.1/v0.6:
 
 ```text
 AUTO MATCH >= 0.90 и margin до второго кандидата >= 0.04
@@ -82,9 +82,39 @@ Metadata-level анализ распознаёт смысловые маркер
 
 Yandex `content_warning → explicit` используется только как evidence. `explicit=true/false` сам по себе не доказывает censored/uncensored версию.
 
+### v0.6 — Library Coverage / Missing Tracks
+
+v0.6 не строит второй matcher. `LibraryCoverageService` и SQL-backed `CoverageRepository` читают active Yandex membership, `matching_results`, `track_links`, Local Library и `track_variant_results` и выводят четыре primary состояния:
+
+```text
+covered       — актуальный accepted local identity match
+missing       — актуальный authoritative UNMATCHED без accepted local link
+needs_review  — CONFLICT / stale manual / invalid accepted link
+not_analyzed  — нет актуального matching result или automatic result stale
+```
+
+Три измерения независимы:
+
+```text
+Identity coverage: covered / missing / needs_review / not_analyzed
+Variant:           same / altered / different_version / uncertain / not_checked
+User action:       wanted / ignored / unreviewed
+```
+
+`MATCHED + ALTERED/DIFFERENT_VERSION/UNCERTAIN/NOT_CHECKED` остаётся `covered`. `CONFLICT` и `not_analyzed` никогда не подменяются `missing`.
+
+Раздел **«Недостающие»** открывается на Missing по умолчанию и поддерживает summary, scopes «Вся библиотека / Мне нравится / playlist», membership, playlist order, search, sort, pagination, variant filters, details, переход в существующее «Сопоставление» и persistent triage **Нужен / Игнорировать / Не решено**. Coverage status не materialize-ится в отдельную таблицу.
+
+Future v0.7 contract:
+
+```text
+coverage_status = missing
+AND user_action = wanted
+```
+
 ## Reference audio
 
-Для глубокого audio verification нужен локальный эталон конкретного provider track ID. Используется только строгий convention:
+Для глубокого v0.5.1 audio verification используется только строгий convention:
 
 ```text
 .musicark/downloads/yandex/yandex_<track_id>.<ext>
@@ -97,7 +127,9 @@ Yandex `content_warning → explicit` используется только ка
 .musicark/downloads/yandex/yandex_69046542.mp3
 ```
 
-Случайное число в path не считается Yandex ID. MusicArk **не скачивает** reference tracks автоматически.
+Случайное число в path не считается Yandex ID. Актуальная tested v0.5.1 реализация при **явном single-track `variant_run`** может bounded-способом получить один exact reference, если его нет. Batch не скачивает библиотеку целиком.
+
+**Reference cache не является Local Library.** Полученный reference не добавляется в `local_audio_files`, не создаёт `track_links` и сам по себе никогда не делает track `covered`.
 
 ## Audio verification
 
@@ -135,9 +167,9 @@ ffmpeg -version
 
 - приложение запускается;
 - Yandex/Local Library работают;
-- v0.5 identity matching работает;
+- v0.5 identity matching и v0.6 Coverage работают;
 - metadata variant evidence остаётся доступным;
-- UI явно показывает `Аудиосравнение недоступно: ffmpeg не найден`;
+- UI явно показывает недоступность audio verification;
 - техническая ошибка не превращается в `DIFFERENT VERSION`.
 
 ## Classification policy
@@ -161,7 +193,9 @@ Audio verification выполняется только после v0.5 matching 
 - reference path + size + `mtime_ns`;
 - `ANALYZER_VERSION`.
 
-Неизменившаяся успешная пара не декодируется повторно. Local/reference/provider change инвалидирует результат. Batch `Проверить все доступные` ограничен `MATCHED` парами с exact reference и не передаёт PCM через Flutter bridge.
+Неизменившаяся успешная пара не декодируется повторно. Local/reference/provider change инвалидирует результат при следующей verification. Batch `Проверить все доступные` ограничен `MATCHED` парами с exact reference и не передаёт PCM через Flutter bridge.
+
+Coverage summary/list/search/filter/sort/pagination выполняются SQL-side и не materialize-ят всю provider library во Flutter. Global coverage дедуплицирует `(provider_id, external_id)` между Liked/playlists.
 
 ## UI
 
@@ -179,17 +213,7 @@ MATCHED 99%
 Версия: ALTERED
 ```
 
-Detail dialog показывает:
-
-- Identity status/confidence;
-- Variant status;
-- Audio similarity;
-- Signals/reasons;
-- altered regions;
-- reference path;
-- кнопку **Проверить версию**.
-
-Также доступна **Проверить все доступные**.
+Detail dialog показывает Identity и Variant отдельно. Раздел **«Недостающие»** добавляет coverage summary и triage, не дублируя matching UI.
 
 ## SQLite
 
@@ -199,15 +223,19 @@ Forward-only schema history:
 1.3.0 — Local Library
 1.4.0 — Identity Matching
 1.5.0 — Variant Detection
+1.6.0 — Coverage user actions
 ```
 
-`track_variant_results` хранит status/evidence/similarity/regions/fingerprints, но не PCM/audio blobs. Существующая `.musicark/musicark.db`, Yandex cache, Local Library, v0.5 matches и manual decisions не требуют удаления.
+`track_variant_results` хранит status/evidence/similarity/regions/fingerprints, но не PCM/audio blobs. v1.6 добавляет только `provider_track_actions(provider_id, external_id, action, created_at, updated_at)`; отсутствие row означает `unreviewed`.
+
+Существующая `.musicark/musicark.db`, Yandex cache, Local Library, v0.5 matches/manual decisions/conflicts и v0.5.1 variant results сохраняются forward migration и не требуют удаления.
 
 ## Safety / privacy
 
-- matching и variant analysis работают локально после заполнения cache;
+- matching, variant analysis и coverage работают локально после заполнения cache;
 - нет внешних matching/metadata/fingerprint APIs;
-- нет автоматического reference download;
+- v0.6 не скачивает missing tracks;
+- bounded v0.5.1 reference acquisition не считается Download workflow;
 - локальные аудиофайлы не переименовываются, не перемещаются, не удаляются и не редактируются;
 - Яндекс Музыка не модифицируется;
 - PCM не отправляется через Flutter↔Python bridge и не хранится в БД.
@@ -219,7 +247,7 @@ Forward-only schema history:
 python -m pip install -U pip
 python -m pip install -e .
 python -m pip install -r requirements-yandex.txt
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -p "test_*.py" -v
 
 $env:MUSICARK_PYTHON = (Resolve-Path ".\.venv\Scripts\python.exe").Path
 $env:MUSICARK_REPO_ROOT = (Get-Location).Path
@@ -230,24 +258,9 @@ flutter test
 flutter run -d windows
 ```
 
-Для v0.5.1 GitHub Actions не используются; проверки выполняются локально.
+## Ручная Windows-проверка v0.6
 
-## Ручная Windows-проверка v0.5.1
-
-Проверить на небольшом controlled наборе:
-
-- одна запись MP3 ↔ FLAC;
-- та же запись с изменённой громкостью/encoding;
-- clean/explicit pair, если обе версии легально доступны;
-- Radio Edit;
-- Live;
-- Remix;
-- копия собственного/тестового audio с коротким участком тишины/другого tone;
-- небольшой leading offset;
-- ffmpeg unavailable;
-- corrupt/missing test file.
-
-Главный критерий: очевидная другая версия не должна автоматически показываться как `SAME`.
+Проверить на реальной библиотеке summary против Matching, четыре coverage-состояния, Liked/playlist scopes и order, `MATCHED + DIFFERENT_VERSION`, wanted/ignored/bulk triage с restart, rerun Matching, offline Coverage и regression `strict reference exists + no accepted Local Library link → MISSING`.
 
 ## Roadmap
 
@@ -258,11 +271,11 @@ v0.3   — Yandex Library / Playlists
 v0.4   — Local Library
 v0.5.0 — Identity Matching
 v0.5.1 — Variant / Altered Track Detection
-v0.6   — Missing Tracks
+v0.6   — Missing Tracks / Coverage
 v0.7   — Download
 v0.8   — Sync
 ```
 
-Download, Missing Tracks workflow, playback, metadata editing и sync не входят в v0.5.1.
+Download, source selection, playback, metadata mutation и sync не входят в v0.6.
 
-Подробности: `docs/versions/v0.5.1.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.
+Подробности: `docs/versions/v0.6.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`.

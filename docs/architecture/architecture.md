@@ -1,8 +1,8 @@
-# MusicArk Architecture — v0.5.1
+# MusicArk Architecture — v0.6.0
 
 ## Product boundaries
 
-MusicArk keeps provider access, local indexing, identity matching, and variant verification as separate responsibilities over one SQLite database:
+MusicArk keeps provider access, local indexing, identity matching, variant verification, and library coverage as separate responsibilities over one SQLite database:
 
 ```text
 Flutter desktop
@@ -14,31 +14,23 @@ YandexLibraryService  LocalLibraryService   MatchingService      VariantDetectio
    ↓                      ↓                      ↓                         ↓
 Yandex provider/cache Local scanner/index   identity matching         matched pair only
                                                   ↓                         ↓
-                                         MATCHED/CONFLICT/UNMATCHED   metadata evidence
-                                                                            ↓
-                                                                    strict reference resolver
-                                                                            ↓
-                                                                      ffmpeg decoder
-                                                                            ↓
-                                                                         aligner
-                                                                            ↓
-                                                                    segment comparator
-                                                                            ↓
-                                                                     variant classifier
-                                                                            ↓
-                                                       SAME/ALTERED/DIFFERENT_VERSION/
-                                                           UNCERTAIN/NOT_CHECKED
-                                                                            ↓
-                                                                          SQLite
+                                         MATCHED/CONFLICT/UNMATCHED   variant evidence
+                                                  └──────────┬──────────────┘
+                                                             ↓
+                                                  LibraryCoverageService
+                                                             ↓
+                                                    CoverageRepository
+                                                             ↓
+                                                           SQLite
 ```
 
-Matching and variant verification never call the Yandex network provider. They work from cached provider metadata and local files already known to MusicArk.
+Matching, variant verification, and coverage never need the Yandex network provider for analytical queries. They work from cached provider metadata, Local Library state, and persisted authoritative results.
 
 ## Identity Matching — v0.5
 
 ### MatchingInputRepository
 
-Materializes a unique `(provider_id, external_id)` identity set from cached collection membership into `provider_tracks`. A track present in Liked and multiple playlists is processed once.
+Materializes a unique `(provider_id, external_id)` identity set from cached collection membership into `provider_tracks`. A track present in Liked and multiple playlists is processed once. v0.6 additionally canonicalizes playlist duplicate occurrence storage keys from `payload_json.external_id`, so synthetic collection keys never become fake provider identities.
 
 ### LocalMatchIndex / CandidateGenerator / MatchScorer
 
@@ -66,16 +58,18 @@ Variant detection is an additional layer. It never changes `MATCHED / CONFLICT /
 
 Extracts semantic variant markers from provider/local title, album, and weak filename evidence. It also carries provider `explicit` (mapped from Yandex `content_warning`) and any locally known explicit flag. Explicit mismatch is evidence only; it is not a censorship verdict.
 
-### ReferenceAudioResolver
+### ReferenceAudioResolver / ReferenceAudioAcquirer
 
-Deep verification requires an exact local reference for the provider identity. Only these strict filename conventions are accepted:
+Deep verification requires an exact reference for the provider identity. Only these strict filename conventions are accepted:
 
 ```text
 yandex_<track_id>.<ext>
 yandex-<track_id>.<ext>
 ```
 
-The resolver first checks `.musicark/downloads/yandex`, then indexed local files. Arbitrary numbers elsewhere in a path are ignored.
+The resolver first checks `.musicark/downloads/yandex`, then indexed local files. Arbitrary numbers elsewhere in a path are ignored. The current tested service may, during an **explicit single-track `variant_run`**, use the bounded `ReferenceAudioAcquirer` to obtain one exact reference if none is available. `variant_run_all_available` remains bounded to already-resolvable references and does not silently download a library.
+
+Reference acquisition is a verification mechanism only: an acquired reference is not indexed into Local Library and does not create `track_links`.
 
 ### AudioDecoder / FfmpegAudioDecoder
 
@@ -87,7 +81,7 @@ signed 16-bit PCM
 11025 Hz
 ```
 
-No giant temporary WAV is required. The decoded buffer stays compact and is never stored in SQLite. ffmpeg is optional: if it is absent, the app and metadata matching continue working and the result remains conservative.
+No giant temporary WAV is required. The decoded buffer stays compact and is never stored in SQLite. ffmpeg is optional: if it is absent, the app, identity matching, and v0.6 Coverage continue working and variant output remains conservative.
 
 ### AudioAligner
 
@@ -114,9 +108,52 @@ Classification uses several explainable signals instead of one magic threshold:
 
 The precision rule is conservative: a false `SAME` is worse than `UNCERTAIN`.
 
-A possible clean/censored interpretation is emitted only when several signals agree (provider explicit metadata, close duration, high overall recording similarity, and localized divergence). The reason is named `possible_clean_or_censored_variant`; it is not presented as certain lyric classification.
+A possible clean/censored interpretation is emitted only when several signals agree. The reason is named `possible_clean_or_censored_variant`; it is not presented as certain lyric classification.
 
-## SQLite v1.5.0
+## Library Coverage — v0.6
+
+Coverage is an application-level derived view. It consumes current v0.5 identity state instead of running its own candidate generation/scoring.
+
+```text
+active provider collection membership
+        +
+matching_results / track_links
+        +
+local_audio_files
+        +
+track_variant_results
+        +
+provider_track_actions
+        ↓
+LibraryCoverageService
+        ↓
+CoverageRepository (SQL)
+        ↓
+covered / missing / needs_review / not_analyzed
+```
+
+Primary truth rules:
+
+- `covered`: current accepted automatic/manual identity, available indexed local file, and accepted `track_links` relationship;
+- `missing`: current authoritative `UNMATCHED` with no accepted current local link;
+- `needs_review`: `CONFLICT`, stale manual accepted decision, or invalid accepted link;
+- `not_analyzed`: no matching result or stale automatic result after matcher/provider/Local Library fingerprint change.
+
+`not matched == missing` is forbidden. Variant state is joined as a separate secondary dimension for covered identities; `ALTERED`, `DIFFERENT_VERSION`, `UNCERTAIN`, and `NOT_CHECKED` never increase Missing.
+
+The reference cache is also separate. `reference exists → covered` is forbidden because coverage requires a normal indexed Local Library link.
+
+### Active dataset / scopes
+
+Coverage starts from active `provider_collection_items` / `provider_collection_snapshots`, canonicalizes provider identity from payload `external_id`, and deduplicates globally by `(provider_id, external_id)`. All collection memberships are aggregated for the row/detail UI. Liked and a specific playlist can be used as scopes; playlist scope preserves provider order.
+
+Tracks removed from all active Yandex collections cannot appear as zombie Missing rows. Historical `wanted/ignored` rows may remain stored but do not enter an active query unless that provider identity is active again.
+
+### SQL / performance boundary
+
+Summary, list, search, filters, sorting, and pagination are SQL-backed CTE/join queries. Flutter does not receive the entire 5k–20k derived provider library to compute technical coverage, and list queries do not issue one database query per provider track.
+
+## SQLite v1.6.0
 
 Migration history is forward-only:
 
@@ -126,30 +163,32 @@ Migration history is forward-only:
 1.4.0 Identity Matching
   ↓
 1.5.0 Variant Detection
+  ↓
+1.6.0 Coverage user actions
 ```
 
-v1.5 adds `track_variant_results` with primary key `(provider_id, external_id, local_file_id)`. It stores variant status, metadata evidence, audio similarity, reasons, altered regions, provider/local/reference fingerprints, analyzer version, reference path, and timestamps.
+v1.5 adds `track_variant_results` with primary key `(provider_id, external_id, local_file_id)` and stores variant evidence/fingerprints without PCM/audio blobs.
 
-No PCM/audio blobs are stored. Yandex cache, Local Library roots/files, `matching_results`, `track_links`, `match_conflicts`, and manual decisions are preserved.
+v1.6 adds only:
+
+```text
+provider_track_actions(
+  provider_id,
+  external_id,
+  action CHECK wanted|ignored,
+  created_at,
+  updated_at,
+  PRIMARY KEY(provider_id, external_id)
+)
+```
+
+No row means `unreviewed`. Coverage status itself is not persisted. Yandex cache, Local Library roots/files, `matching_results`, `track_links`, `match_conflicts`, manual decisions, and `track_variant_results` are preserved.
 
 ## Incremental analysis / invalidation
 
-Identity matching retains its v0.5 matcher/provider/library fingerprints.
+Identity matching retains its v0.5 matcher/provider/library fingerprints. Automatic results whose matcher/provider/local-library fingerprint is no longer current are `not_analyzed` for Coverage until Matching reruns. Manual links reuse v0.5 manual stale/fingerprint semantics and become `needs_review` when stale.
 
-Variant results have independent fingerprints for:
-
-- provider metadata relevant to variant semantics;
-- local path + file size + mtime;
-- reference path + file size + mtime;
-- `ANALYZER_VERSION`.
-
-Unchanged successful results skip re-decode. Local/reference/provider changes invalidate the cache. Technical failures are not treated as permanently cacheable, so installing ffmpeg or repairing a file can recover without deleting the DB.
-
-## Performance boundary
-
-Audio verification occurs only after a `MATCHED` identity (including manual accepted links). `UNMATCHED` and unresolved `CONFLICT` rows are not decoded. `variant_run_all_available` further restricts work to pairs with resolvable exact-ID references and isolates per-file failures.
-
-All audio operations stay Python-side. PCM never crosses Flutter ↔ Python. Flutter starts bridge processes asynchronously, keeping heavy decoding outside the UI isolate.
+Variant results retain their independent provider/local/reference/analyzer fingerprints and are recomputed by the existing v0.5.1 verification workflow when required. Coverage does not invent a second variant cache-validity model.
 
 ## Bridge boundary
 
@@ -164,7 +203,7 @@ matching_accept
 matching_reject
 ```
 
-Variant commands are separate:
+Variant commands remain separate:
 
 ```text
 variant_capabilities
@@ -175,12 +214,30 @@ variant_result
 variant_results
 ```
 
-No variant logic is added to `matching_run`.
+Coverage adds:
+
+```text
+coverage_summary
+coverage_tracks
+coverage_track
+coverage_collections
+coverage_set_action
+coverage_set_actions
+```
+
+Bulk provider IDs use structured JSON transport through the existing process boundary, not unsafe shell concatenation. Flutter launches Python with `runInShell: false`.
 
 ## Safety / privacy
 
-Both analytical layers are read-only toward music files and Yandex Music. They perform no automatic download, metadata mutation, rename/move/delete, playlist edit, like/dislike, or upload. Local metadata/audio is not sent to external matching, metadata, fingerprint, or ML services.
+All analytical layers are read-only toward user music and Yandex Music. v0.6 performs no missing-track download/source selection, metadata mutation, rename/move/delete, playlist edit, like/dislike, or upload. Local metadata/paths/matching/missing-list data are not sent to third-party services. Existing bounded v0.5.1 explicit reference acquisition remains verification-only and cannot establish Local Library coverage.
 
 ## Future boundary
 
-v0.6 Missing Tracks can consume identity results with no accepted local match. v0.5.1 only improves verification of already established links; it does not implement download or sync.
+v0.7 can consume the simple derived condition:
+
+```text
+coverage_status = missing
+AND user_action = wanted
+```
+
+v0.6 deliberately does not implement actual download execution or source selection.

@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from musicark.core.errors import StorageError
+from musicark.storage.coverage_migration import migrate_coverage_v06
 from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
 
 
@@ -188,5 +189,6 @@ def initialize_database(database_path: Path) -> None:
                     conn.execute(statement)
                 ensure_schema_version_seed(conn)
                 migrate_schema(conn)
+                migrate_coverage_v06(conn)
     except sqlite3.Error as exc:
         raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

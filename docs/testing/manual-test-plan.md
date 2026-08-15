@@ -1,30 +1,33 @@
-# Manual Test Plan — MusicArk v0.5.1
+# Manual Test Plan — MusicArk v0.6.0
 
-Use the real cached Yandex Library together with a disposable/local test collection such as `C:\MusicArk-Test`. Do not delete `.musicark\musicark.db`, saved Yandex credentials, or music files for this test.
+Use the real cached Yandex Library together with the real Local Library or a disposable test subset. Do not delete `.musicark\musicark.db`, saved Yandex credentials, matching/manual/variant results, or music files for this test.
 
 ## Preconditions
 
 - Windows Flutter desktop target works;
-- existing v0.5 database/manual decisions remain in place so migration `1.4.0 → 1.5.0` is exercised;
+- existing v0.5.1 database/manual decisions remain in place so migration `1.5.0 → 1.6.0` is exercised;
 - Yandex Liked/playlists are cached;
 - Local Library is scanned;
 - v0.5 matching has representative `MATCHED`, `CONFLICT`, and `UNMATCHED` rows;
-- optional ffmpeg is installed for deep-audio cases; a separate run without ffmpeg is also required;
+- v0.5.1 has representative `SAME`, `ALTERED`, `DIFFERENT_VERSION`, `UNCERTAIN`, and `NOT_CHECKED` results where possible;
+- optional ffmpeg is installed for deep-audio cases; a separate run without ffmpeg may still be used for v0.5.1 regression;
 - any manual edited-audio fixtures are copies of owned/test material, never the primary music archive.
 
-## Migration / v0.5 regression
+## Migration / regression
 
-1. Launch v0.5.1 against the existing v0.5 database.
-2. Confirm schema becomes `1.5.0` automatically.
+1. Launch v0.6 against the existing v0.5.1 database.
+2. Confirm schema becomes `1.6.0` automatically.
 3. Confirm Yandex saved session, Liked, playlists, and cached tracks remain available.
 4. Confirm Local Library roots/tracks/search/sorting remain available.
 5. Confirm previous `MATCHED / CONFLICT / UNMATCHED` results still exist.
-6. Confirm a v0.5 manual accepted link still has manual precedence.
-7. Confirm no database deletion/rescan is required merely for migration.
+6. Confirm v0.5 manual accepted/rejected state still has manual precedence.
+7. Confirm v0.5.1 variant results remain present.
+8. Confirm no database deletion/rescan is required merely for migration.
+9. Confirm `provider_track_actions` is created and existing data remains intact.
 
 ## Identity Matching baseline
 
-Repeat the v0.5 precision checks before evaluating variants:
+Repeat the v0.5 precision checks before evaluating Coverage:
 
 - obvious title+artist/duration matches stay correct;
 - ambiguous candidates remain `CONFLICT`/`UNMATCHED` rather than false `MATCHED`;
@@ -32,22 +35,80 @@ Repeat the v0.5 precision checks before evaluating variants:
 - duplicate Liked/playlist membership remains one provider identity;
 - deleted local files invalidate links after Local Library rescan.
 
-Variant work must not change the meaning of identity status or confidence.
+Coverage work must not change the meaning of identity status or confidence.
 
-## Variant UI baseline
+## Coverage truth table
 
-1. Open **Сопоставление**.
-2. For a matched row confirm the identity badge remains `MATCHED` and a separate variant badge appears.
-3. Before analysis the variant state may be `NOT CHECKED`.
-4. Open detail and confirm separate **Identity** and **Variant verification** sections.
-5. Confirm identity confidence is not displayed as audio similarity.
-6. Confirm `Проверить версию` is available on matched rows.
-7. Confirm unresolved conflict/unmatched rows do not trigger audio analysis.
-8. Use **Проверить все доступные** and confirm progress/busy state remains visible while the Python-side batch runs.
+Open **Недостающие** and verify the primary states independently:
 
-## Reference resolver
+- current `MATCHED` / current accepted manual link → `COVERED`;
+- current authoritative `UNMATCHED` with no accepted current local link → `MISSING`;
+- current `CONFLICT` → `NEEDS_REVIEW`;
+- stale manual accepted decision / invalid accepted local link → `NEEDS_REVIEW`;
+- no matching result → `NOT_ANALYZED`;
+- automatic result stale because matcher/provider/Local Library fingerprint changed → `NOT_ANALYZED`.
 
-Prepare exact-ID references under `.musicark\downloads\yandex` or as indexed local files:
+Explicitly confirm these forbidden mappings never occur:
+
+```text
+CONFLICT      → MISSING
+NOT_ANALYZED  → MISSING
+STALE         → MISSING
+```
+
+## Coverage summary
+
+1. Compare Coverage total with the unique active provider identities in the selected scope.
+2. Confirm `covered + missing + needs_review + not_analyzed = total`.
+3. Confirm Local coverage uses `covered / total`.
+4. Confirm Matching analyzed is shown separately and decreases when `not_analyzed` exists.
+5. Confirm variant counts are shown separately from primary coverage counts.
+6. Confirm summary for Liked and individual playlists matches their unique provider identities.
+
+## Collection identity / scope
+
+Prepare or find one track present in Liked and at least two playlists.
+
+- Global coverage counts it once.
+- Row/detail shows all collection memberships.
+- Liked scope includes it once.
+- Each relevant playlist scope includes it once.
+- A playlist with duplicate occurrences must not create fake provider identities.
+- Playlist scope preserves Yandex order.
+- A track removed from Liked and every active playlist disappears from active Coverage after refresh.
+
+## Search / sorting / pagination
+
+Verify SQL-backed UI behavior for a library large enough to paginate:
+
+- search by title;
+- search by artist;
+- search by album;
+- search by collection/playlist name;
+- sort by Artist / Title / Album / Collection / Status where available;
+- playlist-order sort inside playlist scope;
+- next/previous pages load only page-sized result sets;
+- changing filter/search resets pagination safely.
+
+## Variant separation regression
+
+For current accepted identity matches confirm:
+
+```text
+MATCHED + SAME              → COVERED / SAME
+MATCHED + ALTERED           → COVERED / ALTERED
+MATCHED + DIFFERENT_VERSION → COVERED / DIFFERENT_VERSION
+MATCHED + UNCERTAIN         → COVERED / UNCERTAIN
+MATCHED + NOT_CHECKED       → COVERED / NOT_CHECKED
+```
+
+None may increment Missing.
+
+The **Сопоставление** page must continue to show identity and variant state separately. Identity confidence is not audio similarity.
+
+## Reference resolver / acquisition boundary
+
+Exact-ID references use:
 
 ```text
 yandex_69046542.mp3
@@ -59,114 +120,114 @@ Verify:
 - exact filenames are accepted;
 - `Artist 69046542 - Song.mp3` is not treated as a reference;
 - a random directory number is not treated as a reference ID;
-- no reference is downloaded automatically.
+- an explicit single-track v0.5.1 verification may boundedly acquire one exact reference when the current implementation supports it;
+- batch verification does not silently acquire an entire library;
+- reference files are not inserted into Local Library and do not create `track_links`.
 
-## Real-library / owned-fixture matrix
+### Mandatory Coverage reference regression
 
-Prepare a small controlled set:
+Create/use one strict reference file where:
 
-### A. Same recording, MP3 ↔ FLAC
+```text
+reference exists
++
+no accepted indexed Local Library link
++
+matching = UNMATCHED
+```
 
-Expected: `SAME` when alignment/audio evidence is strong.
+Expected Coverage: **MISSING**. The reference must never establish `COVERED`.
 
-### B. Same recording, changed gain/encoding
+## User triage
 
-Create/obtain an owned/test copy with changed volume or encoding. Expected: still `SAME`, not `ALTERED` merely because bytes differ.
+For several current Missing tracks:
 
-### C. Clean / Explicit pair
+1. Mark one **Нужен** (`wanted`).
+2. Mark one **Игнорировать** (`ignored`).
+3. Leave one unresolved (`unreviewed`).
+4. Restart MusicArk and confirm decisions persist.
+5. Use bulk selection and apply wanted/ignored/reset.
+6. Reset one decision and confirm it becomes unreviewed/no stored action.
+7. Confirm ignored remains technically Missing and can be revealed by filters.
+8. Confirm no Download button/queue execution exists in v0.6 Coverage.
 
-If both versions are legally available, compare them. Metadata `explicit` alone must not assert censorship. If most audio matches and localized stable divergences exist, `ALTERED` with `possible_clean_or_censored_variant` is acceptable.
+## Matching change / future download contract
 
-### D. Radio Edit
+1. Start from `missing + wanted`.
+2. Add/scan a matching local file or otherwise rerun existing Matching so the identity becomes current `MATCHED`.
+3. Confirm technical Coverage changes to `COVERED` immediately after rerun/refresh.
+4. Confirm the historical wanted row may remain stored but does not appear in `status=missing AND user_action=wanted`.
 
-Expected: must not be automatically classified `SAME` merely from title/artist identity. `DIFFERENT VERSION` is preferred when semantic/duration/audio evidence is strong; otherwise `UNCERTAIN` is acceptable.
+This is the future v0.7 contract.
 
-### E. Live version
+## Local Library rescan / stale automatic result
 
-Expected: not `SAME`.
+1. Record a current `UNMATCHED` row shown as Missing.
+2. Change Local Library state by adding/removing/replacing a candidate file and rescan.
+3. Before rerunning Matching, confirm the old automatic result is no longer asserted as Missing; it must be `NOT_ANALYZED` / require rematch.
+4. Rerun the existing Matching workflow and confirm Coverage follows the new authoritative result.
 
-### F. Remix
+## Variant UI baseline (v0.5.1 regression)
 
-Expected: not `SAME`.
+1. Open **Сопоставление**.
+2. For a matched row confirm the identity badge remains `MATCHED` and a separate variant badge appears.
+3. Before analysis the variant state may be `NOT CHECKED`.
+4. Open detail and confirm separate **Identity** and **Variant verification** sections.
+5. Confirm `Проверить версию` is available on matched rows.
+6. Confirm unresolved conflict/unmatched rows do not trigger audio analysis.
+7. Use **Проверить все доступные** and confirm the batch remains bounded to available references.
 
-### G. Local 2-second replacement
+## Real-library / owned-fixture variant matrix
 
-On a copy of test/owned audio replace a short region with silence or another tone/noise. Expected: `ALTERED`, with one merged altered region around the edited interval rather than dozens of tiny windows.
+Retain the v0.5.1 regression matrix:
 
-## Alignment
+- same recording MP3 ↔ FLAC: expected `SAME` when evidence is strong;
+- same recording with gain/encoding change: should not become `ALTERED` merely because bytes differ;
+- clean/explicit pair, when legally available: metadata alone must not assert censorship; localized audio differences may produce `ALTERED` + `possible_clean_or_censored_variant`;
+- Radio Edit / Live / Remix: must not become `SAME` solely from title/artist identity;
+- copied owned/test audio with ~2 s silence/tone replacement: expected localized `ALTERED` with merged region;
+- small leading offset: bounded alignment should compensate where reliable;
+- materially shortened/distributed-different recording: `DIFFERENT_VERSION` or conservative `UNCERTAIN`, never obvious false `SAME`.
 
-Add roughly 0.5–2 seconds of leading silence to an owned/test copy. Expected: bounded alignment compensates for the small start offset and a genuinely same recording can remain `SAME`.
-
-A large/unreliable offset must become `UNCERTAIN`, not force an optimistic class.
-
-## Duration / substantially different recording
-
-Test a materially shortened version and a recording that diverges over a large fraction of its duration. Expected: `DIFFERENT VERSION` or conservative `UNCERTAIN` near policy boundaries; never obvious `DIFFERENT VERSION → SAME`.
-
-## Altered regions
-
-For an `ALTERED` result confirm detail contains:
-
-- start time;
-- end time;
-- mean similarity;
-- merged region behavior.
-
-Adjacent bad windows should be merged. A single mild outlier surrounded by normal windows should not automatically create a region.
-
-## ffmpeg unavailable
+## ffmpeg unavailable (variant regression)
 
 Run once with ffmpeg unavailable from PATH.
 
 Expected:
 
 - app starts normally;
-- Yandex/Local Library/matching remain functional;
-- UI shows `Аудиосравнение недоступно: ffmpeg не найден`;
-- variant technical state is `NOT CHECKED`/conservative;
-- technical failure is never converted to `DIFFERENT VERSION`;
-- installing/restoring ffmpeg allows later re-analysis without deleting the DB.
-
-## Cache / invalidation
-
-1. Analyze a pair with a valid reference.
-2. Run it again without changes: decoded audio should be reused from the stored result (no second decode).
-3. Change the local test file: old variant result must become stale and recompute.
-4. Restore local, then change reference: recompute.
-5. Refresh provider metadata changing explicit/variant-relevant fields: recompute.
-6. Change `ANALYZER_VERSION` in a development test: recompute.
-7. Confirm v0.5 identity need not be rebuilt solely because explicit changed.
-
-## Batch resilience / performance
-
-- Use many Yandex identities but only a small subset with exact references.
-- Confirm audio verification touches only `MATCHED`/manual accepted pairs with references.
-- Confirm no Local Library × Yandex full decode loop occurs.
-- Introduce one missing/corrupt/unreadable test file and confirm the rest of the batch continues.
-- UI must remain responsive while the external Python analysis process runs.
+- Yandex/Local Library/Matching/Coverage remain functional;
+- variant audio verification reports a conservative unavailable/NOT_CHECKED state;
+- technical failure never becomes `DIFFERENT_VERSION`;
+- restoring ffmpeg allows later variant re-analysis without deleting the DB.
 
 ## Offline / privacy
 
-After caches are populated disconnect network access and run identity + variant analysis. Both must operate locally. No local metadata/audio should be uploaded to Yandex or third-party matching/fingerprint/metadata APIs.
+After Yandex cache, Local Library scan, Matching and any desired variant checks are populated, disconnect network access.
+
+Expected:
+
+- Coverage summary/list/search/filter/triage continue working;
+- existing Matching/variant data remains usable;
+- no local metadata/audio/path/matching/missing-list data is uploaded to Yandex or third-party services.
 
 ## Safety regression
 
 During all tests verify MusicArk does not:
 
 - rename, move, delete, transcode, or edit local music files;
-- alter the reference file;
+- alter reference files;
+- promote reference cache into Local Library;
 - create persistent giant decoded WAV files;
 - store PCM/audio blobs in SQLite;
 - like/dislike tracks, edit playlists, upload, or otherwise mutate Yandex Music;
-- automatically download reference tracks;
+- execute Missing Tracks download/source selection in v0.6;
 - delete `.musicark\musicark.db` or saved credentials.
 
 ## Automated commands
 
-Do not run GitHub Actions for this milestone. Run locally:
-
 ```powershell
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -p "test_*.py" -v
 cd ui\musicark_ui
 flutter analyze
 flutter test
@@ -175,15 +236,14 @@ flutter run -d windows
 
 ## Pass criteria
 
-- migration `1.4.0 → 1.5.0` preserves Yandex cache, Local Library, v0.5 matches and manual decisions;
-- v0.5 identity semantics/regressions remain correct;
-- exact-ID reference resolver rejects incidental numbers;
-- same-recording codec/gain cases are not rejected merely because bytes differ;
-- localized edits can produce `ALTERED` + merged regions;
-- Live/Remix/Acoustic/Instrumental/Radio Edit do not become `SAME` from title/artist alone;
-- explicit mismatch without audio does not claim censorship;
-- missing ffmpeg/reference/corrupt file fails gracefully;
-- unchanged pairs avoid redundant decode and local/reference/provider changes invalidate cache;
-- batch remains bounded to matched/reference-available pairs;
+- migration `1.5.0 → 1.6.0` preserves Yandex cache, Local Library, identity/manual/conflict and variant state;
+- v0.5 identity and v0.5.1 variant regression suites remain correct;
+- Coverage truth table and stale handling are correct;
+- global identity dedup / collection scopes / playlist order are correct;
+- reference cache never counts as Local Library coverage;
+- wanted/ignored/reset persist and bulk triage works;
+- newly matched wanted track leaves active Missing+wanted;
+- SQL pagination/search/filter remains responsive on the real library;
+- offline Coverage works;
 - Python tests, Flutter analyzer, and Flutter tests are green on Windows;
-- real-library/owned-fixture review is completed before accepting thresholds.
+- real-library Coverage/manual review is completed before release acceptance.

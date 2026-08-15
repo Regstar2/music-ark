@@ -1,4 +1,4 @@
-"""Regression tests for upgrading a real v0.2 collection cache through v0.5.1."""
+"""Regression tests for upgrading a real v0.2 collection cache through v0.6."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class V03MigrationTests(unittest.TestCase):
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(provider_collection_snapshots)")}
                 local_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
-            self.assertEqual(version, "1.5.0")
+            self.assertEqual(version, "1.6.0")
             self.assertEqual(json.loads(row[0])["displayName"], "Tester")
             self.assertEqual(row[1], 1)
             self.assertEqual(row[2], "2026-08-11T10:00:00+00:00")
@@ -49,6 +49,7 @@ class V03MigrationTests(unittest.TestCase):
             self.assertIn("local_library_roots", local_tables)
             self.assertIn("matching_results", local_tables)
             self.assertIn("track_variant_results", local_tables)
+            self.assertIn("provider_track_actions", local_tables)
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ class MusicArkBridge implements MusicArkBridgeClient {
     String? sort,
   }) async {
     final repoRoot = _resolveRepoRoot();
-    final python = await _resolvePythonCommand();
+    final python = await _resolvePythonCommand(repoRoot);
     final srcPath = '$repoRoot${Platform.pathSeparator}src';
     final existingPythonPath = Platform.environment['PYTHONPATH'];
     final mergedPythonPath = existingPythonPath == null || existingPythonPath.isEmpty
@@ -162,21 +162,42 @@ class MusicArkBridge implements MusicArkBridgeClient {
         File('${directory.path}${separator}src${separator}musicark${separator}mvp_bridge.py').existsSync();
   }
 
-  Future<_PythonCommand> _resolvePythonCommand() async {
+  Future<_PythonCommand> _resolvePythonCommand(String repoRoot) async {
     final override = Platform.environment['MUSICARK_PYTHON']?.trim();
-    if (override != null && override.isNotEmpty) return _PythonCommand(override);
+    if (override != null && override.isNotEmpty) {
+      final explicit = _PythonCommand(override);
+      if (await _pythonWorks(explicit)) return explicit;
+    }
+
+    final separator = Platform.pathSeparator;
+    final repoVenv = Platform.isWindows
+        ? '$repoRoot${separator}.venv${separator}Scripts${separator}python.exe'
+        : '$repoRoot${separator}.venv${separator}bin${separator}python';
+    if (File(repoVenv).existsSync()) {
+      final local = _PythonCommand(repoVenv);
+      if (await _pythonWorks(local)) return local;
+    }
+
     final candidates = Platform.isWindows
         ? const [_PythonCommand('python'), _PythonCommand('py', prefixArgs: ['-3'])]
         : const [_PythonCommand('python3'), _PythonCommand('python')];
     for (final candidate in candidates) {
-      try {
-        final result = await Process.run(candidate.executable, [...candidate.prefixArgs, '--version'], runInShell: false);
-        if (result.exitCode == 0) return candidate;
-      } on ProcessException {
-        // Try the next launcher.
-      }
+      if (await _pythonWorks(candidate)) return candidate;
     }
     throw const MusicArkBridgeException('python_not_found', AppStrings.pythonNotFound);
+  }
+
+  Future<bool> _pythonWorks(_PythonCommand candidate) async {
+    try {
+      final result = await Process.run(
+        candidate.executable,
+        [...candidate.prefixArgs, '--version'],
+        runInShell: false,
+      );
+      return result.exitCode == 0;
+    } on ProcessException {
+      return false;
+    }
   }
 }
 

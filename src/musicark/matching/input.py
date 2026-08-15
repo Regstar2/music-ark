@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import json
 from pathlib import Path
 import sqlite3
 
@@ -16,6 +17,10 @@ class MatchingInputRepository:
     matching/canonical code already uses provider_tracks as the provider identity
     table. This adapter keeps one row per (provider_id, external_id) and therefore
     prevents Liked + playlist membership from creating duplicate matching work.
+
+    Playlist cache duplicate occurrences use synthetic *storage keys* in
+    provider_collection_items.external_id. The canonical provider identity always
+    comes from payload_json.external_id when available.
     """
 
     def __init__(self, database_path: Path) -> None:
@@ -45,8 +50,17 @@ class MatchingInputRepository:
                     )
 
                 unique: dict[str, str] = {}
-                for _collection_id, external_id, payload_json in rows:
-                    key = str(external_id).strip()
+                for _collection_id, storage_external_id, payload_json in rows:
+                    try:
+                        payload = json.loads(payload_json or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                    canonical_external_id = (
+                        str(payload.get("external_id") or "").strip()
+                        if isinstance(payload, dict)
+                        else ""
+                    )
+                    key = canonical_external_id or str(storage_external_id).strip()
                     if key and key not in unique:
                         unique[key] = str(payload_json)
 

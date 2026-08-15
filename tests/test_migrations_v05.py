@@ -94,8 +94,11 @@ class MatchingMigrationV05Tests(unittest.TestCase):
                 variant_table = conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='track_variant_results'"
                 ).fetchone()
+                coverage_table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='provider_track_actions'"
+                ).fetchone()
 
-            self.assertEqual(version, "1.5.0")
+            self.assertEqual(version, "1.6.0")
             self.assertEqual(cache_count, 1)
             self.assertEqual(local[0], "Song")
             self.assertEqual(local[1], '["Artist"]')
@@ -104,6 +107,7 @@ class MatchingMigrationV05Tests(unittest.TestCase):
             self.assertEqual(local[4], 40)
             self.assertIsNotNone(result_table)
             self.assertIsNotNone(variant_table)
+            self.assertIsNotNone(coverage_table)
 
 
 if __name__ == "__main__":

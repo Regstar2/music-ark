@@ -40,6 +40,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("match_conflicts", tables)
             self.assertIn("matching_results", tables)
             self.assertIn("track_variant_results", tables)
+            self.assertIn("provider_track_actions", tables)
             self.assertIn("sync_plans", tables)
             self.assertIn("sync_operations", tables)
 

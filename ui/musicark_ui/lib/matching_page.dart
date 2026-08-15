@@ -433,18 +433,23 @@ class _ResultTile extends StatelessWidget {
       ),
       isThreeLine: true,
       trailing: SizedBox(
-        width: status == 'matched' ? 230 : 100,
-        child: Row(
+        width: 100,
+        child: Column(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             _CompactBadge(label: statusLabel),
             if (status == 'matched') ...[
-              const SizedBox(width: 6),
-              Flexible(
-                child: _VariantBadge(
-                  key: Key('variant-badge-${row['externalId']}'),
-                  status: '${variant['variantStatus'] ?? 'not_checked'}',
+              const SizedBox(height: 2),
+              SizedBox(
+                width: 100,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: _VariantBadge(
+                    key: Key('variant-badge-${row['externalId']}'),
+                    status: '${variant['variantStatus'] ?? 'not_checked'}',
+                  ),
                 ),
               ),
             ],
@@ -468,7 +473,7 @@ class _CompactBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         child: Text(
           label,
           maxLines: 1,

@@ -13,7 +13,11 @@ from musicark.variant.classifier import VariantClassifier
 from musicark.variant.metadata import MetadataVariantDetector, extract_variant_markers
 from musicark.variant.models import AudioComparison, DecodedAudio, ReferenceAudio, VariantStatus
 from musicark.variant.policy import SAMPLE_RATE
-from musicark.variant.reference import ReferenceAudioResolver, strict_yandex_id_from_path
+from musicark.variant.reference import (
+    ReferenceAcquisitionError,
+    ReferenceAudioResolver,
+    strict_yandex_id_from_path,
+)
 from musicark.variant.service import VariantDetectionService
 
 
@@ -188,7 +192,6 @@ class VariantAudioTests(unittest.TestCase):
         self.assertGreater(comparison.global_similarity, 0.94)
 
     def test_significant_shorter_duration_is_different_or_uncertain(self) -> None:
-        audio = synthetic_audio()
         comparison = AudioComparison(0.0, 1.0, 0.91, 0.93, 0.08, (), 20)
         status, _ = self.classifier.classify(
             self._evidence(),
@@ -261,6 +264,11 @@ class _FixedReferenceResolver:
         if self.path is None:
             return None
         return ReferenceAudio(self.path, provider_id, external_id)
+
+
+class _UnavailableReferenceAcquirer:
+    def acquire(self, provider_id: str, external_id: str) -> ReferenceAudio:
+        raise ReferenceAcquisitionError("reference not found in isolated unit test")
 
 
 class _CountingVerifier:
@@ -338,13 +346,14 @@ class VariantServiceTests(unittest.TestCase):
             provider_id="yandex_music",
             audio_verifier=verifier,  # type: ignore[arg-type]
             reference_resolver=_FixedReferenceResolver(reference),  # type: ignore[arg-type]
+            reference_acquirer=_UnavailableReferenceAcquirer(),  # type: ignore[arg-type]
         )
 
     def test_reference_missing_is_not_checked(self) -> None:
         service = self._service(_CountingVerifier(), None)
         result = service.run("69046542")["result"]
         self.assertEqual("not_checked", result["variantStatus"])
-        self.assertIn("reference_audio_missing", result["variantReasons"])
+        self.assertIn("reference_unavailable", result["variantReasons"])
 
     def test_decoder_unavailable_is_graceful(self) -> None:
         verifier = _CountingVerifier(available=False)
@@ -408,7 +417,6 @@ class VariantServiceTests(unittest.TestCase):
             )
             conn.commit()
         resolver = ReferenceAudioResolver(self.db, self.root)
-        # The strict reference from setUp is not in .musicark/downloads and not indexed.
         self.assertIsNone(resolver.resolve("yandex_music", "69046542"))
 
     def test_migration_14_to_15_preserves_existing_data(self) -> None:
@@ -435,7 +443,7 @@ class VariantServiceTests(unittest.TestCase):
             table = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='track_variant_results'"
             ).fetchone()
-        self.assertEqual("1.5.0", version)
+        self.assertEqual("1.6.0", version)
         self.assertEqual(1, provider_count)
         self.assertGreaterEqual(local_count, 1)
         self.assertEqual(("matched", 1), matching)

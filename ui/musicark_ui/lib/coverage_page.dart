@@ -45,6 +45,13 @@ class _CoveragePageState extends State<CoveragePage> {
   bool _matching = false;
   String? _error;
 
+  int get _pageLimit => _pageSize;
+
+  void _updateView(VoidCallback update) {
+    if (!mounted) return;
+    setState(update);
+  }
+
   @override
   void initState() {
     super.initState();

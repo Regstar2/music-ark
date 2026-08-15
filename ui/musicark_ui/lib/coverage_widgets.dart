@@ -2,22 +2,13 @@ part of 'coverage_page.dart';
 
 class _Summary extends StatelessWidget {
   const _Summary({required this.summary});
-
   final Map<String, dynamic> summary;
 
   @override
   Widget build(BuildContext context) {
-    final total = _asInt(summary['total']);
-    final covered = _asInt(summary['covered']);
-    final missing = _asInt(summary['missing']);
-    final review = _asInt(summary['needsReview']);
-    final unknown = _asInt(summary['notAnalyzed']);
-    final coverage = _asDouble(summary['coveragePercent']);
-    final analyzed = _asDouble(summary['matchingAnalyzedPercent']);
     final variants = summary['variantVerification'] is Map
         ? Map<String, dynamic>.from(summary['variantVerification'] as Map)
         : const <String, dynamic>{};
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
       child: Card(
@@ -28,13 +19,13 @@ class _Summary extends StatelessWidget {
             spacing: 24,
             runSpacing: 8,
             children: [
-              Text('Yandex: $total'),
-              Text('Локально найдено: $covered'),
-              Text('Отсутствует: $missing'),
-              Text('Требует проверки: $review'),
-              Text('Не анализировалось: $unknown'),
-              Text('Local coverage: ${coverage.toStringAsFixed(1)}%'),
-              Text('Matching analyzed: ${analyzed.toStringAsFixed(1)}%'),
+              Text('Yandex: ${_asInt(summary['total'])}'),
+              Text('Локально найдено: ${_asInt(summary['covered'])}'),
+              Text('Отсутствует: ${_asInt(summary['missing'])}'),
+              Text('Требует проверки: ${_asInt(summary['needsReview'])}'),
+              Text('Не анализировалось: ${_asInt(summary['notAnalyzed'])}'),
+              Text('Local coverage: ${_asDouble(summary['coveragePercent']).toStringAsFixed(1)}%'),
+              Text('Matching analyzed: ${_asDouble(summary['matchingAnalyzedPercent']).toStringAsFixed(1)}%'),
               Text(
                 'Variant — Same ${_asInt(variants['same'])}, '
                 'Altered ${_asInt(variants['altered'])}, '
@@ -51,23 +42,17 @@ class _Summary extends StatelessWidget {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    super.key,
-    required this.selected,
-    required this.label,
-    required this.onSelected,
-  });
-
+  const _StatusChip({super.key, required this.selected, required this.label, required this.onSelected});
   final bool selected;
   final String label;
   final VoidCallback onSelected;
 
   @override
   Widget build(BuildContext context) => ChoiceChip(
-    selected: selected,
-    label: Text(label),
-    onSelected: (_) => onSelected(),
-  );
+        selected: selected,
+        label: Text(label),
+        onSelected: (_) => onSelected(),
+      );
 }
 
 class _CoverageRow extends StatelessWidget {
@@ -80,6 +65,7 @@ class _CoverageRow extends StatelessWidget {
     required this.onWanted,
     required this.onIgnored,
     required this.onReset,
+    required this.onDownload,
     required this.onOpenMatching,
   });
 
@@ -90,6 +76,7 @@ class _CoverageRow extends StatelessWidget {
   final VoidCallback? onWanted;
   final VoidCallback? onIgnored;
   final VoidCallback? onReset;
+  final VoidCallback? onDownload;
   final VoidCallback? onOpenMatching;
 
   @override
@@ -97,12 +84,9 @@ class _CoverageRow extends StatelessWidget {
     final provider = item['provider'] is Map
         ? Map<String, dynamic>.from(item['provider'] as Map)
         : const <String, dynamic>{};
-    final artists = provider['artists'] is List
-        ? (provider['artists'] as List).join(', ')
-        : '';
+    final artists = provider['artists'] is List ? (provider['artists'] as List).join(', ') : '';
     final title = (provider['title'] ?? '').toString();
-    final album =
-        (provider['album_title'] ?? provider['album'] ?? '').toString();
+    final album = (provider['album_title'] ?? provider['album'] ?? '').toString();
     final status = (item['coverageStatus'] ?? '').toString();
     final action = (item['userAction'] ?? 'unreviewed').toString();
     final variant = item['variantStatus']?.toString();
@@ -128,23 +112,18 @@ class _CoverageRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '$artists — $title',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    Text('$artists — $title', style: Theme.of(context).textTheme.titleMedium),
                     if (album.isNotEmpty) Text(album),
                     const SizedBox(height: 4),
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
                       children: collections
-                          .map(
-                            (collection) => Text(
-                              collection['id'] == 'liked'
-                                  ? '♥ Мне нравится'
-                                  : '▤ ${collection['title']}',
-                            ),
-                          )
+                          .map((collection) => Text(
+                                collection['id'] == 'liked'
+                                    ? '♥ Мне нравится'
+                                    : '▤ ${collection['title']}',
+                              ))
                           .toList(),
                     ),
                   ],
@@ -156,14 +135,10 @@ class _CoverageRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _StatusLabel(status: status),
-                    if (status == 'covered' && variant != null)
-                      _VariantLabel(status: variant),
-                    if ((status == 'needs_review' || status == 'not_analyzed') &&
-                        onOpenMatching != null)
+                    if (status == 'covered' && variant != null) _VariantLabel(status: variant),
+                    if ((status == 'needs_review' || status == 'not_analyzed') && onOpenMatching != null)
                       TextButton(
-                        key: ValueKey(
-                          'coverage-open-matching-${item['externalId']}',
-                        ),
+                        key: ValueKey('coverage-open-matching-${item['externalId']}'),
                         onPressed: onOpenMatching,
                         child: const Text('Открыть в сопоставлении'),
                       ),
@@ -172,7 +147,7 @@ class _CoverageRow extends StatelessWidget {
               ),
               if (onWanted != null)
                 SizedBox(
-                  width: 260,
+                  width: onDownload == null ? 260 : 360,
                   child: Wrap(
                     alignment: WrapAlignment.end,
                     spacing: 4,
@@ -187,6 +162,13 @@ class _CoverageRow extends StatelessWidget {
                         onPressed: action == 'ignored' ? null : onIgnored,
                         child: const Text('Игнорировать'),
                       ),
+                      if (onDownload != null)
+                        FilledButton.tonalIcon(
+                          key: ValueKey('coverage-download-${item['externalId']}'),
+                          onPressed: onDownload,
+                          icon: const Icon(Icons.download, size: 18),
+                          label: const Text('В загрузки'),
+                        ),
                       if (action != 'unreviewed')
                         IconButton(
                           key: ValueKey('coverage-reset-${item['externalId']}'),
@@ -208,7 +190,6 @@ class _CoverageRow extends StatelessWidget {
 class _StatusLabel extends StatelessWidget {
   const _StatusLabel({required this.status});
   final String status;
-
   @override
   Widget build(BuildContext context) {
     final label = switch (status) {
@@ -225,7 +206,6 @@ class _StatusLabel extends StatelessWidget {
 class _VariantLabel extends StatelessWidget {
   const _VariantLabel({required this.status});
   final String status;
-
   @override
   Widget build(BuildContext context) {
     final label = switch (status) {
@@ -236,21 +216,12 @@ class _VariantLabel extends StatelessWidget {
       'not_checked' => 'Версия не проверена',
       _ => status,
     };
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Text(label),
-    );
+    return Padding(padding: const EdgeInsets.only(top: 4), child: Text(label));
   }
 }
 
 class _BulkBar extends StatelessWidget {
-  const _BulkBar({
-    required this.count,
-    required this.onWanted,
-    required this.onIgnored,
-    required this.onReset,
-  });
-
+  const _BulkBar({required this.count, required this.onWanted, required this.onIgnored, required this.onReset});
   final int count;
   final VoidCallback onWanted;
   final VoidCallback onIgnored;
@@ -258,33 +229,21 @@ class _BulkBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    key: const Key('coverage-bulk-bar'),
-    color: Theme.of(context).colorScheme.secondaryContainer,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      child: Row(
-        children: [
-          Text('$count выбрано'),
-          const SizedBox(width: 16),
-          TextButton(
-            key: const Key('coverage-bulk-wanted'),
-            onPressed: onWanted,
-            child: const Text('Нужны'),
+        key: const Key('coverage-bulk-bar'),
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          child: Row(
+            children: [
+              Text('$count выбрано'),
+              const SizedBox(width: 16),
+              TextButton(key: const Key('coverage-bulk-wanted'), onPressed: onWanted, child: const Text('Нужны')),
+              TextButton(key: const Key('coverage-bulk-ignored'), onPressed: onIgnored, child: const Text('Игнорировать')),
+              TextButton(key: const Key('coverage-bulk-reset'), onPressed: onReset, child: const Text('Сбросить')),
+            ],
           ),
-          TextButton(
-            key: const Key('coverage-bulk-ignored'),
-            onPressed: onIgnored,
-            child: const Text('Игнорировать'),
-          ),
-          TextButton(
-            key: const Key('coverage-bulk-reset'),
-            onPressed: onReset,
-            child: const Text('Сбросить'),
-          ),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 }
 
 class _Pagination extends StatelessWidget {
@@ -295,7 +254,6 @@ class _Pagination extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
   });
-
   final int offset;
   final int limit;
   final int total;
@@ -313,16 +271,8 @@ class _Pagination extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Text('$start–$end из $total'),
-          IconButton(
-            key: const Key('coverage-page-previous'),
-            onPressed: onPrevious,
-            icon: const Icon(Icons.chevron_left),
-          ),
-          IconButton(
-            key: const Key('coverage-page-next'),
-            onPressed: onNext,
-            icon: const Icon(Icons.chevron_right),
-          ),
+          IconButton(key: const Key('coverage-page-previous'), onPressed: onPrevious, icon: const Icon(Icons.chevron_left)),
+          IconButton(key: const Key('coverage-page-next'), onPressed: onNext, icon: const Icon(Icons.chevron_right)),
         ],
       ),
     );
@@ -330,14 +280,7 @@ class _Pagination extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({
-    required this.title,
-    this.subtitle,
-    this.actionLabel,
-    this.onAction,
-    this.secondaryAction,
-  });
-
+  const _EmptyState({required this.title, this.subtitle, this.actionLabel, this.onAction, this.secondaryAction});
   final String title;
   final String? subtitle;
   final String? actionLabel;
@@ -346,43 +289,32 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(title, textAlign: TextAlign.center),
-          if (subtitle != null) ...[
-            const SizedBox(height: 8),
-            Text(subtitle!, textAlign: TextAlign.center),
-          ],
-          if (actionLabel != null) ...[
-            const SizedBox(height: 12),
-            FilledButton(
-              key: const Key('coverage-run-matching'),
-              onPressed: onAction,
-              child: Text(actionLabel!),
-            ),
-          ],
-          if (secondaryAction != null) ...[
-            const SizedBox(height: 4),
-            TextButton(
-              onPressed: secondaryAction,
-              child: const Text('Открыть «Сопоставление»'),
-            ),
-          ],
-        ],
-      ),
-    ),
-  );
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, textAlign: TextAlign.center),
+              if (subtitle != null) ...[
+                const SizedBox(height: 8),
+                Text(subtitle!, textAlign: TextAlign.center),
+              ],
+              if (actionLabel != null) ...[
+                const SizedBox(height: 12),
+                FilledButton(key: const Key('coverage-run-matching'), onPressed: onAction, child: Text(actionLabel!)),
+              ],
+              if (secondaryAction != null) ...[
+                const SizedBox(height: 4),
+                TextButton(onPressed: secondaryAction, child: const Text('Открыть «Сопоставление»')),
+              ],
+            ],
+          ),
+        ),
+      );
 }
 
 class _CoverageDetailsDialog extends StatelessWidget {
-  const _CoverageDetailsDialog({
-    required this.payload,
-    required this.onOpenMatching,
-  });
-
+  const _CoverageDetailsDialog({required this.payload, required this.onOpenMatching});
   final Map<String, dynamic> payload;
   final VoidCallback? onOpenMatching;
 
@@ -400,9 +332,7 @@ class _CoverageDetailsDialog extends StatelessWidget {
     final variant = payload['variant'] is Map
         ? Map<String, dynamic>.from(payload['variant'] as Map)
         : const <String, dynamic>{};
-    final artists = provider['artists'] is List
-        ? (provider['artists'] as List).join(', ')
-        : '';
+    final artists = provider['artists'] is List ? (provider['artists'] as List).join(', ') : '';
     final collections = _maps(track['collections']);
     final coverageStatus = (track['coverageStatus'] ?? '').toString();
 
@@ -420,16 +350,13 @@ class _CoverageDetailsDialog extends StatelessWidget {
               Text('Альбом: ${provider['album_title'] ?? provider['album'] ?? ''}'),
               Text('Длительность: ${provider['duration_seconds'] ?? '—'}'),
               Text('External ID: ${track['externalId'] ?? ''}'),
-              Text(
-                'Коллекции: ${collections.map((item) => item['title']).join(', ')}',
-              ),
+              Text('Коллекции: ${collections.map((item) => item['title']).join(', ')}'),
               const Divider(),
               Text('Matching', style: Theme.of(context).textTheme.titleMedium),
               Text('Coverage: $coverageStatus'),
               Text('Status: ${matching?['status'] ?? 'NOT ANALYZED'}'),
               Text('Reason: ${matching?['reason'] ?? track['reason'] ?? '—'}'),
-              if (matching?['confidence'] != null)
-                Text('Confidence: ${matching!['confidence']}'),
+              if (matching?['confidence'] != null) Text('Confidence: ${matching!['confidence']}'),
               const Divider(),
               Text('Variant', style: Theme.of(context).textTheme.titleMedium),
               Text(
@@ -442,9 +369,7 @@ class _CoverageDetailsDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        if ((coverageStatus == 'needs_review' ||
-                coverageStatus == 'not_analyzed') &&
-            onOpenMatching != null)
+        if ((coverageStatus == 'needs_review' || coverageStatus == 'not_analyzed') && onOpenMatching != null)
           TextButton(
             key: const Key('coverage-detail-open-matching'),
             onPressed: () {
@@ -453,10 +378,7 @@ class _CoverageDetailsDialog extends StatelessWidget {
             },
             child: const Text('Открыть в сопоставлении'),
           ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Закрыть'),
-        ),
+        FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
       ],
     );
   }
@@ -464,10 +386,7 @@ class _CoverageDetailsDialog extends StatelessWidget {
 
 List<Map<String, dynamic>> _maps(Object? value) {
   if (value is! List) return <Map<String, dynamic>>[];
-  return value
-      .whereType<Map>()
-      .map((item) => Map<String, dynamic>.from(item))
-      .toList();
+  return value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
 }
 
 int _asInt(Object? value) {

@@ -31,9 +31,10 @@ class LocalLibraryService:
         repository: LocalLibraryStorageRepository | None = None,
         scanner: LocalLibraryScanner | None = None,
         indexer: LocalFileIndexer | None = None,
+        database_path: Path | None = None,
     ) -> None:
         self._base_dir = base_dir
-        self._database_path = self._resolve_database_path()
+        self._database_path = database_path or self._resolve_database_path()
         initialize_database(self._database_path)
         self._repository = repository or LocalLibraryStorageRepository(self._database_path)
         self._scanner = scanner or LocalLibraryScanner(self._repository)

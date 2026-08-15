@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -79,22 +80,23 @@ class DownloadV07Tests(unittest.TestCase):
         self._snapshot("liked", "Мне нравится")
 
     def _snapshot(self, collection_id: str, title: str) -> None:
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO provider_collection_snapshots(
-                    provider_id, collection_id, account_json, item_count, refreshed_at,
-                    collection_type, external_id, title, metadata_json, source_position, active
-                ) VALUES (?, ?, '{}', 0, datetime('now'), ?, ?, ?, '{}', 0, 1)
-                """,
-                (
-                    PROVIDER,
-                    collection_id,
-                    "liked" if collection_id == "liked" else "playlist",
-                    None if collection_id == "liked" else collection_id.split(":", 1)[-1],
-                    title,
-                ),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO provider_collection_snapshots(
+                        provider_id, collection_id, account_json, item_count, refreshed_at,
+                        collection_type, external_id, title, metadata_json, source_position, active
+                    ) VALUES (?, ?, '{}', 0, datetime('now'), ?, ?, ?, '{}', 0, 1)
+                    """,
+                    (
+                        PROVIDER,
+                        collection_id,
+                        "liked" if collection_id == "liked" else "playlist",
+                        None if collection_id == "liked" else collection_id.split(":", 1)[-1],
+                        title,
+                    ),
+                )
 
     def _member(
         self,
@@ -112,58 +114,61 @@ class DownloadV07Tests(unittest.TestCase):
             "album_title": "Album",
             "duration_seconds": 1.0,
         }
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO provider_collection_items(
-                    provider_id, collection_id, external_id, position, payload_json
-                ) VALUES (?, ?, ?, 0, ?)
-                """,
-                (PROVIDER, collection_id, storage_id or external_id, json.dumps(payload)),
-            )
-            conn.execute(
-                """
-                INSERT INTO provider_tracks(provider_id, external_id, payload_json)
-                VALUES (?, ?, ?)
-                ON CONFLICT(provider_id, external_id) DO UPDATE SET payload_json=excluded.payload_json
-                """,
-                (PROVIDER, external_id, json.dumps(payload)),
-            )
-            conn.execute(
-                """
-                UPDATE provider_collection_snapshots SET item_count=item_count+1
-                WHERE provider_id=? AND collection_id=?
-                """,
-                (PROVIDER, collection_id),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO provider_collection_items(
+                        provider_id, collection_id, external_id, position, payload_json
+                    ) VALUES (?, ?, ?, 0, ?)
+                    """,
+                    (PROVIDER, collection_id, storage_id or external_id, json.dumps(payload)),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO provider_tracks(provider_id, external_id, payload_json)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(provider_id, external_id) DO UPDATE SET payload_json=excluded.payload_json
+                    """,
+                    (PROVIDER, external_id, json.dumps(payload)),
+                )
+                conn.execute(
+                    """
+                    UPDATE provider_collection_snapshots SET item_count=item_count+1
+                    WHERE provider_id=? AND collection_id=?
+                    """,
+                    (PROVIDER, collection_id),
+                )
         return payload
 
     def _matching(self, external_id: str, payload: dict[str, object], status: str) -> None:
         local_fp = MatchingStorageRepository(self.db).local_library_fingerprint()
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                """
-                INSERT INTO matching_results(
-                    provider_id, external_id, status, local_file_id, confidence, method,
-                    reason, matcher_version, provider_fingerprint, local_fingerprint, manual
-                ) VALUES (?, ?, ?, NULL, 0, 'automatic', 'test', ?, ?, ?, 0)
-                """,
-                (
-                    PROVIDER,
-                    external_id,
-                    status,
-                    MATCHER_VERSION,
-                    provider_fingerprint(PROVIDER, external_id, payload),
-                    local_fp,
-                ),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO matching_results(
+                        provider_id, external_id, status, local_file_id, confidence, method,
+                        reason, matcher_version, provider_fingerprint, local_fingerprint, manual
+                    ) VALUES (?, ?, ?, NULL, 0, 'automatic', 'test', ?, ?, ?, 0)
+                    """,
+                    (
+                        PROVIDER,
+                        external_id,
+                        status,
+                        MATCHER_VERSION,
+                        provider_fingerprint(PROVIDER, external_id, payload),
+                        local_fp,
+                    ),
+                )
 
     def _action(self, external_id: str, action: str) -> None:
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "INSERT INTO provider_track_actions(provider_id, external_id, action) VALUES (?, ?, ?)",
-                (PROVIDER, external_id, action),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "INSERT INTO provider_track_actions(provider_id, external_id, action) VALUES (?, ?, ?)",
+                    (PROVIDER, external_id, action),
+                )
 
     def _service(self, provider: DownloadProvider | None = None) -> DownloadService:
         registry = DownloadProviderRegistry()
@@ -194,7 +199,7 @@ class DownloadV07Tests(unittest.TestCase):
         self.assertEqual(completed.status, DownloadStatus.COMPLETED)
         self.assertIsNotNone(completed.result_local_file_id)
 
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             local = conn.execute(
                 "SELECT library_root_id, normalized_path, availability FROM local_audio_files WHERE id=?",
                 (completed.result_local_file_id,),
@@ -290,11 +295,12 @@ class DownloadV07Tests(unittest.TestCase):
         service = self._service()
         service.set_target(str(self.music))
         task_id = service.enqueue("401")["task"]["id"]
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "UPDATE provider_track_actions SET action='ignored' WHERE provider_id=? AND external_id=?",
-                (PROVIDER, "401"),
-            )
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "UPDATE provider_track_actions SET action='ignored' WHERE provider_id=? AND external_id=?",
+                    (PROVIDER, "401"),
+                )
         task = service.run_task(task_id)
         self.assertEqual(task.status, DownloadStatus.SKIPPED)
         self.assertFalse((self.music / "MusicArk").exists())
@@ -337,29 +343,30 @@ class DownloadMigrationV07Tests(unittest.TestCase):
     def test_v16_row_is_preserved_and_migration_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "legacy.db"
-            with sqlite3.connect(db) as conn:
-                conn.execute("CREATE TABLE app_metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-                conn.execute("INSERT INTO app_metadata VALUES('schema_version','1.6.0')")
-                conn.execute(
-                    """
-                    CREATE TABLE download_tasks(
-                        id TEXT PRIMARY KEY, task_type TEXT NOT NULL, source_id TEXT NOT NULL,
-                        provider_id TEXT NOT NULL, status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0,
-                        target_folder TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT,
-                        finished_at TEXT, error_message TEXT, result_local_file_id INTEGER,
-                        raw_payload_json TEXT
+            with closing(sqlite3.connect(db)) as conn:
+                with conn:
+                    conn.execute("CREATE TABLE app_metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                    conn.execute("INSERT INTO app_metadata VALUES('schema_version','1.6.0')")
+                    conn.execute(
+                        """
+                        CREATE TABLE download_tasks(
+                            id TEXT PRIMARY KEY, task_type TEXT NOT NULL, source_id TEXT NOT NULL,
+                            provider_id TEXT NOT NULL, status TEXT NOT NULL, progress REAL NOT NULL DEFAULT 0,
+                            target_folder TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT,
+                            finished_at TEXT, error_message TEXT, result_local_file_id INTEGER,
+                            raw_payload_json TEXT
+                        )
+                        """
                     )
-                    """
-                )
-                conn.execute(
-                    "INSERT INTO download_tasks(id,task_type,source_id,provider_id,status,target_folder,created_at) VALUES('old','x','7','p','failed','C:/Music','now')"
-                )
-                self.assertEqual(migrate_download_v07(conn), "1.7.0")
-                self.assertEqual(migrate_download_v07(conn), "1.7.0")
-                columns = {row[1] for row in conn.execute("PRAGMA table_info(download_tasks)")}
-                self.assertTrue({"downloaded_bytes", "total_bytes", "cancel_requested", "target_root_id", "error_code", "updated_at"}.issubset(columns))
-                self.assertEqual(conn.execute("SELECT source_id,status FROM download_tasks WHERE id='old'").fetchone(), ("7", "failed"))
-                self.assertEqual(conn.execute("SELECT value FROM app_metadata WHERE key='schema_version'").fetchone()[0], "1.7.0")
+                    conn.execute(
+                        "INSERT INTO download_tasks(id,task_type,source_id,provider_id,status,target_folder,created_at) VALUES('old','x','7','p','failed','C:/Music','now')"
+                    )
+                    self.assertEqual(migrate_download_v07(conn), "1.7.0")
+                    self.assertEqual(migrate_download_v07(conn), "1.7.0")
+                    columns = {row[1] for row in conn.execute("PRAGMA table_info(download_tasks)")}
+                    self.assertTrue({"downloaded_bytes", "total_bytes", "cancel_requested", "target_root_id", "error_code", "updated_at"}.issubset(columns))
+                    self.assertEqual(conn.execute("SELECT source_id,status FROM download_tasks WHERE id='old'").fetchone(), ("7", "failed"))
+                    self.assertEqual(conn.execute("SELECT value FROM app_metadata WHERE key='schema_version'").fetchone()[0], "1.7.0")
 
 
 class YandexStreamingV07Tests(unittest.TestCase):

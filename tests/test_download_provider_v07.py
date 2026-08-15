@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from musicark.download.models import DownloadStatus, DownloadTask
 from musicark.download.provider import DownloadProviderError, YandexMusicDownloadProvider
 from musicark.providers.yandex_music_provider import YandexAuthenticationError
@@ -36,6 +38,18 @@ class _Client:
     def tracks(self, ids):  # type: ignore[no-untyped-def]
         self.requested = list(ids)
         return self._tracks
+
+
+class _BrokenResponse:
+    headers = {"Content-Length": "6"}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def iter_content(self, chunk_size: int):  # type: ignore[no-untyped-def]
+        del chunk_size
+        yield b"abc"
+        raise requests.ConnectionError("connection dropped")
 
 
 class YandexDownloadProviderResolutionTests(unittest.TestCase):
@@ -157,6 +171,17 @@ class YandexDownloadProviderResolutionTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(), b"keep-this-unrelated-file")
             self.assertEqual(collision.read_bytes(), b"downloaded")
             self.assertEqual(Path(result.path), collision.resolve())
+
+    def test_stream_network_failure_removes_part_and_has_network_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "track.mp3"
+            provider = YandexMusicDownloadProvider(token="secure-token")
+            with patch("musicark.download.provider.requests.get", return_value=_BrokenResponse()):
+                with self.assertRaises(DownloadProviderError) as cm:
+                    provider._download_to_file("temporary-url", destination)
+            self.assertEqual(cm.exception.code, "network_error")
+            self.assertFalse(destination.exists())
+            self.assertFalse(destination.with_name(destination.name + ".part").exists())
 
 
 if __name__ == "__main__":

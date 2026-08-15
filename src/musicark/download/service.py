@@ -8,7 +8,6 @@ commands and reads queue state; it never coordinates these modules itself.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import json
 from pathlib import Path
 import time
 from typing import Any
@@ -95,7 +94,11 @@ class DownloadService:
         self._downloads = DownloadStorageRepository(self._database_path)
         self._coverage = CoverageRepository(self._database_path)
         self._local_repo = LocalLibraryStorageRepository(self._database_path)
-        self._local = LocalLibraryService(base_dir=base_dir, repository=self._local_repo)
+        self._local = LocalLibraryService(
+            base_dir=base_dir,
+            repository=self._local_repo,
+            database_path=self._database_path,
+        )
         self._matching = MatchingStorageRepository(self._database_path)
         self._audit = AuditLogRepository(self._database_path)
         self._credentials = credential_store or SystemCredentialStore()
@@ -338,8 +341,10 @@ class DownloadService:
         self._audit_event("download_started", "success", f"source={task.source_id}", task.id)
 
         target_filename = str(task.raw_payload.get("target_filename") or f"yandex_{task.source_id}.mp3")
-        expected_path = (Path(task.target_folder) / target_filename).resolve(strict=False)
+        target_folder = Path(task.target_folder).resolve(strict=False)
+        expected_path = (target_folder / target_filename).resolve(strict=False)
         existed_before = expected_path.exists()
+        cleanup_new_final = not existed_before
         last_write = 0.0
         last_bytes = 0
         last_cancel_check = 0.0
@@ -372,7 +377,18 @@ class DownloadService:
                 progress=persist_progress,
                 cancelled=cancelled,
             )
-            indexed = self._local.index_file(local_audio.path, int(task.target_root_id or 0))["track"]
+            actual_path = Path(local_audio.path).resolve(strict=False)
+            if actual_path.parent != target_folder:
+                raise DownloadServiceError(
+                    "Download provider returned a file outside the selected target.",
+                    code="unsafe_path",
+                )
+            cleanup_new_final = not (existed_before and actual_path == expected_path)
+            if actual_path.name != target_filename:
+                task.raw_payload["target_filename"] = actual_path.name
+                self._downloads.upsert_task(task)
+
+            indexed = self._local.index_file(actual_path, int(task.target_root_id or 0))["track"]
             self._validate_duration(current.get("provider") or {}, indexed)
             local_id = int(indexed["id"])
             provider_payload = dict(current.get("provider") or {})
@@ -403,7 +419,7 @@ class DownloadService:
                     code="coverage_not_updated",
                 )
 
-            size = Path(local_audio.path).stat().st_size
+            size = actual_path.stat().st_size
             task = self._downloads.get_task(task.id)
             task.status = DownloadStatus.COMPLETED
             task.progress = 1.0
@@ -429,11 +445,18 @@ class DownloadService:
         except DownloadProviderError as exc:
             return self._fail_or_cancel(task, exc, code=exc.code)
         except DownloadServiceError as exc:
-            return self._fail_or_cancel(task, exc, code=exc.code, cleanup=not existed_before)
+            review = exc.code in {"duration_mismatch", "coverage_not_updated"}
+            return self._fail_or_cancel(
+                task,
+                exc,
+                code=exc.code,
+                status=DownloadStatus.NEEDS_REVIEW if review else DownloadStatus.FAILED,
+                cleanup=cleanup_new_final and not review,
+            )
         except YandexMusicError as exc:
             return self._fail_or_cancel(task, exc, code="provider_request")
         except (OSError, ValueError) as exc:
-            return self._fail_or_cancel(task, exc, code="invalid_audio", cleanup=not existed_before)
+            return self._fail_or_cancel(task, exc, code="invalid_audio", cleanup=cleanup_new_final)
         except Exception as exc:  # noqa: BLE001 - queue must remain recoverable.
             return self._fail_or_cancel(task, exc, code="unexpected")
 
@@ -487,7 +510,10 @@ class DownloadService:
             target_filename = str(current.raw_payload.get("target_filename") or "")
             if target_filename:
                 try:
-                    (Path(current.target_folder) / target_filename).unlink(missing_ok=True)
+                    target_folder = Path(current.target_folder).resolve(strict=False)
+                    candidate = (target_folder / target_filename).resolve(strict=False)
+                    if candidate.parent == target_folder:
+                        candidate.unlink(missing_ok=True)
                 except OSError:
                     pass
         current.status = final_status
@@ -497,7 +523,12 @@ class DownloadService:
         current.cancel_requested = False
         current.progress = 0.0 if final_status != DownloadStatus.COMPLETED else current.progress
         self._downloads.upsert_task(current)
-        event = "download_cancelled" if final_status == DownloadStatus.CANCELLED else "download_failed"
+        if final_status == DownloadStatus.CANCELLED:
+            event = "download_cancelled"
+        elif final_status == DownloadStatus.NEEDS_REVIEW:
+            event = "download_needs_review"
+        else:
+            event = "download_failed"
         self._audit_event(event, "failed", f"code={current.error_code} source={current.source_id}", current.id)
         return current
 

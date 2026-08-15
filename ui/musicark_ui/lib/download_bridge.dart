@@ -62,14 +62,13 @@ class DownloadBridge implements DownloadBridgeClient {
           : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath',
       'PYTHONIOENCODING': 'utf-8',
       'PYTHONUTF8': '1',
-      if (targetPath != null && targetPath.isNotEmpty)
-        'MUSICARK_DOWNLOAD_TARGET': targetPath,
     };
     // Production downloads must obtain the Yandex token from SystemCredentialStore.
     environment.remove('YANDEX_MUSIC_TOKEN');
-    environment.remove('MUSICARK_DOWNLOAD_TARGET');
     if (targetPath != null && targetPath.isNotEmpty) {
       environment['MUSICARK_DOWNLOAD_TARGET'] = targetPath;
+    } else {
+      environment.remove('MUSICARK_DOWNLOAD_TARGET');
     }
 
     final args = <String>[
@@ -321,12 +320,15 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   }
 
   @override
-  Future<Map<String, dynamic>> settings() async => {
-        'targetConfigured': configured,
-        'rootId': configured ? 1 : null,
-        'rootPath': configured ? r'C:\Music' : null,
-        'targetPath': configured ? r'C:\Music\MusicArk' : null,
-      };
+  Future<Map<String, dynamic>> settings() async {
+    final root = selectedPath ?? r'C:\Music';
+    return {
+      'targetConfigured': configured,
+      'rootId': configured ? 1 : null,
+      'rootPath': configured ? root : null,
+      'targetPath': configured ? '$root\\MusicArk' : null,
+    };
+  }
 
   @override
   Future<Map<String, dynamic>> setTarget(String path) async {

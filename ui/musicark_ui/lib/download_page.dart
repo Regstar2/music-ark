@@ -307,6 +307,8 @@ class _DownloadPageState extends State<DownloadPage> {
   Widget _taskCard(Map<String, dynamic> task) {
     final status = (task['status'] ?? '').toString();
     final progress = task['progress'];
+    final progressValue = progress is num ? progress.toDouble().clamp(0.0, 1.0).toDouble() : null;
+    final progressPercent = ((progressValue ?? 0.0) * 100).round();
     final artists = task['artists'] is List
         ? (task['artists'] as List).map((e) => e.toString()).join(', ')
         : '';
@@ -337,14 +339,12 @@ class _DownloadPageState extends State<DownloadPage> {
               const SizedBox(height: 10),
               LinearProgressIndicator(
                 key: Key('download-progress-${task['id']}'),
-                value: progress is num
-                    ? progress.toDouble().clamp(0.0, 1.0).toDouble()
-                    : null,
+                value: progressValue,
               ),
               const SizedBox(height: 6),
               Text(total == null
                   ? '${_bytes(downloaded)} загружено'
-                  : '${_bytes(downloaded)} / ${_bytes(total)} (${((progress as num?)?.toDouble() ?? 0) * 100).round()}%)'),
+                  : '${_bytes(downloaded)} / ${_bytes(total)} ($progressPercent%)'),
             ],
             if ((task['targetPath'] ?? '').toString().isNotEmpty) ...[
               const SizedBox(height: 6),

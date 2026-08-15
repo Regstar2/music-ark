@@ -147,11 +147,16 @@ class YandexMusicDownloadProvider(DownloadProvider):
             raise DownloadProviderError(f"Invalid Yandex track id '{track_id}'.", code="invalid_track_id")
         quality = str(task.raw_payload.get("quality", "best")).lower() if task.raw_payload else "best"
         destination = self._destination(task, track_id)
-        if destination.exists() and destination.is_file() and destination.stat().st_size > 0:
-            if progress is not None:
-                size = int(destination.stat().st_size)
-                progress(size, size)
-            return build_local_audio_file(destination)
+        if destination.exists():
+            # The stable filename itself carries the exact provider identity. Reuse
+            # only a parseable complete audio file; never overwrite an unknown or
+            # corrupted file that happens to occupy the requested leaf name.
+            if destination.is_file() and destination.stat().st_size > 0 and self._is_valid_existing_audio(destination):
+                if progress is not None:
+                    size = int(destination.stat().st_size)
+                    progress(size, size)
+                return build_local_audio_file(destination)
+            destination = self._collision_safe_destination(destination)
 
         direct_link = self._resolve_direct_link(track_id, quality=quality)
         self._download_to_file(
@@ -176,6 +181,26 @@ class YandexMusicDownloadProvider(DownloadProvider):
         if destination.parent != target_folder:
             raise DownloadProviderError("Download destination escapes the selected root.", code="unsafe_path")
         return destination
+
+    @staticmethod
+    def _is_valid_existing_audio(path: Path) -> bool:
+        try:
+            from mutagen import File as MutagenFile  # type: ignore
+
+            audio = MutagenFile(str(path), easy=True)
+            return audio is not None and getattr(audio, "info", None) is not None
+        except Exception:  # noqa: BLE001 - a suspicious existing file must not be reused.
+            return False
+
+    @staticmethod
+    def _collision_safe_destination(destination: Path) -> Path:
+        for index in range(2, 10_000):
+            candidate = destination.with_name(f"{destination.stem} ({index}){destination.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise DownloadProviderError(
+            f"Cannot find a free filename near '{destination.name}'.", code="file_collision"
+        )
 
     def _extract_track_id(self, task: DownloadTask) -> str:
         if task.raw_payload and task.raw_payload.get("track_id"):

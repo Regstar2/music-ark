@@ -15,14 +15,9 @@ extension _CoveragePageView on _CoveragePageState {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Недостающие треки',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
+                    Text('Недостающие треки', style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 4),
-                    const Text(
-                      'Покрытие Yandex-библиотеки локальной коллекцией',
-                    ),
+                    const Text('Покрытие Yandex-библиотеки локальной коллекцией'),
                   ],
                 ),
               ),
@@ -74,9 +69,7 @@ extension _CoveragePageView on _CoveragePageState {
           child: LayoutBuilder(
             builder: (context, constraints) {
               double fieldWidth(double preferred) =>
-                  constraints.maxWidth < preferred
-                      ? constraints.maxWidth
-                      : preferred;
+                  constraints.maxWidth < preferred ? constraints.maxWidth : preferred;
               return Wrap(
                 spacing: 12,
                 runSpacing: 8,
@@ -96,10 +89,7 @@ extension _CoveragePageView on _CoveragePageState {
                       items: [
                         const DropdownMenuItem(
                           value: '',
-                          child: Text(
-                            'Вся Yandex-библиотека',
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: Text('Вся Yandex-библиотека', overflow: TextOverflow.ellipsis),
                         ),
                         ..._collections.map(
                           (collection) => DropdownMenuItem(
@@ -142,33 +132,12 @@ extension _CoveragePageView on _CoveragePageState {
                       ),
                       items: [
                         if (_collectionId.startsWith('playlist:'))
-                          const DropdownMenuItem(
-                            value: 'position',
-                            child: Text(
-                              'Порядок плейлиста',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        const DropdownMenuItem(
-                          value: 'artist',
-                          child: Text('Исполнитель'),
-                        ),
-                        const DropdownMenuItem(
-                          value: 'title',
-                          child: Text('Название'),
-                        ),
-                        const DropdownMenuItem(
-                          value: 'album',
-                          child: Text('Альбом'),
-                        ),
-                        const DropdownMenuItem(
-                          value: 'collection',
-                          child: Text('Коллекция'),
-                        ),
-                        const DropdownMenuItem(
-                          value: 'status',
-                          child: Text('Статус'),
-                        ),
+                          const DropdownMenuItem(value: 'position', child: Text('Порядок плейлиста', overflow: TextOverflow.ellipsis)),
+                        const DropdownMenuItem(value: 'artist', child: Text('Исполнитель')),
+                        const DropdownMenuItem(value: 'title', child: Text('Название')),
+                        const DropdownMenuItem(value: 'album', child: Text('Альбом')),
+                        const DropdownMenuItem(value: 'collection', child: Text('Коллекция')),
+                        const DropdownMenuItem(value: 'status', child: Text('Статус')),
                       ],
                       onChanged: (value) {
                         if (value == null) return;
@@ -193,15 +162,9 @@ extension _CoveragePageView on _CoveragePageState {
                       ),
                       items: const [
                         DropdownMenuItem(value: '', child: Text('Все')),
-                        DropdownMenuItem(
-                          value: 'unreviewed',
-                          child: Text('Не решено'),
-                        ),
+                        DropdownMenuItem(value: 'unreviewed', child: Text('Не решено')),
                         DropdownMenuItem(value: 'wanted', child: Text('Нужен')),
-                        DropdownMenuItem(
-                          value: 'ignored',
-                          child: Text('Игнорировать'),
-                        ),
+                        DropdownMenuItem(value: 'ignored', child: Text('Игнорировать')),
                       ],
                       onChanged: (value) {
                         _updateView(() {
@@ -227,22 +190,10 @@ extension _CoveragePageView on _CoveragePageState {
                         items: const [
                           DropdownMenuItem(value: '', child: Text('Все версии')),
                           DropdownMenuItem(value: 'same', child: Text('Same')),
-                          DropdownMenuItem(
-                            value: 'altered',
-                            child: Text('Altered'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'different_version',
-                            child: Text('Другая версия'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'uncertain',
-                            child: Text('Uncertain'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'not_checked',
-                            child: Text('Not checked'),
-                          ),
+                          DropdownMenuItem(value: 'altered', child: Text('Altered')),
+                          DropdownMenuItem(value: 'different_version', child: Text('Другая версия')),
+                          DropdownMenuItem(value: 'uncertain', child: Text('Uncertain')),
+                          DropdownMenuItem(value: 'not_checked', child: Text('Not checked')),
                         ],
                         onChanged: (value) {
                           _updateView(() {
@@ -276,9 +227,7 @@ extension _CoveragePageView on _CoveragePageState {
                 child: Text(
                   _error!,
                   key: const Key('coverage-error'),
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
                 ),
               ),
             ),
@@ -291,11 +240,7 @@ extension _CoveragePageView on _CoveragePageState {
           onPrevious: _offset <= 0 || _loading
               ? null
               : () {
-                  _updateView(
-                    () => _offset = _offset > _pageLimit
-                        ? _offset - _pageLimit
-                        : 0,
-                  );
+                  _updateView(() => _offset = _offset > _pageLimit ? _offset - _pageLimit : 0);
                   _reloadTracks(refreshSummary: false);
                 },
           onNext: _offset + _pageLimit >= _total || _loading
@@ -310,9 +255,7 @@ extension _CoveragePageView on _CoveragePageState {
   }
 
   Widget _body(Map<String, dynamic> summary) {
-    if (_loading && _items.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading && _items.isEmpty) return const Center(child: CircularProgressIndicator());
     if (_items.isEmpty) {
       final total = _asInt(summary['total']);
       final notAnalyzed = _asInt(summary['notAnalyzed']);
@@ -327,8 +270,7 @@ extension _CoveragePageView on _CoveragePageState {
       if (_status == 'missing' && _asInt(summary['missing']) == 0) {
         return const _EmptyState(
           title: 'Нет треков, доказанно отсутствующих локально.',
-          subtitle:
-              'Конфликты и неанализированные треки остаются отдельными состояниями.',
+          subtitle: 'Конфликты и неанализированные треки остаются отдельными состояниями.',
         );
       }
       return const _EmptyState(title: 'Нет треков для выбранных фильтров.');
@@ -340,11 +282,13 @@ extension _CoveragePageView on _CoveragePageState {
       itemBuilder: (context, index) {
         final item = _items[index];
         final id = (item['externalId'] ?? '').toString();
+        final isMissing = item['coverageStatus'] == 'missing';
+        final isWanted = item['userAction'] == 'wanted';
         return _CoverageRow(
           key: ValueKey('coverage-row-$id'),
           item: item,
           selected: _selected.contains(id),
-          onSelectionChanged: item['coverageStatus'] == 'missing'
+          onSelectionChanged: isMissing
               ? (value) => _updateView(() {
                   if (value) {
                     _selected.add(id);
@@ -354,18 +298,13 @@ extension _CoveragePageView on _CoveragePageState {
                 })
               : null,
           onOpen: () => _openDetails(item),
-          onWanted: item['coverageStatus'] == 'missing'
-              ? () => _setAction(id, 'wanted')
+          onWanted: isMissing ? () => _setAction(id, 'wanted') : null,
+          onIgnored: isMissing ? () => _setAction(id, 'ignored') : null,
+          onReset: isMissing ? () => _setAction(id, 'unreviewed') : null,
+          onDownload: isMissing && isWanted && widget.downloadBridge != null
+              ? () => _enqueueDownload(id)
               : null,
-          onIgnored: item['coverageStatus'] == 'missing'
-              ? () => _setAction(id, 'ignored')
-              : null,
-          onReset: item['coverageStatus'] == 'missing'
-              ? () => _setAction(id, 'unreviewed')
-              : null,
-          onOpenMatching:
-              item['coverageStatus'] == 'needs_review' ||
-                  item['coverageStatus'] == 'not_analyzed'
+          onOpenMatching: item['coverageStatus'] == 'needs_review' || item['coverageStatus'] == 'not_analyzed'
               ? widget.onOpenMatching
               : null,
         );

@@ -1,54 +1,21 @@
 # Идея проекта
 
-## Проблема
-
-Музыкальная библиотека пользователя разделена между streaming provider и локальными файлами. До download/sync MusicArk должен сначала надёжно понять, какие provider tracks уже существуют локально и где система уверена в этом выводе.
-
-## Текущий продуктовый сценарий
+MusicArk объединяет streaming-library и локальную коллекцию поэтапно: сначала надёжная identity, затем проверка версии записи, затем честная оценка coverage, и только после этого download/sync.
 
 ```text
-Yandex Music cache
-        +
-Local Library index
+Yandex cache + Local Library
         ↓
-Matching
+Identity Matching
         ↓
-matched / conflict / unmatched
+Variant Verification (secondary)
+        ↓
+Library Coverage
+        ↓
+Missing + wanted
+        ↓
+future Download
 ```
 
-Пользователь может проверить сомнительные случаи, вручную принять правильный local candidate или отклонить неверный. Эти решения сохраняются и становятся основой для Missing Tracks и будущего sync.
+v0.6 отвечает «что доказанно отсутствует локально?» и сознательно не называет conflict/stale/not-analyzed состояниями missing. Пользователь может отметить технически missing трек как wanted/ignored, не меняя ни matching, ни Yandex.
 
-## Принцип качества
-
-Для автоматического matching **precision важнее recall**. Неверный auto-match опаснее, чем `conflict` или `unmatched`, потому что следующие версии будут строить решения поверх этого dataset.
-
-## Архитектурный принцип
-
-Yandex integration, Local Library scanning и Matching остаются отдельными boundaries. Matching работает локально поверх уже сохранённых данных и не отправляет local metadata во внешние сервисы.
-
-## Последовательность продукта
-
-```text
-v0.1 Yandex Likes
-v0.2 Persistent Library
-v0.3 Yandex Library / Playlists
-v0.4 Local Library
-v0.5 Matching
-v0.6 Missing Tracks
-v0.7 Download
-v0.8 Sync
-```
-
-Download и sync не должны внедряться раньше, чем matching dataset станет достаточно надёжным.
-
-## Риски
-
-- provider metadata и local tags могут быть неполными или отличаться между релизами;
-- live/remix/remaster/single/album версии могут выглядеть почти одинаково;
-- одинаковые title у разных artists создают false-positive risk;
-- качество автоматического matching нельзя подтвердить только synthetic tests — нужна проверка на реальной библиотеке;
-- Yandex provider использует внешнюю integration dependency и может менять поведение независимо от local matching.
-
-## Safety
-
-MusicArk Matching не изменяет аудиофайлы и не мутирует Yandex Music. Manual review изменяет только локальные записи MusicArk о соответствии сущностей.
+Ключевой принцип продукта: система не должна создавать ложное ощущение полноты библиотеки. Поэтому рядом с Local coverage показывается доля Matching analyzed, а variant issues считаются отдельно.

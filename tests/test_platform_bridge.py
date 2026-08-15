@@ -17,17 +17,14 @@ class PlatformBridgeTests(unittest.TestCase):
             base_dir = Path(tmp)
             initialize_database(base_dir / ".musicark" / "musicark.db")
             snapshot = build_snapshot(base_dir=base_dir)
-            self.assertIn("dashboard", snapshot)
-            self.assertIn("collection", snapshot)
-            self.assertIn("local_library", snapshot)
-            self.assertIn("download_queue", snapshot)
-            self.assertIn("sync_plans", snapshot)
-            self.assertIn("logs", snapshot)
-            self.assertIn("settings", snapshot)
-            self.assertIn("mvp_hints", snapshot)
+            for key in (
+                "dashboard", "collection", "local_library", "download_queue",
+                "sync_plans", "logs", "settings", "mvp_hints",
+            ):
+                self.assertIn(key, snapshot)
             mh = snapshot["mvp_hints"]
             self.assertIn("schema_version", mh)
-            self.assertEqual(mh["schema_version"], "1.5.0")
+            self.assertEqual(mh["schema_version"], "1.6.0")
             self.assertIn("latest_sync_plan_id", mh)
 
     def test_sync_execute_safe_requires_confirm(self) -> None:
@@ -42,11 +39,7 @@ class PlatformBridgeTests(unittest.TestCase):
             base_dir = Path(tmp)
             initialize_database(base_dir / ".musicark" / "musicark.db")
             with self.assertRaises(ValueError):
-                run_action(
-                    "download_enqueue_run",
-                    base_dir=base_dir,
-                    payload={"external_id": "1"},
-                )
+                run_action("download_enqueue_run", base_dir=base_dir, payload={"external_id": "1"})
 
     def test_sync_plan_action_returns_plan_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -70,14 +63,10 @@ class PlatformBridgeTests(unittest.TestCase):
             db_path = base_dir / ".musicark" / "musicark.db"
             initialize_database(db_path)
             import sqlite3
-
             with sqlite3.connect(db_path) as conn:
                 conn.execute(
-                    """
-                    INSERT INTO local_audio_files(
-                        path, sha256, file_size, duration_seconds, codec, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
+                    """INSERT INTO local_audio_files(path, sha256, file_size, duration_seconds, codec, metadata_json)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
                     (str(base_dir / "missing.mp3"), "a" * 64, 1, 0.0, "mp3", "{}"),
                 )
                 conn.commit()

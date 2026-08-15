@@ -435,7 +435,7 @@ class VariantServiceTests(unittest.TestCase):
             table = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='track_variant_results'"
             ).fetchone()
-        self.assertEqual("1.5.0", version)
+        self.assertEqual("1.6.0", version)
         self.assertEqual(1, provider_count)
         self.assertGreaterEqual(local_count, 1)
         self.assertEqual(("matched", 1), matching)

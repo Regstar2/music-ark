@@ -71,173 +71,191 @@ extension _CoveragePageView on _CoveragePageState {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 280,
-                child: DropdownButtonFormField<String>(
-                  key: const Key('coverage-collection'),
-                  initialValue: _collectionId,
-                  decoration: const InputDecoration(
-                    labelText: 'Коллекция',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '',
-                      child: Text('Вся Yandex-библиотека'),
-                    ),
-                    ..._collections.map(
-                      (collection) => DropdownMenuItem(
-                        value: (collection['id'] ?? '').toString(),
-                        child: Text(
-                          (collection['title'] ?? collection['id']).toString(),
-                          overflow: TextOverflow.ellipsis,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              double fieldWidth(double preferred) =>
+                  constraints.maxWidth < preferred
+                      ? constraints.maxWidth
+                      : preferred;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SizedBox(
+                    width: fieldWidth(280),
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('coverage-collection'),
+                      initialValue: _collectionId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Коллекция',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: '',
+                          child: Text(
+                            'Вся Yandex-библиотека',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
+                        ..._collections.map(
+                          (collection) => DropdownMenuItem(
+                            value: (collection['id'] ?? '').toString(),
+                            child: Text(
+                              (collection['title'] ?? collection['id']).toString(),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: _setCollection,
                     ),
-                  ],
-                  onChanged: _setCollection,
-                ),
-              ),
-              SizedBox(
-                width: 320,
-                child: TextField(
-                  key: const Key('coverage-search'),
-                  controller: _searchController,
-                  onChanged: _queueSearch,
-                  decoration: const InputDecoration(
-                    labelText: 'Поиск',
-                    hintText: 'Название, исполнитель, альбом, плейлист',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
                   ),
-                ),
-              ),
-              SizedBox(
-                width: 190,
-                child: DropdownButtonFormField<String>(
-                  key: const Key('coverage-sort'),
-                  initialValue: _sort,
-                  decoration: const InputDecoration(
-                    labelText: 'Сортировка',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  SizedBox(
+                    width: fieldWidth(320),
+                    child: TextField(
+                      key: const Key('coverage-search'),
+                      controller: _searchController,
+                      onChanged: _queueSearch,
+                      decoration: const InputDecoration(
+                        labelText: 'Поиск',
+                        hintText: 'Название, исполнитель, альбом, плейлист',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
                   ),
-                  items: [
-                    if (_collectionId.startsWith('playlist:'))
-                      const DropdownMenuItem(
-                        value: 'position',
-                        child: Text('Порядок плейлиста'),
+                  SizedBox(
+                    width: fieldWidth(190),
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('coverage-sort'),
+                      initialValue: _sort,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Сортировка',
+                        border: OutlineInputBorder(),
+                        isDense: true,
                       ),
-                    const DropdownMenuItem(
-                      value: 'artist',
-                      child: Text('Исполнитель'),
+                      items: [
+                        if (_collectionId.startsWith('playlist:'))
+                          const DropdownMenuItem(
+                            value: 'position',
+                            child: Text(
+                              'Порядок плейлиста',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        const DropdownMenuItem(
+                          value: 'artist',
+                          child: Text('Исполнитель'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'title',
+                          child: Text('Название'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'album',
+                          child: Text('Альбом'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'collection',
+                          child: Text('Коллекция'),
+                        ),
+                        const DropdownMenuItem(
+                          value: 'status',
+                          child: Text('Статус'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        _updateView(() {
+                          _sort = value;
+                          _offset = 0;
+                        });
+                        _reloadTracks(refreshSummary: false);
+                      },
                     ),
-                    const DropdownMenuItem(
-                      value: 'title',
-                      child: Text('Название'),
-                    ),
-                    const DropdownMenuItem(
-                      value: 'album',
-                      child: Text('Альбом'),
-                    ),
-                    const DropdownMenuItem(
-                      value: 'collection',
-                      child: Text('Коллекция'),
-                    ),
-                    const DropdownMenuItem(
-                      value: 'status',
-                      child: Text('Статус'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    _updateView(() {
-                      _sort = value;
-                      _offset = 0;
-                    });
-                    _reloadTracks(refreshSummary: false);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 180,
-                child: DropdownButtonFormField<String>(
-                  key: const Key('coverage-action-filter'),
-                  initialValue: _userAction,
-                  decoration: const InputDecoration(
-                    labelText: 'Решение',
-                    border: OutlineInputBorder(),
-                    isDense: true,
                   ),
-                  items: const [
-                    DropdownMenuItem(value: '', child: Text('Все')),
-                    DropdownMenuItem(
-                      value: 'unreviewed',
-                      child: Text('Не решено'),
+                  SizedBox(
+                    width: fieldWidth(180),
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('coverage-action-filter'),
+                      initialValue: _userAction,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Решение',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: '', child: Text('Все')),
+                        DropdownMenuItem(
+                          value: 'unreviewed',
+                          child: Text('Не решено'),
+                        ),
+                        DropdownMenuItem(value: 'wanted', child: Text('Нужен')),
+                        DropdownMenuItem(
+                          value: 'ignored',
+                          child: Text('Игнорировать'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        _updateView(() {
+                          _userAction = value ?? '';
+                          _offset = 0;
+                        });
+                        _reloadTracks(refreshSummary: false);
+                      },
                     ),
-                    DropdownMenuItem(value: 'wanted', child: Text('Нужен')),
-                    DropdownMenuItem(
-                      value: 'ignored',
-                      child: Text('Игнорировать'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    _updateView(() {
-                      _userAction = value ?? '';
-                      _offset = 0;
-                    });
-                    _reloadTracks(refreshSummary: false);
-                  },
-                ),
-              ),
-              if (_status == 'covered')
-                SizedBox(
-                  width: 210,
-                  child: DropdownButtonFormField<String>(
-                    key: const Key('coverage-variant-filter'),
-                    initialValue: _variantStatus,
-                    decoration: const InputDecoration(
-                      labelText: 'Variant',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: '', child: Text('Все версии')),
-                      DropdownMenuItem(value: 'same', child: Text('Same')),
-                      DropdownMenuItem(
-                        value: 'altered',
-                        child: Text('Altered'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'different_version',
-                        child: Text('Другая версия'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'uncertain',
-                        child: Text('Uncertain'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'not_checked',
-                        child: Text('Not checked'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      _updateView(() {
-                        _variantStatus = value ?? '';
-                        _offset = 0;
-                      });
-                      _reloadTracks(refreshSummary: false);
-                    },
                   ),
-                ),
-            ],
+                  if (_status == 'covered')
+                    SizedBox(
+                      width: fieldWidth(210),
+                      child: DropdownButtonFormField<String>(
+                        key: const Key('coverage-variant-filter'),
+                        initialValue: _variantStatus,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Variant',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: '', child: Text('Все версии')),
+                          DropdownMenuItem(value: 'same', child: Text('Same')),
+                          DropdownMenuItem(
+                            value: 'altered',
+                            child: Text('Altered'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'different_version',
+                            child: Text('Другая версия'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'uncertain',
+                            child: Text('Uncertain'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'not_checked',
+                            child: Text('Not checked'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          _updateView(() {
+                            _variantStatus = value ?? '';
+                            _offset = 0;
+                          });
+                          _reloadTracks(refreshSummary: false);
+                        },
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
         if (_selected.isNotEmpty)

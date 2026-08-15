@@ -159,12 +159,17 @@ class YandexMusicDownloadProvider(DownloadProvider):
             destination = self._collision_safe_destination(destination)
 
         direct_link = self._resolve_direct_link(track_id, quality=quality)
-        self._download_to_file(
-            direct_link,
-            destination,
-            progress=progress,
-            cancelled=cancelled,
-        )
+        # Keep the historical no-context call shape for execute()/legacy subclasses.
+        # v0.7 passes callbacks only when the new worker explicitly asks for them.
+        if progress is None and cancelled is None:
+            self._download_to_file(direct_link, destination)
+        else:
+            self._download_to_file(
+                direct_link,
+                destination,
+                progress=progress,
+                cancelled=cancelled,
+            )
         return build_local_audio_file(destination)
 
     def _destination(self, task: DownloadTask, track_id: str) -> Path:

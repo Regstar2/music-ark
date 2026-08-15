@@ -164,7 +164,8 @@ class DownloadStorageRepository:
     def request_cancel(self, task_id: str) -> DownloadTask:
         task = self.get_task(task_id)
         if task.status == DownloadStatus.QUEUED:
-            task.cancel_requested = True
+            self._cleanup_partial(task)
+            task.cancel_requested = False
             task.status = DownloadStatus.CANCELLED
             task.error_code = "cancelled"
             task.error_message = "Cancelled before download started."
@@ -187,10 +188,14 @@ class DownloadStorageRepository:
         return bool(row and row[0])
 
     def recover_interrupted(self) -> int:
-        """Turn persisted RUNNING tasks into retryable failures after process restart."""
+        """Clean stale .part files and turn persisted RUNNING tasks into retryable failures."""
+        interrupted = self.list_tasks(status="running", limit=5000)
+        for task in interrupted:
+            self._cleanup_partial(task)
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 with conn:
+                    now = _now()
                     cursor = conn.execute(
                         """
                         UPDATE download_tasks
@@ -199,11 +204,30 @@ class DownloadStorageRepository:
                             finished_at=?, updated_at=?, cancel_requested=0
                         WHERE status='running'
                         """,
-                        (_now(), _now()),
+                        (now, now),
                     )
                     return max(0, int(cursor.rowcount))
         except sqlite3.Error as exc:
             raise StorageError("Failed to recover interrupted downloads.") from exc
+
+    @staticmethod
+    def _cleanup_partial(task: DownloadTask) -> None:
+        target_filename = str(task.raw_payload.get("target_filename") or "").strip()
+        if not target_filename:
+            return
+        try:
+            target_folder = Path(task.target_folder).expanduser().resolve(strict=False)
+            final_path = (target_folder / target_filename).resolve(strict=False)
+            if final_path.parent != target_folder:
+                return
+            partial = final_path.with_name(final_path.name + ".part")
+            if partial.parent != target_folder:
+                return
+            partial.unlink(missing_ok=True)
+        except OSError:
+            # Recovery state must remain repairable even if Windows temporarily
+            # prevents deletion; a subsequent Retry removes its own .part again.
+            return
 
     def summary(self) -> dict[str, int]:
         try:

@@ -22,8 +22,12 @@ class StableDesktopMigrationsTests(unittest.TestCase):
                 idx_rows = conn.execute("PRAGMA index_list(audit_log)").fetchall()
                 self.assertIn("idx_audit_log_created_at", {r[1] for r in idx_rows})
                 tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-                for table in ("provider_collection_snapshots", "provider_collection_items", "local_library_roots", "matching_results", "track_variant_results", "provider_track_actions"):
-                    self.assertIn(table, tables)
+                self.assertIn("provider_collection_snapshots", tables)
+                self.assertIn("provider_collection_items", tables)
+                self.assertIn("local_library_roots", tables)
+                self.assertIn("matching_results", tables)
+                self.assertIn("track_variant_results", tables)
+                self.assertIn("provider_track_actions", tables)
 
     def test_repair_migration_replaces_incompatible_experimental_cache_tables(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

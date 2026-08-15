@@ -1,4 +1,4 @@
-"""Regression tests for upgrading a real v0.2 collection cache through current schema."""
+"""Regression tests for upgrading a real v0.2 collection cache through v0.6."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class V03MigrationTests(unittest.TestCase):
                 row = conn.execute("SELECT account_json, item_count, refreshed_at, collection_type, content_refreshed_at FROM provider_collection_snapshots WHERE provider_id='yandex_music' AND collection_id='liked'").fetchone()
                 item = conn.execute("SELECT external_id, position, payload_json FROM provider_collection_items WHERE provider_id='yandex_music' AND collection_id='liked'").fetchone()
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(provider_collection_snapshots)")}
-                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+                local_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
             self.assertEqual(version, "1.6.0")
             self.assertEqual(json.loads(row[0])["displayName"], "Tester")
@@ -46,10 +46,10 @@ class V03MigrationTests(unittest.TestCase):
             self.assertEqual(item[0:2], ("101", 0))
             self.assertEqual(json.loads(item[2])["title"], "Existing Like")
             self.assertTrue({"collection_type", "external_id", "title", "owner_name", "metadata_json", "source_position", "active", "content_refreshed_at"}.issubset(columns))
-            self.assertIn("local_library_roots", tables)
-            self.assertIn("matching_results", tables)
-            self.assertIn("track_variant_results", tables)
-            self.assertIn("provider_track_actions", tables)
+            self.assertIn("local_library_roots", local_tables)
+            self.assertIn("matching_results", local_tables)
+            self.assertIn("track_variant_results", local_tables)
+            self.assertIn("provider_track_actions", local_tables)
 
 
 if __name__ == "__main__":

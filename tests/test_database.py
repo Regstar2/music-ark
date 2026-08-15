@@ -17,25 +17,54 @@ class DatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "musicark.db"
             initialize_database(db_path)
+
             with closing(sqlite3.connect(db_path)) as conn:
-                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()}
-            for table in (
-                "app_metadata", "audit_log", "providers", "track_sources", "provider_tracks",
-                "provider_playlists", "provider_raw_responses", "local_audio_files",
-                "download_tasks", "tracks", "track_links", "match_conflicts",
-                "matching_results", "track_variant_results", "provider_track_actions",
-                "sync_plans", "sync_operations",
-            ):
-                self.assertIn(table, tables)
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table';"
+                    ).fetchall()
+                }
+
+            self.assertIn("app_metadata", tables)
+            self.assertIn("audit_log", tables)
+            self.assertIn("providers", tables)
+            self.assertIn("track_sources", tables)
+            self.assertIn("provider_tracks", tables)
+            self.assertIn("provider_playlists", tables)
+            self.assertIn("provider_raw_responses", tables)
+            self.assertIn("local_audio_files", tables)
+            self.assertIn("download_tasks", tables)
+            self.assertIn("tracks", tables)
+            self.assertIn("track_links", tables)
+            self.assertIn("match_conflicts", tables)
+            self.assertIn("matching_results", tables)
+            self.assertIn("track_variant_results", tables)
+            self.assertIn("provider_track_actions", tables)
+            self.assertIn("sync_plans", tables)
+            self.assertIn("sync_operations", tables)
 
     def test_audit_log_insert_persists_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "musicark.db"
             initialize_database(db_path)
             repository = AuditLogRepository(db_path)
-            repository.append(AuditEvent(event_type="db_init", entity_type="database", entity_id="main", status="success", details="Initialized from unit test."))
+
+            repository.append(
+                AuditEvent(
+                    event_type="db_init",
+                    entity_type="database",
+                    entity_id="main",
+                    status="success",
+                    details="Initialized from unit test.",
+                )
+            )
+
             with closing(sqlite3.connect(db_path)) as conn:
-                rows = conn.execute("SELECT event_type, entity_type, entity_id, status FROM audit_log;").fetchall()
+                rows = conn.execute(
+                    "SELECT event_type, entity_type, entity_id, status FROM audit_log;"
+                ).fetchall()
+
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0], ("db_init", "database", "main", "success"))
 

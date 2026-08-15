@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_strings.dart';
 import 'matching_bridge.dart';
 
 class MatchingPage extends StatefulWidget {
@@ -14,15 +15,18 @@ class MatchingPage extends StatefulWidget {
 class _MatchingPageState extends State<MatchingPage> {
   static const _pageSize = 50;
   Map<String, dynamic> _summary = const {};
+  Map<String, dynamic> _variantCapabilities = const {};
   List<Map<String, dynamic>> _items = const [];
   int _total = 0;
   bool _loading = true;
   bool _running = false;
+  bool _runningVariants = false;
   bool _loadingMore = false;
   String _status = '';
   String _search = '';
   String _sort = 'confidence';
   String? _message;
+  String? _variantMessage;
   String? _error;
 
   @override
@@ -45,10 +49,12 @@ class _MatchingPageState extends State<MatchingPage> {
         search: _search,
         sort: _sort,
       );
+      final capabilities = await widget.bridge.variantCapabilities();
       if (!mounted) return;
       setState(() {
         _summary = summary;
-        _items = _mapItems(results['items']);
+        _variantCapabilities = capabilities;
+        _items = _ensureVariantRows(_mapItems(results['items']));
         _total = _asInt(results['count']);
       });
     } catch (error) {
@@ -81,6 +87,30 @@ class _MatchingPageState extends State<MatchingPage> {
     }
   }
 
+  Future<void> _runAllVariants() async {
+    setState(() {
+      _runningVariants = true;
+      _variantMessage = null;
+      _error = null;
+    });
+    try {
+      final result = await widget.bridge.variantRunAllAvailable();
+      if (!mounted) return;
+      setState(() {
+        _variantMessage = 'Проверено версий: ${_asInt(result['processed'])}; '
+            'SAME: ${_asInt(result['same'])}; '
+            'ALTERED: ${_asInt(result['altered'])}; '
+            'DIFFERENT: ${_asInt(result['differentVersion'])}; '
+            'UNCERTAIN: ${_asInt(result['uncertain'])}';
+      });
+      await _reload();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _runningVariants = false);
+    }
+  }
+
   Future<void> _loadMore() async {
     if (_loadingMore || _items.length >= _total) return;
     setState(() => _loadingMore = true);
@@ -94,7 +124,10 @@ class _MatchingPageState extends State<MatchingPage> {
       );
       if (!mounted) return;
       setState(() {
-        _items = [..._items, ..._mapItems(result['items'])];
+        _items = [
+          ..._items,
+          ..._ensureVariantRows(_mapItems(result['items'])),
+        ];
         _total = _asInt(result['count']);
       });
     } catch (error) {
@@ -117,11 +150,24 @@ class _MatchingPageState extends State<MatchingPage> {
     try {
       final payload = await widget.bridge.matchingResult(externalId);
       final detail = _asMap(payload['result']);
+      if ('${detail['status'] ?? ''}' == 'matched') {
+        final variantPayload = await widget.bridge.variantResult(externalId);
+        detail['variant'] = _asMap(variantPayload['result']);
+      }
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (context) => _MatchingDetailDialog(
           detail: detail,
+          variantCapabilities: _variantCapabilities,
+          onVerifyVariant: '${detail['status'] ?? ''}' == 'matched'
+              ? () async {
+                  final result = await widget.bridge.variantRun(externalId);
+                  final variant = _asMap(result['result']);
+                  await _reload();
+                  return variant;
+                }
+              : null,
           onAccept: (localFileId) async {
             await widget.bridge.matchingAccept(externalId, localFileId);
             if (context.mounted) Navigator.of(context).pop();
@@ -141,6 +187,7 @@ class _MatchingPageState extends State<MatchingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final unavailableMessage = '${_variantCapabilities['unavailableMessage'] ?? ''}'.trim();
     return Scaffold(
       key: const Key('matching-page'),
       appBar: AppBar(title: const Text('Сопоставление')),
@@ -166,6 +213,18 @@ class _MatchingPageState extends State<MatchingPage> {
                         )
                       : const Icon(Icons.compare_arrows),
                   label: Text(_running ? 'Сопоставление…' : 'Запустить сопоставление'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('variant-run-all'),
+                  onPressed: _runningVariants ? null : _runAllVariants,
+                  icon: _runningVariants
+                      ? const SizedBox.square(
+                          key: Key('variant-progress'),
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.graphic_eq),
+                  label: Text(_runningVariants ? 'Проверка версий…' : 'Проверить все доступные'),
                 ),
                 _FilterChip(
                   key: const Key('matching-filter-all'),
@@ -193,6 +252,14 @@ class _MatchingPageState extends State<MatchingPage> {
                 ),
               ],
             ),
+            if (unavailableMessage.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                unavailableMessage,
+                key: const Key('variant-unavailable'),
+                style: TextStyle(color: Theme.of(context).colorScheme.secondary),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [
@@ -232,6 +299,10 @@ class _MatchingPageState extends State<MatchingPage> {
             if (_message != null) ...[
               const SizedBox(height: 10),
               Text(_message!, key: const Key('matching-run-result')),
+            ],
+            if (_variantMessage != null) ...[
+              const SizedBox(height: 10),
+              Text(_variantMessage!, key: const Key('variant-run-result')),
             ],
             if (_error != null) ...[
               const SizedBox(height: 10),
@@ -349,6 +420,7 @@ class _ResultTile extends StatelessWidget {
       'conflict' => 'CONFLICT',
       _ => 'UNMATCHED',
     };
+    final variant = row['variant'] is Map ? _asMap(row['variant']) : const <String, dynamic>{};
     return ListTile(
       key: Key('matching-row-${row['externalId']}'),
       onTap: onTap,
@@ -360,18 +432,76 @@ class _ResultTile extends StatelessWidget {
             : '${provider['album_title'] ?? ''}\n↓ $confidence%\n$localArtists — ${local['title'] ?? ''}\n${local['path'] ?? ''}',
       ),
       isThreeLine: true,
-      trailing: Chip(label: Text(statusLabel)),
+      trailing: SizedBox(
+        width: status == 'matched' ? 230 : 100,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            _CompactBadge(label: statusLabel),
+            if (status == 'matched') ...[
+              const SizedBox(width: 6),
+              Flexible(
+                child: _VariantBadge(
+                  key: Key('variant-badge-${row['externalId']}'),
+                  status: '${variant['variantStatus'] ?? 'not_checked'}',
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
+  }
+}
+
+class _CompactBadge extends StatelessWidget {
+  const _CompactBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.fade,
+          softWrap: false,
+          style: Theme.of(context).textTheme.labelSmall,
+        ),
+      ),
+    );
+  }
+}
+
+class _VariantBadge extends StatelessWidget {
+  const _VariantBadge({super.key, required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return _CompactBadge(label: _variantLabel(status));
   }
 }
 
 class _MatchingDetailDialog extends StatefulWidget {
   const _MatchingDetailDialog({
     required this.detail,
+    required this.variantCapabilities,
     required this.onAccept,
     required this.onReject,
+    this.onVerifyVariant,
   });
   final Map<String, dynamic> detail;
+  final Map<String, dynamic> variantCapabilities;
+  final Future<Map<String, dynamic>> Function()? onVerifyVariant;
   final Future<void> Function(int localFileId) onAccept;
   final Future<void> Function(int localFileId) onReject;
 
@@ -381,6 +511,14 @@ class _MatchingDetailDialog extends StatefulWidget {
 
 class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
   bool _busy = false;
+  String? _variantError;
+  late Map<String, dynamic> _detail;
+
+  @override
+  void initState() {
+    super.initState();
+    _detail = Map<String, dynamic>.from(widget.detail);
+  }
 
   Future<void> _perform(Future<void> Function() action) async {
     setState(() => _busy = true);
@@ -391,12 +529,34 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
     }
   }
 
+  Future<void> _verifyVariant() async {
+    final callback = widget.onVerifyVariant;
+    if (callback == null) return;
+    setState(() {
+      _busy = true;
+      _variantError = null;
+    });
+    try {
+      final variant = await callback();
+      if (!mounted) return;
+      setState(() => _detail['variant'] = variant);
+    } catch (error) {
+      if (mounted) setState(() => _variantError = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final provider = _asMap(widget.detail['provider']);
-    final candidates = _mapItems(widget.detail['candidates']);
-    final local = widget.detail['local'] is Map
-        ? _asMap(widget.detail['local'])
+    final provider = _asMap(_detail['provider']);
+    final candidates = _mapItems(_detail['candidates']);
+    final local = _detail['local'] is Map
+        ? _asMap(_detail['local'])
+        : const <String, dynamic>{};
+    final identityStatus = '${_detail['status'] ?? ''}';
+    final variant = _detail['variant'] is Map
+        ? _asMap(_detail['variant'])
         : const <String, dynamic>{};
     return AlertDialog(
       key: const Key('matching-detail'),
@@ -407,14 +567,50 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const Text('Identity', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('Status: ${identityStatus.toUpperCase()}'),
+              Text('Title: ${provider['title'] ?? '—'}'),
+              Text('Artist: ${_artistText(provider['artists'])}'),
               Text('Yandex album: ${provider['album_title'] ?? '—'}'),
               Text('Yandex duration: ${provider['duration_seconds'] ?? '—'} s'),
+              Text('Confidence: ${(_asDouble(_detail['confidence']) * 100).round()}%'),
               if (local.isNotEmpty) ...[
                 const Divider(),
                 Text('Local: ${_artistText(local['artists'])} — ${local['title'] ?? ''}'),
                 Text('Album: ${local['album'] ?? '—'}'),
                 Text('Duration: ${local['durationSeconds'] ?? '—'} s'),
                 Text('Path: ${local['path'] ?? '—'}'),
+              ],
+              if (identityStatus == 'matched') ...[
+                const Divider(),
+                const Text('Variant verification', style: TextStyle(fontWeight: FontWeight.bold)),
+                _VariantDetail(variant: variant),
+                const SizedBox(height: 8),
+                if ('${widget.variantCapabilities['unavailableMessage'] ?? ''}'.trim().isNotEmpty)
+                  Text(
+                    '${widget.variantCapabilities['unavailableMessage']}',
+                    key: const Key('variant-detail-unavailable'),
+                  ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    key: const Key('variant-verify'),
+                    onPressed: _busy ? null : _verifyVariant,
+                    icon: _busy
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.graphic_eq),
+                    label: Text(_busy ? 'Проверка…' : 'Проверить версию'),
+                  ),
+                ),
+                if (_variantError != null)
+                  Text(
+                    _variantError!,
+                    key: const Key('variant-detail-error'),
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
               ],
               if (candidates.isNotEmpty) ...[
                 const Divider(),
@@ -437,6 +633,51 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
       ),
       actions: [
         TextButton(onPressed: _busy ? null : () => Navigator.of(context).pop(), child: const Text('Закрыть')),
+      ],
+    );
+  }
+}
+
+class _VariantDetail extends StatelessWidget {
+  const _VariantDetail({required this.variant});
+  final Map<String, dynamic> variant;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = '${variant['variantStatus'] ?? 'not_checked'}';
+    final similarity = variant['audioSimilarity'];
+    final reasons = variant['variantReasons'] is List
+        ? List<dynamic>.from(variant['variantReasons'] as List)
+        : const <dynamic>[];
+    final segments = _mapItems(variant['alteredSegments']);
+    return Column(
+      key: const Key('variant-detail'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Status: ${_variantLabel(status)}', key: const Key('variant-detail-status')),
+        Text(
+          similarity == null
+              ? 'Audio similarity: —'
+              : 'Audio similarity: ${(_asDouble(similarity) * 100).round()}%',
+        ),
+        if (reasons.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          const Text('Signals:'),
+          for (final reason in reasons)
+            Text('• ${AppStrings.variantReason(reason.toString())}'),
+        ],
+        if (segments.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          const Text('Altered regions:'),
+          for (var index = 0; index < segments.length; index++)
+            Text(
+              '${_formatSeconds(_asDouble(segments[index]['startSeconds']))}–'
+              '${_formatSeconds(_asDouble(segments[index]['endSeconds']))} '
+              '(${(_asDouble(segments[index]['meanSimilarity']) * 100).round()}%)',
+              key: Key('variant-altered-region-$index'),
+            ),
+        ],
+        Text('Reference: ${variant['referencePath'] ?? '—'}'),
       ],
     );
   }
@@ -493,6 +734,23 @@ class _CandidateCard extends StatelessWidget {
   }
 }
 
+List<Map<String, dynamic>> _ensureVariantRows(List<Map<String, dynamic>> rows) {
+  return rows.map((row) {
+    final copy = Map<String, dynamic>.from(row);
+    if ('${copy['status'] ?? ''}' == 'matched' &&
+        copy['localFileId'] != null &&
+        copy['variant'] is! Map) {
+      copy['variant'] = {
+        'variantStatus': 'not_checked',
+        'status': 'not_checked',
+        'variantReasons': ['audio_not_checked'],
+        'alteredSegments': <Map<String, dynamic>>[],
+      };
+    }
+    return copy;
+  }).toList();
+}
+
 List<Map<String, dynamic>> _mapItems(dynamic value) {
   if (value is! List) return <Map<String, dynamic>>[];
   return value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
@@ -517,4 +775,19 @@ double _asDouble(dynamic value) {
 String _artistText(dynamic value) {
   if (value is List && value.isNotEmpty) return value.join(', ');
   return 'Unknown Artist';
+}
+
+String _variantLabel(String status) => switch (status) {
+  'same' => 'SAME',
+  'altered' => 'ALTERED',
+  'different_version' => 'DIFFERENT VERSION',
+  'uncertain' => 'UNCERTAIN',
+  _ => 'NOT CHECKED',
+};
+
+String _formatSeconds(double seconds) {
+  final safe = seconds.isFinite && seconds >= 0 ? seconds.round() : 0;
+  final minutes = safe ~/ 60;
+  final remainder = safe % 60;
+  return '$minutes:${remainder.toString().padLeft(2, '0')}';
 }

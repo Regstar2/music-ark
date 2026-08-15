@@ -1,55 +1,54 @@
-# MusicArk Architecture — v0.5
+# MusicArk Architecture — v0.5.1
 
 ## Product boundaries
 
-MusicArk has three top-level desktop flows sharing one SQLite database while keeping network, filesystem, and analytical responsibilities separate:
+MusicArk keeps provider access, local indexing, identity matching, and variant verification as separate responsibilities over one SQLite database:
 
 ```text
 Flutter desktop
         ↓
 musicark.mvp_bridge
-   ├──────────────────────┬──────────────────────┐
-   ↓                      ↓                      ↓
-YandexLibraryService  LocalLibraryService   MatchingService
-   ↓                      ↓                      ↓
-Yandex provider/cache Local scanner/index   Input identity adapter
-                                                  ↓
-                                          LocalMatchIndex
-                                                  ↓
-                                        CandidateGenerator
-                                                  ↓
-                                           MatchScorer
-                                                  ↓
-                                          MatchDecision
-                                                  ↓
-                                   MatchingStorageRepository
-                                                  ↓
-                                             SQLite
+   ├──────────────────────┬──────────────────────┬─────────────────────────┐
+   ↓                      ↓                      ↓                         ↓
+YandexLibraryService  LocalLibraryService   MatchingService      VariantDetectionService
+   ↓                      ↓                      ↓                         ↓
+Yandex provider/cache Local scanner/index   identity matching         matched pair only
+                                                  ↓                         ↓
+                                         MATCHED/CONFLICT/UNMATCHED   metadata evidence
+                                                                            ↓
+                                                                    strict reference resolver
+                                                                            ↓
+                                                                      ffmpeg decoder
+                                                                            ↓
+                                                                         aligner
+                                                                            ↓
+                                                                    segment comparator
+                                                                            ↓
+                                                                     variant classifier
+                                                                            ↓
+                                                       SAME/ALTERED/DIFFERENT_VERSION/
+                                                           UNCERTAIN/NOT_CHECKED
+                                                                            ↓
+                                                                          SQLite
 ```
 
-Matching never calls the Yandex network provider. It operates only on cached provider collections and the local index.
+Matching and variant verification never call the Yandex network provider. They work from cached provider metadata and local files already known to MusicArk.
 
-## Matching layers
+## Identity Matching — v0.5
 
 ### MatchingInputRepository
 
-The active v0.3/v0.4 Yandex cache stores collection membership in `provider_collection_items`, while legacy canonical code already uses `provider_tracks`. The input adapter materializes a unique `(provider_id, external_id)` identity set into `provider_tracks` before matching. One track appearing in Liked and several playlists is processed once.
+Materializes a unique `(provider_id, external_id)` identity set from cached collection membership into `provider_tracks`. A track present in Liked and multiple playlists is processed once.
 
-### LocalMatchIndex
+### LocalMatchIndex / CandidateGenerator / MatchScorer
 
-`local_audio_files` remains owned by Local Library. Matching-specific compact columns (`normalized_title`, `normalized_artists_text`, `duration_bucket`) are refreshed once before a run and indexed by SQLite. This avoids coupling the v0.4 scanner to matching while also avoiding normalization of the whole local collection for every provider query.
+`local_audio_files` stays owned by Local Library. Compact normalized title/artist/duration indexes support bounded candidate lookups. Detailed scoring receives at most a small candidate set instead of a Cartesian `Yandex × Local` product.
 
-### CandidateGenerator
-
-Candidate generation performs a small series of indexed SQL lookups and returns at most 40 candidates per provider identity. It does not load the complete Local Library and contains no Cartesian-product loop.
-
-### MatchScorer
-
-Pure local scoring consumes structured provider/local metadata. Title similarity uses stdlib `difflib`; artists are normalized as an order-independent set; duration and album are secondary. Filename is fallback only. The strict `yandex_<track_id>.<ext>` filename convention is a strong exact-ID signal.
+The strict `yandex_<track_id>.<ext>` filename convention remains a strong exact-ID identity signal. Semantic words such as Live/Remix/Acoustic are not erased by normalization.
 
 ### MatchDecision
 
-Policy is centralized in `matching/policy.py`:
+Identity policy remains unchanged:
 
 ```text
 AUTO_MATCH_THRESHOLD = 0.90
@@ -57,32 +56,104 @@ CONFLICT_THRESHOLD   = 0.70
 AMBIGUITY_MARGIN     = 0.04
 ```
 
-The second-best candidate matters. A strong but ambiguous pair becomes `conflict` rather than an arbitrary match.
+A strong but ambiguous identity becomes `CONFLICT`, not an arbitrary automatic match. Manual accepted/rejected decisions outrank later automatic matching.
 
-### MatchingStorageRepository
+## Variant Detection — v0.5.1
 
-Persists automatic results in batches, reuses canonical `tracks` and confirmed `track_links`, and extends `match_conflicts` for multiple ranked candidates and rejection history. `matching_results` provides one current state per provider identity.
+Variant detection is an additional layer. It never changes `MATCHED / CONFLICT / UNMATCHED` or replaces identity confidence with one combined score.
 
-Manual match state outranks automatic state. A rejected candidate is excluded from later automatic candidate generation.
+### MetadataVariantDetector
 
-## SQLite v1.4.0
+Extracts semantic variant markers from provider/local title, album, and weak filename evidence. It also carries provider `explicit` (mapped from Yandex `content_warning`) and any locally known explicit flag. Explicit mismatch is evidence only; it is not a censorship verdict.
 
-Forward migration from v0.4 `1.3.0` adds:
+### ReferenceAudioResolver
 
-- matching index columns/indexes on `local_audio_files`;
-- indexes for provider/local link queries;
-- `matching_results` keyed by `(provider_id, external_id)`;
-- score breakdown/rank/matcher-version/update fields on `match_conflicts`.
+Deep verification requires an exact local reference for the provider identity. Only these strict filename conventions are accepted:
 
-No Yandex cache, Local Library roots/files, canonical links, or credentials are dropped.
+```text
+yandex_<track_id>.<ext>
+yandex-<track_id>.<ext>
+```
 
-## Incremental matching
+The resolver first checks `.musicark/downloads/yandex`, then indexed local files. Arbitrary numbers elsewhere in a path are ignored.
 
-Each result records `matcher_version`, a provider metadata fingerprint, and a Local Library fingerprint. Unchanged automatic results can be skipped. Provider metadata changes or Local Library changes allow recalculation. Missing linked local files are invalidated before a run.
+### AudioDecoder / FfmpegAudioDecoder
+
+`AudioDecoder` is an abstraction. `FfmpegAudioDecoder` is the v0.5.1 adapter and normalizes supported inputs through a pipe to:
+
+```text
+mono
+signed 16-bit PCM
+11025 Hz
+```
+
+No giant temporary WAV is required. The decoded buffer stays compact and is never stored in SQLite. ffmpeg is optional: if it is absent, the app and metadata matching continue working and the result remains conservative.
+
+### AudioAligner
+
+A bounded coarse alignment compares normalized energy envelopes within ±15 seconds. This covers encoder delay, short leading silence, and modest start offsets without unrestricted dynamic alignment.
+
+### SegmentComparator
+
+After alignment, the recording is compared in policy-controlled overlapping windows (`2.0 s`, `0.75 s` hop). Similarity combines normalized energy-envelope shape, compact phase-insensitive spectral evidence, zero-crossing rate, and derivative evidence.
+
+Low-similarity neighboring windows are merged into `AlteredRegion` values containing start/end/mean/minimum similarity. Isolated mild outliers are ignored.
+
+### VariantClassifier
+
+Classification uses several explainable signals instead of one magic threshold:
+
+- semantic marker mismatch;
+- explicit evidence;
+- duration delta;
+- global audio similarity;
+- median window similarity;
+- low-similarity-window ratio;
+- longest altered region;
+- altered region count.
+
+The precision rule is conservative: a false `SAME` is worse than `UNCERTAIN`.
+
+A possible clean/censored interpretation is emitted only when several signals agree (provider explicit metadata, close duration, high overall recording similarity, and localized divergence). The reason is named `possible_clean_or_censored_variant`; it is not presented as certain lyric classification.
+
+## SQLite v1.5.0
+
+Migration history is forward-only:
+
+```text
+1.3.0 Local Library
+  ↓
+1.4.0 Identity Matching
+  ↓
+1.5.0 Variant Detection
+```
+
+v1.5 adds `track_variant_results` with primary key `(provider_id, external_id, local_file_id)`. It stores variant status, metadata evidence, audio similarity, reasons, altered regions, provider/local/reference fingerprints, analyzer version, reference path, and timestamps.
+
+No PCM/audio blobs are stored. Yandex cache, Local Library roots/files, `matching_results`, `track_links`, `match_conflicts`, and manual decisions are preserved.
+
+## Incremental analysis / invalidation
+
+Identity matching retains its v0.5 matcher/provider/library fingerprints.
+
+Variant results have independent fingerprints for:
+
+- provider metadata relevant to variant semantics;
+- local path + file size + mtime;
+- reference path + file size + mtime;
+- `ANALYZER_VERSION`.
+
+Unchanged successful results skip re-decode. Local/reference/provider changes invalidate the cache. Technical failures are not treated as permanently cacheable, so installing ffmpeg or repairing a file can recover without deleting the DB.
+
+## Performance boundary
+
+Audio verification occurs only after a `MATCHED` identity (including manual accepted links). `UNMATCHED` and unresolved `CONFLICT` rows are not decoded. `variant_run_all_available` further restricts work to pairs with resolvable exact-ID references and isolates per-file failures.
+
+All audio operations stay Python-side. PCM never crosses Flutter ↔ Python. Flutter starts bridge processes asynchronously, keeping heavy decoding outside the UI isolate.
 
 ## Bridge boundary
 
-Matching bridge commands are:
+Identity commands remain:
 
 ```text
 matching_summary
@@ -93,12 +164,23 @@ matching_accept
 matching_reject
 ```
 
-Listing supports `limit`, `offset`, `status`, `search`, and sort. The Flutter process boundary continues to use argument arrays with `Process.run(..., runInShell: false)`; no user value is interpolated into a shell command.
+Variant commands are separate:
+
+```text
+variant_capabilities
+variant_summary
+variant_run
+variant_run_all_available
+variant_result
+variant_results
+```
+
+No variant logic is added to `matching_run`.
 
 ## Safety / privacy
 
-The matching path is read-only toward audio files and Yandex Music. It performs no download, metadata mutation, file rename/move/delete, playlist edit, like/dislike, or upload. Local metadata is not sent to external matching or metadata services.
+Both analytical layers are read-only toward music files and Yandex Music. They perform no automatic download, metadata mutation, rename/move/delete, playlist edit, like/dislike, or upload. Local metadata/audio is not sent to external matching, metadata, fingerprint, or ML services.
 
 ## Future boundary
 
-v0.6 Missing Tracks can consume provider identities whose `matching_results` have no accepted local match. v0.5 does not implement download or the Missing Tracks product workflow.
+v0.6 Missing Tracks can consume identity results with no accepted local match. v0.5.1 only improves verification of already established links; it does not implement download or sync.

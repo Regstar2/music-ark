@@ -2,7 +2,54 @@
 
 All notable project changes are recorded here.
 
-## Unreleased — v0.5.0 Matching
+## Unreleased — v0.5.1 Variant / Altered Track Detection
+
+### Added
+
+- independent variant states `SAME`, `ALTERED`, `DIFFERENT_VERSION`, `UNCERTAIN`, and `NOT_CHECKED` above unchanged v0.5 identity state;
+- `MetadataVariantDetector` with semantic markers for live/remix/mix/acoustic/instrumental/remaster/radio edit/edit/extended/demo/clean/explicit/censored/uncensored variants;
+- provider explicit/content-warning evidence kept separate from censorship conclusions;
+- strict `ReferenceAudioResolver` for exact `yandex_<id>.<ext>` / `yandex-<id>.<ext>` reference files;
+- `AudioDecoder` abstraction and optional `FfmpegAudioDecoder` using mono signed-16 PCM at 11025 Hz through a pipe;
+- bounded energy-envelope alignment for small encoder/leading-silence offsets;
+- segment-level comparison with policy-controlled windows/hop, energy/spectral/waveform evidence, and merged altered regions;
+- conservative `VariantClassifier` with separate duration, metadata, global/median similarity, low-window ratio, region count/length signals;
+- evidence-based `possible_clean_or_censored_variant` reason for localized divergence under strong recording/explicit evidence;
+- `track_variant_results` persistence with provider/local/reference fingerprints and analyzer version;
+- independent cache invalidation when provider variant metadata, local file, reference file, or analyzer version changes;
+- bridge commands `variant_capabilities`, `variant_summary`, `variant_run`, `variant_run_all_available`, `variant_result`, and `variant_results`;
+- Matching-page secondary variant badges, separate variant detail section, altered-region display, single-track verification, batch verification, decoder-unavailable and progress/error states;
+- synthetic Python tests for audio comparison, metadata variants, strict references, graceful failures, cache/invalidation, and v1.4→v1.5 migration preservation;
+- Flutter widget tests for SAME/ALTERED/DIFFERENT VERSION/NOT CHECKED, verification controls, altered regions, unavailable decoder, progress, error, and result refresh.
+
+### Changed
+
+- package and Flutter versions advanced to `0.5.1`;
+- SQLite schema advanced from `1.4.0` to `1.5.0` through a forward-only migration;
+- v0.5 matching is documented explicitly as **identity matching**, while v0.5.1 is a second recording/version-verification layer;
+- decoded PCM remains compact/in-memory and is never stored as SQLite blobs or persistent temporary WAV files;
+- Matching UI keeps identity confidence separate from audio/variant evidence.
+
+### Variant policy
+
+- false-positive `SAME` is considered worse than `UNCERTAIN`;
+- semantic Live/Remix/Acoustic/Instrumental/Radio Edit mismatches cannot become `SAME` solely because title/artist identity is close;
+- technical decoder/alignment/file failures never become `DIFFERENT_VERSION`;
+- explicit metadata alone never proves clean/censored status;
+- deep audio comparison requires an exact local reference and never triggers an automatic reference download;
+- audio verification begins only after a v0.5 `MATCHED` or manually accepted identity.
+
+### Safety / performance
+
+- no external matching, metadata, fingerprint, or ML service is introduced;
+- ffmpeg is optional and its absence does not break Yandex, Local Library, or identity matching;
+- no local music file is renamed, moved, deleted, edited, or transcoded by variant analysis;
+- no PCM crosses Flutter ↔ Python;
+- unchanged successful pairs skip redundant decode;
+- batch work is bounded to matched/reference-available pairs and isolates per-file failures;
+- existing Yandex cache, Local Library, v0.5 matches, `track_links`, conflicts, and manual decisions are preserved by migration.
+
+## v0.5.0 — Matching
 
 ### Added
 
@@ -24,7 +71,7 @@ All notable project changes are recorded here.
 - SQLite schema advanced from `1.3.0` to `1.4.0` through a forward-only migration;
 - legacy `MatchingEngine` is now a compatibility facade over the v0.5 pipeline rather than the production algorithm;
 - legacy canonical `tracks`, `track_links`, and `match_conflicts` are reused/extended instead of creating a parallel canonical model;
-- exact Yandex-ID matching now recognizes only the strict `yandex_<track_id>.<ext>` filename convention instead of arbitrary numeric path substrings.
+- exact Yandex-ID matching recognizes only the strict filename convention instead of arbitrary numeric path substrings.
 
 ### Matching policy
 

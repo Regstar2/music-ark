@@ -1,107 +1,189 @@
-# Manual Test Plan — MusicArk v0.5
+# Manual Test Plan — MusicArk v0.5.1
 
 Use the real cached Yandex Library together with a disposable/local test collection such as `C:\MusicArk-Test`. Do not delete `.musicark\musicark.db`, saved Yandex credentials, or music files for this test.
 
 ## Preconditions
 
 - Windows Flutter desktop target works;
-- v0.4 database/local roots are kept in place so migration `1.4.0` is exercised;
-- Yandex Liked is loaded; open/refresh representative playlists so their tracks are cached;
-- Local Library is scanned and includes structured metadata;
-- fixture contains at least 10 obvious matches, 5 harder matches, live/remix/acoustic variants, and same-title/different-artist examples where possible.
+- existing v0.5 database/manual decisions remain in place so migration `1.4.0 → 1.5.0` is exercised;
+- Yandex Liked/playlists are cached;
+- Local Library is scanned;
+- v0.5 matching has representative `MATCHED`, `CONFLICT`, and `UNMATCHED` rows;
+- optional ffmpeg is installed for deep-audio cases; a separate run without ffmpeg is also required;
+- any manual edited-audio fixtures are copies of owned/test material, never the primary music archive.
 
-## Migration / regression baseline
+## Migration / v0.5 regression
 
-1. Launch v0.5 against the existing v0.4 database.
-2. Confirm Yandex saved session, Liked, playlists, and cached playlist tracks remain available.
-3. Confirm Local Library roots/tracks/search/sorting remain available.
-4. Do not rescan only to make migration work; `initialize_database()` must upgrade automatically.
+1. Launch v0.5.1 against the existing v0.5 database.
+2. Confirm schema becomes `1.5.0` automatically.
+3. Confirm Yandex saved session, Liked, playlists, and cached tracks remain available.
+4. Confirm Local Library roots/tracks/search/sorting remain available.
+5. Confirm previous `MATCHED / CONFLICT / UNMATCHED` results still exist.
+6. Confirm a v0.5 manual accepted link still has manual precedence.
+7. Confirm no database deletion/rescan is required merely for migration.
 
-## Matching baseline
+## Identity Matching baseline
+
+Repeat the v0.5 precision checks before evaluating variants:
+
+- obvious title+artist/duration matches stay correct;
+- ambiguous candidates remain `CONFLICT`/`UNMATCHED` rather than false `MATCHED`;
+- manual accept/reject persists across restart/rerun;
+- duplicate Liked/playlist membership remains one provider identity;
+- deleted local files invalidate links after Local Library rescan.
+
+Variant work must not change the meaning of identity status or confidence.
+
+## Variant UI baseline
 
 1. Open **Сопоставление**.
-2. Confirm Yandex and Local track counts are plausible.
-3. Click **Запустить сопоставление**.
-4. Confirm final counts are shown for matched / conflicts / unmatched.
-5. Open filters **Все**, **Совпало**, **Требует проверки**, **Не найдено**.
-6. Search by Yandex title/artist and local title/artist/path.
-7. Check sorting by confidence, artist, title, and status.
+2. For a matched row confirm the identity badge remains `MATCHED` and a separate variant badge appears.
+3. Before analysis the variant state may be `NOT CHECKED`.
+4. Open detail and confirm separate **Identity** and **Variant verification** sections.
+5. Confirm identity confidence is not displayed as audio similarity.
+6. Confirm `Проверить версию` is available on matched rows.
+7. Confirm unresolved conflict/unmatched rows do not trigger audio analysis.
+8. Use **Проверить все доступные** and confirm progress/busy state remains visible while the Python-side batch runs.
 
-## Precision review
+## Reference resolver
 
-Inspect at least:
+Prepare exact-ID references under `.musicark\downloads\yandex` or as indexed local files:
 
-- 10 obvious title+artist matches with close duration;
-- 5 difficult matches with edition/album differences;
-- several `Live`, `Remix`, `Acoustic`, `Instrumental`, or `Remaster` cases;
-- same-title tracks from different artists;
-- multi-artist / `feat.` cases;
-- FLAC+MP3 duplicates where both are plausible.
+```text
+yandex_69046542.mp3
+yandex-69046542.flac
+```
 
-Expected policy: false positives are unacceptable. A doubtful case should be `CONFLICT` or `UNMATCHED`, not `MATCHED`.
+Verify:
 
-## Conflict review / manual decisions
+- exact filenames are accepted;
+- `Artist 69046542 - Song.mp3` is not treated as a reference;
+- a random directory number is not treated as a reference ID;
+- no reference is downloaded automatically.
 
-1. Open one conflict.
-2. Compare Yandex and local title, artists, album, duration, path, and confidence.
-3. Confirm multiple top candidates are shown when available.
-4. Accept the correct candidate.
-5. Restart MusicArk.
-6. Confirm the result is still matched manually.
-7. Pick another conflict and reject its best wrong candidate.
-8. Run matching again.
-9. Confirm the rejected candidate does not return as the same active best candidate.
-10. If another candidate remains, verify it can be accepted instead.
+## Real-library / owned-fixture matrix
 
-## Incremental behavior
+Prepare a small controlled set:
 
-- Run matching twice without Yandex/Local changes: the second run should report unchanged work instead of needlessly recomputing everything.
-- Change metadata of a test local file externally, rescan Local Library, then rerun matching; affected automatic result should be eligible for recalculation.
-- Delete a test local file externally, rescan, then rerun; a link to the removed file must not remain valid.
-- Refresh Yandex metadata/library, then rerun; changed provider metadata must be eligible for recalculation.
-- A manual accepted link must not be overwritten by an ordinary automatic rerun.
+### A. Same recording, MP3 ↔ FLAC
 
-## Duplicate collection identity
+Expected: `SAME` when alignment/audio evidence is strong.
 
-Use a Yandex track that appears in Liked and at least one playlist. Matching must show/process it as one provider identity, not one result per collection occurrence.
+### B. Same recording, changed gain/encoding
+
+Create/obtain an owned/test copy with changed volume or encoding. Expected: still `SAME`, not `ALTERED` merely because bytes differ.
+
+### C. Clean / Explicit pair
+
+If both versions are legally available, compare them. Metadata `explicit` alone must not assert censorship. If most audio matches and localized stable divergences exist, `ALTERED` with `possible_clean_or_censored_variant` is acceptable.
+
+### D. Radio Edit
+
+Expected: must not be automatically classified `SAME` merely from title/artist identity. `DIFFERENT VERSION` is preferred when semantic/duration/audio evidence is strong; otherwise `UNCERTAIN` is acceptable.
+
+### E. Live version
+
+Expected: not `SAME`.
+
+### F. Remix
+
+Expected: not `SAME`.
+
+### G. Local 2-second replacement
+
+On a copy of test/owned audio replace a short region with silence or another tone/noise. Expected: `ALTERED`, with one merged altered region around the edited interval rather than dozens of tiny windows.
+
+## Alignment
+
+Add roughly 0.5–2 seconds of leading silence to an owned/test copy. Expected: bounded alignment compensates for the small start offset and a genuinely same recording can remain `SAME`.
+
+A large/unreliable offset must become `UNCERTAIN`, not force an optimistic class.
+
+## Duration / substantially different recording
+
+Test a materially shortened version and a recording that diverges over a large fraction of its duration. Expected: `DIFFERENT VERSION` or conservative `UNCERTAIN` near policy boundaries; never obvious `DIFFERENT VERSION → SAME`.
+
+## Altered regions
+
+For an `ALTERED` result confirm detail contains:
+
+- start time;
+- end time;
+- mean similarity;
+- merged region behavior.
+
+Adjacent bad windows should be merged. A single mild outlier surrounded by normal windows should not automatically create a region.
+
+## ffmpeg unavailable
+
+Run once with ffmpeg unavailable from PATH.
+
+Expected:
+
+- app starts normally;
+- Yandex/Local Library/matching remain functional;
+- UI shows `Аудиосравнение недоступно: ffmpeg не найден`;
+- variant technical state is `NOT CHECKED`/conservative;
+- technical failure is never converted to `DIFFERENT VERSION`;
+- installing/restoring ffmpeg allows later re-analysis without deleting the DB.
+
+## Cache / invalidation
+
+1. Analyze a pair with a valid reference.
+2. Run it again without changes: decoded audio should be reused from the stored result (no second decode).
+3. Change the local test file: old variant result must become stale and recompute.
+4. Restore local, then change reference: recompute.
+5. Refresh provider metadata changing explicit/variant-relevant fields: recompute.
+6. Change `ANALYZER_VERSION` in a development test: recompute.
+7. Confirm v0.5 identity need not be rebuilt solely because explicit changed.
+
+## Batch resilience / performance
+
+- Use many Yandex identities but only a small subset with exact references.
+- Confirm audio verification touches only `MATCHED`/manual accepted pairs with references.
+- Confirm no Local Library × Yandex full decode loop occurs.
+- Introduce one missing/corrupt/unreadable test file and confirm the rest of the batch continues.
+- UI must remain responsive while the external Python analysis process runs.
 
 ## Offline / privacy
 
-After Yandex cache and Local Library are populated:
-
-1. disconnect network access;
-2. launch the app;
-3. run matching;
-4. review results and manual decisions.
-
-Matching should continue to work because it is local-only. No local metadata should be sent to Yandex or third-party matching/metadata services.
+After caches are populated disconnect network access and run identity + variant analysis. Both must operate locally. No local metadata/audio should be uploaded to Yandex or third-party matching/fingerprint/metadata APIs.
 
 ## Safety regression
 
-During all matching tests verify MusicArk does not:
+During all tests verify MusicArk does not:
 
-- rename, move, delete, transcode, or edit tags/artwork of local audio files;
+- rename, move, delete, transcode, or edit local music files;
+- alter the reference file;
+- create persistent giant decoded WAV files;
+- store PCM/audio blobs in SQLite;
 - like/dislike tracks, edit playlists, upload, or otherwise mutate Yandex Music;
-- remove stored Yandex credentials;
-- delete `.musicark\musicark.db`.
+- automatically download reference tracks;
+- delete `.musicark\musicark.db` or saved credentials.
 
 ## Automated commands
+
+Do not run GitHub Actions for this milestone. Run locally:
 
 ```powershell
 python -m unittest discover -s tests -v
 cd ui\musicark_ui
 flutter analyze
 flutter test
+flutter run -d windows
 ```
 
 ## Pass criteria
 
-- migration `1.3.0 → 1.4.0` preserves v0.4 Yandex/Local data;
-- no Cartesian-product behavior is observed in the implementation/scale regression;
-- obvious auto-matches are correct and ambiguous cases are conservative;
-- manual accept/reject persists across restart/rerun;
-- rejected candidates do not immediately return as active best candidates;
-- deleted local files invalidate links;
-- Yandex and Local Library regressions remain working;
+- migration `1.4.0 → 1.5.0` preserves Yandex cache, Local Library, v0.5 matches and manual decisions;
+- v0.5 identity semantics/regressions remain correct;
+- exact-ID reference resolver rejects incidental numbers;
+- same-recording codec/gain cases are not rejected merely because bytes differ;
+- localized edits can produce `ALTERED` + merged regions;
+- Live/Remix/Acoustic/Instrumental/Radio Edit do not become `SAME` from title/artist alone;
+- explicit mismatch without audio does not claim censorship;
+- missing ffmpeg/reference/corrupt file fails gracefully;
+- unchanged pairs avoid redundant decode and local/reference/provider changes invalidate cache;
+- batch remains bounded to matched/reference-available pairs;
 - Python tests, Flutter analyzer, and Flutter tests are green on Windows;
-- real-library precision is reviewed before the version is considered accepted.
+- real-library/owned-fixture review is completed before accepting thresholds.

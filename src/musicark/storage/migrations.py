@@ -298,6 +298,45 @@ def _upgrade_matching_v05(c: object) -> None:
     )
 
 
+def _upgrade_variant_v051(c: object) -> None:
+    """Add variant results without replacing or rewriting v0.5 identity state."""
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS track_variant_results (
+            provider_id TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            local_file_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'not_checked',
+            metadata_score REAL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            audio_similarity REAL,
+            variant_reasons_json TEXT NOT NULL DEFAULT '[]',
+            altered_segments_json TEXT NOT NULL DEFAULT '[]',
+            provider_variant_fingerprint TEXT NOT NULL DEFAULT '',
+            local_audio_fingerprint TEXT NOT NULL DEFAULT '',
+            reference_audio_fingerprint TEXT NOT NULL DEFAULT '',
+            analyzer_version INTEGER NOT NULL DEFAULT 1,
+            reference_path TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY(provider_id, external_id, local_file_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_track_variant_results_status
+        ON track_variant_results(provider_id, status, updated_at DESC)
+        """
+    )
+    c.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_track_variant_results_local_file
+        ON track_variant_results(local_file_id)
+        """
+    )
+
+
 MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     (
         "1.0.0",
@@ -312,6 +351,7 @@ MIGRATION_STEPS: list[tuple[str, tuple[MigrationFn, ...]]] = [
     ("1.2.0", (_upgrade_collection_metadata,)),
     ("1.3.0", (_upgrade_local_library,)),
     ("1.4.0", (_upgrade_matching_v05,)),
+    ("1.5.0", (_upgrade_variant_v051,)),
 ]
 
 

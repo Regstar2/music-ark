@@ -70,7 +70,7 @@ class MatchingInputRepository:
                         ((external_id,) for external_id in unique),
                     )
                     # Provider identities removed from every cached collection are no
-                    # longer part of the current matching dataset. Remove only local
+                    # longer part of the current analytical dataset. Remove only local
                     # analytical/link rows; canonical tracks and Yandex cache remain.
                     conn.execute(
                         """
@@ -87,6 +87,16 @@ class MatchingInputRepository:
                         DELETE FROM match_conflicts
                         WHERE source_provider_id=?
                           AND source_external_id NOT IN (
+                            SELECT external_id FROM matching_active_provider_ids
+                          )
+                        """,
+                        (provider_id,),
+                    )
+                    conn.execute(
+                        """
+                        DELETE FROM track_variant_results
+                        WHERE provider_id=?
+                          AND external_id NOT IN (
                             SELECT external_id FROM matching_active_provider_ids
                           )
                         """,

@@ -14,6 +14,17 @@ abstract interface class MatchingBridgeClient {
   Future<Map<String, dynamic>> matchingResult(String externalId);
   Future<Map<String, dynamic>> matchingAccept(String externalId, int localFileId);
   Future<Map<String, dynamic>> matchingReject(String externalId, int localFileId);
+
+  Future<Map<String, dynamic>> variantCapabilities();
+  Future<Map<String, dynamic>> variantSummary();
+  Future<Map<String, dynamic>> variantRun(String externalId, {bool force = false});
+  Future<Map<String, dynamic>> variantRunAllAvailable();
+  Future<Map<String, dynamic>> variantResults({
+    int limit = 500,
+    int offset = 0,
+    String status = '',
+  });
+  Future<Map<String, dynamic>> variantResult(String externalId);
 }
 
 class MatchingBridge implements MatchingBridgeClient {
@@ -51,6 +62,30 @@ class MatchingBridge implements MatchingBridgeClient {
   Future<Map<String, dynamic>> matchingReject(String externalId, int localFileId) =>
       _run('matching_reject', externalId: externalId, localFileId: localFileId);
 
+  @override
+  Future<Map<String, dynamic>> variantCapabilities() => _run('variant_capabilities');
+
+  @override
+  Future<Map<String, dynamic>> variantSummary() => _run('variant_summary');
+
+  @override
+  Future<Map<String, dynamic>> variantRun(String externalId, {bool force = false}) =>
+      _run('variant_run', externalId: externalId, force: force);
+
+  @override
+  Future<Map<String, dynamic>> variantRunAllAvailable() => _run('variant_run_all_available');
+
+  @override
+  Future<Map<String, dynamic>> variantResults({
+    int limit = 500,
+    int offset = 0,
+    String status = '',
+  }) => _run('variant_results', limit: limit, offset: offset, status: status);
+
+  @override
+  Future<Map<String, dynamic>> variantResult(String externalId) =>
+      _run('variant_result', externalId: externalId);
+
   Future<Map<String, dynamic>> _run(
     String command, {
     String? externalId,
@@ -60,6 +95,7 @@ class MatchingBridge implements MatchingBridgeClient {
     String? status,
     String? search,
     String? sort,
+    bool force = false,
   }) async {
     final repoRoot = _resolveRepoRoot();
     final python = await _resolvePythonCommand();
@@ -91,6 +127,7 @@ class MatchingBridge implements MatchingBridgeClient {
       if (status != null && status.isNotEmpty) ...['--status', status],
       if (search != null && search.isNotEmpty) ...['--search', search],
       if (sort != null && sort.isNotEmpty) ...['--sort', sort],
+      if (force) '--force',
     ];
     final result = await Process.run(
       python.executable,
@@ -197,10 +234,15 @@ class MatchingBridgeException implements Exception {
 }
 
 class FakeMatchingBridge implements MatchingBridgeClient {
+  FakeMatchingBridge({this.ffmpegAvailable = true});
+
+  final bool ffmpegAvailable;
   int runCalls = 0;
   int resultCalls = 0;
   int acceptCalls = 0;
   int rejectCalls = 0;
+  int variantRunCalls = 0;
+  int variantRunAllCalls = 0;
 
   final List<Map<String, dynamic>> _items = [
     {
@@ -213,7 +255,7 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       'score': {'title': 1.0, 'artists': 1.0, 'duration': 0.95, 'album': 1.0, 'final': 0.97},
       'reason': 'auto_threshold_and_margin',
       'manual': false,
-      'provider': {'title': 'Numb', 'artists': ['Linkin Park'], 'album_title': 'Meteora', 'duration_seconds': 185},
+      'provider': {'title': 'Numb', 'artists': ['Linkin Park'], 'album_title': 'Meteora', 'duration_seconds': 185, 'explicit': false},
       'local': {'id': 1, 'title': 'Numb', 'artists': ['Linkin Park'], 'album': 'Meteora', 'durationSeconds': 185.4, 'path': r'C:\Music\Linkin Park\Numb.flac'},
     },
     {
@@ -243,6 +285,22 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       'local': null,
     },
   ];
+
+  final Map<String, Map<String, dynamic>> variants = {
+    '201': {
+      'providerId': 'yandex_music',
+      'externalId': '201',
+      'localFileId': 1,
+      'status': 'same',
+      'variantStatus': 'same',
+      'metadataScore': 1.0,
+      'audioSimilarity': 0.98,
+      'variantReasons': ['decoded_audio_consistent'],
+      'alteredSegments': <Map<String, dynamic>>[],
+      'referencePath': r'C:\MusicArk\.musicark\downloads\yandex\yandex_201.mp3',
+      'metadata': {'providerMarkers': <String>[], 'localMarkers': <String>[]},
+    },
+  };
 
   List<Map<String, dynamic>> get _candidates => [
     {
@@ -326,6 +384,24 @@ class FakeMatchingBridge implements MatchingBridgeClient {
     } else {
       items.sort((a, b) => ((b['confidence'] as num?) ?? 0).compareTo((a['confidence'] as num?) ?? 0));
     }
+    items = items.map((item) {
+      final copy = Map<String, dynamic>.from(item);
+      if (copy['status'] == 'matched' && copy['localFileId'] != null) {
+        final externalId = '${copy['externalId']}';
+        copy['variant'] = variants[externalId] ?? {
+          'providerId': 'yandex_music',
+          'externalId': externalId,
+          'localFileId': copy['localFileId'],
+          'status': 'not_checked',
+          'variantStatus': 'not_checked',
+          'variantReasons': ['audio_not_checked'],
+          'alteredSegments': <Map<String, dynamic>>[],
+          'audioSimilarity': null,
+          'referencePath': null,
+        };
+      }
+      return copy;
+    }).toList();
     final total = items.length;
     final safeOffset = offset < 0 ? 0 : (offset > total ? total : offset);
     final requestedEnd = safeOffset + (limit < 0 ? 0 : limit);
@@ -363,6 +439,7 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       'reason': 'manual_accept',
       'local': {'id': localFileId, ...local},
     };
+    variants.remove(externalId);
     return matchingResult(externalId);
   }
 
@@ -380,6 +457,120 @@ class FakeMatchingBridge implements MatchingBridgeClient {
       'reason': 'manual_reject_no_candidates',
       'local': null,
     };
+    variants.remove(externalId);
     return matchingResult(externalId);
+  }
+
+  @override
+  Future<Map<String, dynamic>> variantCapabilities() async => {
+    'providerId': 'yandex_music',
+    'ffmpegAvailable': ffmpegAvailable,
+    'audioVerificationAvailable': ffmpegAvailable,
+    'sampleRate': 11025,
+    'analyzerVersion': 1,
+    'unavailableMessage': ffmpegAvailable ? null : 'Аудиосравнение недоступно: ffmpeg не найден',
+  };
+
+  @override
+  Future<Map<String, dynamic>> variantSummary() async {
+    final values = variants.values.toList();
+    int count(String status) => values.where((item) => item['variantStatus'] == status).length;
+    final matched = _items.where((item) => item['status'] == 'matched').length;
+    return {
+      'providerId': 'yandex_music',
+      'eligibleMatched': matched,
+      'stored': values.length,
+      'checked': values.length,
+      'same': count('same'),
+      'altered': count('altered'),
+      'differentVersion': count('different_version'),
+      'uncertain': count('uncertain'),
+      'notChecked': matched - values.length + count('not_checked'),
+      'capabilities': await variantCapabilities(),
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> variantRun(String externalId, {bool force = false}) async {
+    variantRunCalls++;
+    final localId = _items.firstWhere((row) => row['externalId'] == externalId)['localFileId'];
+    variants[externalId] = {
+      'providerId': 'yandex_music',
+      'externalId': externalId,
+      'localFileId': localId,
+      'status': ffmpegAvailable ? 'same' : 'not_checked',
+      'variantStatus': ffmpegAvailable ? 'same' : 'not_checked',
+      'metadataScore': 1.0,
+      'audioSimilarity': ffmpegAvailable ? 0.98 : null,
+      'variantReasons': ffmpegAvailable ? ['decoded_audio_consistent'] : ['audio_decoder_unavailable'],
+      'alteredSegments': <Map<String, dynamic>>[],
+      'referencePath': r'C:\MusicArk\.musicark\downloads\yandex\yandex_201.mp3',
+      'metadata': <String, dynamic>{},
+    };
+    return {'result': variants[externalId], 'cached': false, 'capabilities': await variantCapabilities()};
+  }
+
+  @override
+  Future<Map<String, dynamic>> variantRunAllAvailable() async {
+    variantRunAllCalls++;
+    return {
+      'eligibleMatched': _items.where((item) => item['status'] == 'matched').length,
+      'available': 1,
+      'processed': 1,
+      'cached': 0,
+      'errors': 0,
+      'same': 1,
+      'altered': 0,
+      'differentVersion': 0,
+      'uncertain': 0,
+      'notChecked': 0,
+      'progress': {'completed': 1, 'total': 1},
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> variantResults({
+    int limit = 500,
+    int offset = 0,
+    String status = '',
+  }) async {
+    var items = variants.values.map((item) => Map<String, dynamic>.from(item)).toList();
+    if (status.isNotEmpty) {
+      items = items.where((item) => item['variantStatus'] == status).toList();
+    }
+    final total = items.length;
+    final safeOffset = offset.clamp(0, total).toInt();
+    final safeEnd = (safeOffset + limit).clamp(safeOffset, total).toInt();
+    return {
+      'count': total,
+      'limit': limit,
+      'offset': offset,
+      'items': items.sublist(safeOffset, safeEnd),
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> variantResult(String externalId) async {
+    final existing = variants[externalId];
+    if (existing != null) return {'result': Map<String, dynamic>.from(existing)};
+    final row = _items.firstWhere((item) => item['externalId'] == externalId);
+    if (row['status'] != 'matched') {
+      throw const MatchingBridgeException('invalid_request', 'Variant analysis requires a MATCHED identity.');
+    }
+    return {
+      'result': {
+        'providerId': 'yandex_music',
+        'externalId': externalId,
+        'localFileId': row['localFileId'],
+        'status': 'not_checked',
+        'variantStatus': 'not_checked',
+        'metadataScore': null,
+        'audioSimilarity': null,
+        'variantReasons': ['audio_not_checked'],
+        'alteredSegments': <Map<String, dynamic>>[],
+        'referencePath': null,
+        'metadata': <String, dynamic>{},
+      },
+    };
   }
 }

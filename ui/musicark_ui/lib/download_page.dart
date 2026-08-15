@@ -337,7 +337,9 @@ class _DownloadPageState extends State<DownloadPage> {
               const SizedBox(height: 10),
               LinearProgressIndicator(
                 key: Key('download-progress-${task['id']}'),
-                value: progress is num ? progress.toDouble().clamp(0.0, 1.0) : null,
+                value: progress is num
+                    ? progress.toDouble().clamp(0.0, 1.0).toDouble()
+                    : null,
               ),
               const SizedBox(height: 6),
               Text(total == null

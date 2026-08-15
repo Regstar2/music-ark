@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'coverage_bridge.dart';
 import 'coverage_page.dart';
+import 'download_bridge.dart';
+import 'download_page.dart';
 import 'local_library_page.dart';
 import 'matching_bridge.dart';
 import 'matching_page.dart';
@@ -16,19 +18,22 @@ class MusicArkDesktopApp extends StatelessWidget {
     this.bridge,
     this.matchingBridge,
     this.coverageBridge,
+    this.downloadBridge,
   });
 
   final MusicArkBridgeClient? bridge;
   final MatchingBridgeClient? matchingBridge;
   final CoverageBridgeClient? coverageBridge;
+  final DownloadBridgeClient? downloadBridge;
 
   @override
   Widget build(BuildContext context) {
     final client = bridge ?? MusicArkBridge();
     final matchingClient = matchingBridge ?? MatchingBridge();
     final coverageClient = coverageBridge ?? CoverageBridge();
+    final downloadClient = downloadBridge ?? DownloadBridge();
     return MaterialApp(
-      title: 'MusicArk 0.6',
+      title: 'MusicArk 0.7',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -37,6 +42,7 @@ class MusicArkDesktopApp extends StatelessWidget {
         bridge: client,
         matchingBridge: matchingClient,
         coverageBridge: coverageClient,
+        downloadBridge: downloadClient,
       ),
     );
   }
@@ -47,11 +53,13 @@ class _MusicArkShell extends StatefulWidget {
     required this.bridge,
     required this.matchingBridge,
     required this.coverageBridge,
+    required this.downloadBridge,
   });
 
   final MusicArkBridgeClient bridge;
   final MatchingBridgeClient matchingBridge;
   final CoverageBridgeClient coverageBridge;
+  final DownloadBridgeClient downloadBridge;
 
   @override
   State<_MusicArkShell> createState() => _MusicArkShellState();
@@ -62,6 +70,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
   bool _localLibraryOpened = false;
   bool _matchingOpened = false;
   bool _coverageOpened = false;
+  bool _downloadsOpened = false;
 
   void _selectSection(int index) {
     setState(() {
@@ -69,6 +78,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
       if (index == 1) _localLibraryOpened = true;
       if (index == 2) _matchingOpened = true;
       if (index == 3) _coverageOpened = true;
+      if (index == 4) _downloadsOpened = true;
     });
   }
 
@@ -84,10 +94,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
             labelType: NavigationRailLabelType.all,
             leading: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                'MusicArk',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              child: Text('MusicArk', style: Theme.of(context).textTheme.titleMedium),
             ),
             destinations: const [
               NavigationRailDestination(
@@ -96,28 +103,24 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                 label: Text('Яндекс Музыка'),
               ),
               NavigationRailDestination(
-                icon: Icon(
-                  Icons.library_music_outlined,
-                  key: Key('nav-local-library'),
-                ),
+                icon: Icon(Icons.library_music_outlined, key: Key('nav-local-library')),
                 selectedIcon: Icon(Icons.library_music),
                 label: Text('Локальная библиотека'),
               ),
               NavigationRailDestination(
-                icon: Icon(
-                  Icons.compare_arrows_outlined,
-                  key: Key('nav-matching'),
-                ),
+                icon: Icon(Icons.compare_arrows_outlined, key: Key('nav-matching')),
                 selectedIcon: Icon(Icons.compare_arrows),
                 label: Text('Сопоставление'),
               ),
               NavigationRailDestination(
-                icon: Icon(
-                  Icons.playlist_remove,
-                  key: Key('nav-coverage'),
-                ),
+                icon: Icon(Icons.playlist_remove, key: Key('nav-coverage')),
                 selectedIcon: Icon(Icons.playlist_remove),
                 label: Text('Недостающие'),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.download_outlined, key: Key('nav-downloads')),
+                selectedIcon: Icon(Icons.download),
+                label: Text('Загрузки'),
               ),
             ],
           ),
@@ -127,18 +130,19 @@ class _MusicArkShellState extends State<_MusicArkShell> {
               index: _index,
               children: [
                 yandex.MusicArkHomePage(bridge: widget.bridge),
-                _localLibraryOpened
-                    ? LocalLibraryPage(bridge: widget.bridge)
-                    : const SizedBox.shrink(),
-                _matchingOpened
-                    ? MatchingPage(bridge: widget.matchingBridge)
-                    : const SizedBox.shrink(),
+                _localLibraryOpened ? LocalLibraryPage(bridge: widget.bridge) : const SizedBox.shrink(),
+                _matchingOpened ? MatchingPage(bridge: widget.matchingBridge) : const SizedBox.shrink(),
                 _coverageOpened
                     ? CoveragePage(
                         bridge: widget.coverageBridge,
                         matchingBridge: widget.matchingBridge,
+                        downloadBridge: widget.downloadBridge,
                         onOpenMatching: () => _selectSection(2),
+                        onOpenDownloads: () => _selectSection(4),
                       )
+                    : const SizedBox.shrink(),
+                _downloadsOpened
+                    ? DownloadPage(bridge: widget.downloadBridge)
                     : const SizedBox.shrink(),
               ],
             ),

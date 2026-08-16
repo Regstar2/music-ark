@@ -217,12 +217,14 @@ class _CoveragePageState extends State<CoveragePage> {
       _error = null;
     });
     try {
-      // Download is a one-click user action. Wanted remains an internal eligibility
-      // invariant and is set here automatically instead of forcing a separate click.
-      await widget.bridge.coverageSetAction(externalId, 'wanted');
+      // A direct Download click is its own explicit user intent. It must not
+      // mutate the triage decision (unreviewed/wanted/ignored), otherwise a
+      // currently selected Decision filter can make the Missing list disappear.
       final queued = await bridge.enqueue(externalId);
       final rawTask = queued['task'];
-      final task = rawTask is Map ? Map<String, dynamic>.from(rawTask) : const <String, dynamic>{};
+      final task = rawTask is Map
+          ? Map<String, dynamic>.from(rawTask)
+          : const <String, dynamic>{};
       var finalStatus = (task['status'] ?? '').toString();
       if (finalStatus == 'queued') {
         try {
@@ -245,7 +247,7 @@ class _CoveragePageState extends State<CoveragePage> {
       await _reloadTracks();
       if (!mounted) return;
       final message = finalStatus == 'completed'
-          ? 'Трек скачан.'
+          ? 'Трек скачан и добавлен в локальную библиотеку.'
           : finalStatus == 'failed' || finalStatus == 'needs_review'
               ? 'Загрузка завершилась с ошибкой. Подробности — в «Загрузках».'
               : 'Загрузка запущена.';

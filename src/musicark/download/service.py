@@ -118,11 +118,22 @@ class DownloadService:
         root = next((item for item in self._local_repo.list_roots() if item.id == root_id), None)
         if root is None:
             return {"targetConfigured": False, "rootId": None, "rootPath": None, "targetPath": None}
-        target = Path(root.path) / self.MANAGED_FOLDER
+
+        root_path = Path(root.path).expanduser().resolve(strict=False)
+        stored_target = self._downloads.get_target_path()
+        target = (
+            Path(stored_target).expanduser().resolve(strict=False)
+            if stored_target
+            else (root_path / self.MANAGED_FOLDER).resolve(strict=False)
+        )
+        try:
+            target.relative_to(root_path)
+        except ValueError:
+            return {"targetConfigured": False, "rootId": None, "rootPath": None, "targetPath": None}
         return {
             "targetConfigured": True,
             "rootId": root.id,
-            "rootPath": root.path,
+            "rootPath": str(root_path),
             "targetPath": str(target),
         }
 
@@ -147,8 +158,12 @@ class DownloadService:
                 root = self._local_repo.add_root(selected)
             except ValueError as exc:
                 raise DownloadServiceError(str(exc), code="target_overlap") from exc
-        self._downloads.set_target_root_id(root.id)
-        self._audit_event("download_target_changed", "success", f"root_id={root.id}")
+        self._downloads.set_target(root.id, selected)
+        self._audit_event(
+            "download_target_changed",
+            "success",
+            f"root_id={root.id} target={selected}",
+        )
         return self.settings()
 
     def _target(self) -> tuple[int, Path]:
@@ -421,8 +436,6 @@ class DownloadService:
                 provider_fingerprint=provider_fingerprint(
                     self.SOURCE_PROVIDER, task.source_id, provider_payload
                 ),
-                # Automatic v0.5 decisions store the whole Local Library fingerprint.
-                # Compute it only after the new file has been indexed.
                 local_fingerprint=self._matching.local_library_fingerprint(),
                 status=MatchStatus.MATCHED,
                 local_file_id=local_id,
@@ -480,7 +493,7 @@ class DownloadService:
             return self._fail_or_cancel(task, exc, code="provider_request")
         except (OSError, ValueError) as exc:
             return self._fail_or_cancel(task, exc, code="invalid_audio", cleanup=cleanup_new_final)
-        except Exception as exc:  # noqa: BLE001 - queue must remain recoverable.
+        except Exception as exc:
             return self._fail_or_cancel(task, exc, code="unexpected")
 
     def _provider(self, provider_id: str) -> DownloadProvider:

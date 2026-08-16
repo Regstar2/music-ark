@@ -54,7 +54,7 @@ class SystemLocalFileActions implements LocalFileActions {
     if (Platform.isWindows) {
       await Process.start(
         'explorer.exe',
-        ['/select,', file.path],
+        ['/select,${file.path}'],
         runInShell: false,
         mode: ProcessStartMode.detached,
       );

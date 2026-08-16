@@ -94,7 +94,7 @@ class CoverageMigrationV06Tests(unittest.TestCase):
                 version = conn.execute(
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
-                self.assertEqual(version, "1.7.0")
+                self.assertEqual(version, "1.8.0")
                 self.assertEqual(
                     conn.execute(
                         "SELECT COUNT(*) FROM provider_collection_items"
@@ -137,8 +137,32 @@ class CoverageMigrationV06Tests(unittest.TestCase):
                     for row in conn.execute("PRAGMA table_info(download_tasks)").fetchall()
                 }
                 self.assertTrue(
-                    {"downloaded_bytes", "total_bytes", "cancel_requested", "target_root_id", "error_code", "updated_at"}
+                    {
+                        "downloaded_bytes",
+                        "total_bytes",
+                        "cancel_requested",
+                        "target_root_id",
+                        "error_code",
+                        "updated_at",
+                    }
                     <= download_columns
+                )
+                sync_plan_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(sync_plans)").fetchall()
+                }
+                self.assertTrue(
+                    {
+                        "planner_version",
+                        "scope_type",
+                        "scope_id",
+                        "target_root_id",
+                        "target_folder",
+                        "input_fingerprint",
+                        "applied_at",
+                        "result_json",
+                        "updated_at",
+                    }
+                    <= sync_plan_columns
                 )
 
 

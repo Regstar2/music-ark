@@ -1,262 +1,121 @@
-# Manual Test Plan — MusicArk v0.7.0 Download + Local Playback
+# Manual Test Plan — MusicArk v0.8.0 Controlled Sync
 
-Use Windows and the real cached Yandex Library together with the real Local Library. Begin with **1–3 tracks**, never with the full wanted set. Do not delete `.musicark\musicark.db`, the saved Yandex credential, existing Local Library files, matching/manual decisions, Variant results, or Coverage actions.
+Use Windows with the existing `.musicark\musicark.db`, saved Yandex credential, cached Yandex library and real Local Library. Do **not** reset/delete the database, credentials, local audio, matching/variant/coverage/download/sync history.
 
 ## Preconditions
 
-- Windows Flutter desktop target works;
-- `flutter pub get` has installed the v0.7 audio dependencies;
-- existing v0.6 database is available so `1.6.0 → 1.7.0` migration is exercised;
-- Yandex session/token works through the normal secure credential flow;
-- Yandex Liked/playlists are loaded;
-- one or more Local Library roots are configured and scanned;
-- Matching has run and there are representative `MATCHED`, `CONFLICT`, `UNMATCHED`, and preferably `not_analyzed` states;
-- several proven Missing rows are available;
-- enough free disk space exists in the selected test folder.
-
-## Migration / regression
-
-1. Launch v0.7 against the existing v0.6 database.
-2. Confirm schema becomes `1.7.0` automatically.
-3. Restart once and confirm repeated initialization is harmless.
-4. Confirm Yandex session/cache/Liked/playlists remain present.
-5. Confirm Local Library roots and existing indexed tracks remain present.
-6. Confirm Matching results, manual accept/reject, conflicts, Variant results, and wanted/ignored decisions remain present.
-7. Confirm legacy download/reference rows remain in storage but are **not shown in the user Downloads page**.
-8. Confirm no DB reset or manual SQL is required.
-
-## Primary 1–3 track scenario — one click
-
-For one proven `missing` track that is currently `unreviewed`:
+Prepare a controlled dataset approximating:
 
 ```text
-1. open Недостающие
-2. optionally set Решение = Не решено
-3. find a Missing track
-4. do NOT press Нужен first
-5. press Скачать once
-6. if no target exists, choose the test download folder
-7. download starts without manually opening/starting the queue
-8. confirm the user's triage action is still Не решено
-9. confirm other Missing rows remain visible
-10. observe final success/error message
-11. open Загрузки only to inspect progress/history
-12. verify physical final file exists in the exact selected folder
-13. verify no .part remains
-14. open Local Library and find the file
-15. verify local_audio_files.library_root_id is non-NULL
-16. verify normalized_path/metadata are populated
-17. refresh Missing/Coverage
-18. only the successfully downloaded identity becomes covered/leaves Missing
-19. restart MusicArk
-20. completed user task history remains visible
+3 Covered
+3 Missing + Wanted
+2 Missing + Unreviewed
+1 Missing + Ignored
+1 Conflict / Needs Review
+1 Not Analyzed
+1 Covered + Different Version
 ```
 
-Repeat for at most 1–2 additional tracks before any batch test.
+Have one valid Local Library download target and optionally one unrelated queued user download.
 
-## Direct intent / triage separation
+## Migration
 
-Direct **Скачать** is explicit acquisition intent. It must not rewrite Coverage triage.
+1. Start from schema 1.7.0.
+2. Launch v0.8 and confirm automatic schema 1.8.0.
+3. Restart; initialization must be idempotent.
+4. Confirm Yandex cache/session, Local roots/files, matching/manual/conflicts, Variant, wanted/ignored, Downloads/settings and legacy Sync history remain.
+5. Open an old legacy sync plan if present; it may be viewed but must be marked unsupported and cannot Apply.
+
+## Create / preview
+
+1. Open **Синхронизация**.
+2. Select `Мне нравится` (repeat later for all and one playlist).
+3. Create plan.
+4. Expected: exactly the 3 Missing+Wanted tracks are **ready to download**.
+5. Missing+Unreviewed is shown under decision blockers.
+6. Missing+Ignored is counted separately and is not a download.
+7. Conflict and Not Analyzed are review/matching blockers.
+8. Covered+Different Version is a Variant review item and never a replacement download.
+9. Before Apply, verify no audio file appears and no new download task is created.
+10. Current and Projected coverage must be visually distinct; projected counts only planned downloads hypothetically succeeding.
+
+## Apply
+
+1. Press **Применить**.
+2. Verify explicit confirmation names the download count and states that existing local files are not changed/deleted.
+3. Confirm.
+4. Exactly the 3 Missing+Wanted identities are enqueued through the user Downloads queue.
+5. Downloads do not auto-start from Sync.
+6. Existing unrelated queued tasks are not started, cancelled, reprioritized or modified.
+7. Repeating Apply does not create duplicate active tasks.
+8. Use **Открыть Загрузки** to execute/inspect them through the existing v0.7 workflow.
+
+## Complete one regression
+
+Download exactly one planned track through v0.7. Rebuild the Sync Plan:
 
 ```text
-Missing + unreviewed + direct Скачать → allowed; action remains unreviewed
-Missing + ignored    + direct Скачать → allowed; action remains ignored
-Missing + wanted     + direct Скачать → allowed; action remains wanted
+A completed → Covered → absent from new download operations
+B/C still Missing+Wanted → remain ready downloads
 ```
 
-The `Нужен` action remains the input for `Скачать все «Нужные»` and other triage/bulk workflows.
+This is the controlled fingerprint-rebase regression gate.
 
-Explicitly test the reported regression:
+## Staleness
 
-1. Set `Решение = Не решено`.
-2. Confirm multiple Missing rows are visible.
-3. Press **Скачать** on one row.
-4. While downloading, the list must not be cleared merely because of a hidden action mutation.
-5. After success, the downloaded row may disappear because it is now Covered; the remaining Missing rows stay visible.
-6. On failure, the row remains Missing and retains its original triage action.
+For each case create a fresh plan first, then change exactly one input and return to Sync:
 
-## Exact destination persistence
+- wanted → ignored;
+- active Yandex membership changes after cache refresh;
+- Local Library scan/index changes local state;
+- Matching result changes;
+- download target changes.
 
-1. Open `Загрузки`.
-2. Select a distinctive disposable folder, for example `C:\MusicArkTest\ChosenHere`.
-3. Record exactly what the UI shows as the target.
-4. Switch to `Недостающие`, `Локальная библиотека`, and another tab.
-5. Return to `Загрузки`.
-6. Confirm the target is still the **same exact path**, not a parent Local Library root and not a newly derived `<root>\MusicArk` path.
-7. Restart MusicArk and confirm the exact selected path remains.
-8. Download one track and confirm its file is written directly into the selected folder.
+Expected: plan becomes **stale**, Apply disabled/refused, and UI asks to create a new plan.
 
-If the selected directory is inside an existing Local Library root, the parent root may remain the indexing owner internally, but the visible/download target must remain the exact selected directory.
+Playback start/position/queue changes must **not** make a plan stale.
 
-For a database created before exact `target_path` persistence, re-select the folder once. Thereafter it must remain stable.
+## Race revalidation
 
-## Filename / path safety
+After a valid plan has passed preview, make one planned identity Covered before enqueue (controlled debug/test timing). Apply must record it as skipped/already covered and must not create a duplicate download.
 
-- with no target configured, pressing `Скачать` must route the user to choose a folder rather than silently using `.musicark`;
-- changing the default target affects newly enqueued tasks, not target snapshots already stored in queued tasks;
-- filenames contain the stable Yandex ID and remain valid with Cyrillic, spaces and Unicode;
-- titles/artists containing `< > : " / \\ | ? *`, trailing dots/spaces, or Windows reserved names cannot escape/create invalid paths;
-- reference cache `.musicark\downloads\yandex\` is not used as the user destination and is not shown as user history.
+## Scope semantics
 
-## Queue / legacy isolation
+- all: same provider identity in Liked + Playlist A + Playlist B is one desired track;
+- liked: only Liked membership;
+- playlist A/B: only identities in that selected active Yandex Playlist;
+- duplicate occurrences inside a playlist create one download candidate;
+- a local track outside a selected playlist is labelled **Outside this scope**, never “delete”.
 
-- queued/running/completed/failed/cancelled/skipped states display correctly;
-- filters All / queued / running / completed / errors work;
-- repeated enqueue of the same active provider identity does not duplicate tasks;
-- completed tasks are not rerun;
-- `Скачать все «Нужные»` starts the user queue automatically;
-- `Продолжить очередь` remains a recovery/manual control, not a required ordinary step;
-- clearing completed history removes only v0.7 user task history and never audio files;
-- internal/legacy reference-download rows are not shown, run, cancelled, retried, recovered, or cleared by the v0.7 user queue UI;
-- restart preserves user completed/failed/queued/cancelled history.
+## No target
 
-## Embedded playback / path privacy
+Plan generation/preview must work without a download target. Apply must remain disabled/refused. Selecting a target after the plan should make that old plan stale; rebuild uses the exact new destination snapshot.
 
-For a completed download and at least one ordinary Local Library track:
+## Offline
 
-1. Confirm the full filesystem path is **not printed by default**.
-2. `Показать путь` reveals it only on request.
-3. Press `▶ / Воспроизвести`.
-4. **No Windows Media Player or other external associated application may open.**
-5. Audio must begin from inside MusicArk.
-6. A bottom Now Playing bar appears.
-7. Verify Play/Pause.
-8. Verify seek after duration becomes known.
-9. Verify position and duration advance/render correctly.
-10. Switch between `Локальная библиотека`, `Недостающие`, `Загрузки` and Yandex; playback and Now Playing remain active.
-11. Stop/close the player; playback stops and the bar disappears.
-12. `Открыть расположение файла` still opens Explorer and selects/reveals the real file.
-13. Test at least one MP3 and, if present in the real collection, one FLAC/M4A/OGG file.
-14. A missing/deleted physical file produces an error and does not launch an external player.
+With Yandex cache already populated, disconnect internet and create/preview plans. This must work. Enqueue itself need not fetch network content; actual Downloads transfer naturally requires network.
 
-## Crash recovery
+## Restart / history
 
-1. Start a user download.
-2. Terminate MusicArk during `running` (use a disposable test track/location).
-3. Relaunch.
-4. Confirm the user task does not remain permanently `running`.
-5. Expected behavior: `failed` with an interrupted reason and Retry available.
-6. Confirm any matching `.part` was removed.
-7. Confirm internal/reference tasks were not changed by user-download recovery.
-8. Retry and confirm exactly one final indexed file exists.
+Restart MusicArk and verify current plan/history/status/operation results persist. Rebuild creates a new plan id rather than rewriting the old snapshot. Cancelling a planned plan changes only its status and does not cancel unrelated Downloads.
 
-## Progress
+## Safety audit
 
-For a normal response with known size:
-
-- downloaded bytes increase;
-- total bytes are shown;
-- percentage reflects actual bytes;
-- UI remains responsive.
-
-For unknown length, if a controlled mock/debug path is available:
-
-- progress is indeterminate;
-- no fake 10%/90% values appear.
-
-## Cancellation
-
-For a running user track:
+After all scenarios verify:
 
 ```text
-start
-→ Cancel
-→ streaming stops cooperatively
-→ .part removed
-→ final corrupted file absent
-→ task = cancelled
-→ Coverage remains missing
+deleted local files = 0
+renamed/moved local files = 0
+modified existing audio/tags = 0
+Yandex likes/playlist mutations = 0
+Yandex upload/replacement = 0
 ```
 
-For a queued user task, Cancel should be immediate. No arbitrary PID/process kill should occur.
+Verify sync tables/audit/logs contain no Yandex token, auth header, cookie or temporary direct download URL.
 
-## Failure scenarios
+## Regression
 
-### Network off
-
-- press `Скачать` for a Missing track with network unavailable;
-- app remains running;
-- task becomes failed with a network-class error;
-- queue persists;
-- track stays Missing;
-- original Coverage triage action remains unchanged;
-- Retry remains available.
-
-### Authentication failure
-
-- use an expired/invalid saved Yandex token through the normal auth test path;
-- queue is not deleted;
-- UI reports that Yandex Music re-authorization is required;
-- no token appears in logs/task detail/SQLite.
-
-### Unavailable track / no download info
-
-- task becomes failed/unavailable rather than silently trying YouTube/VK/torrents/web search;
-- track remains Missing;
-- no third-party fallback occurs.
-
-## Post-download product gate
-
-For every reported `completed` user task verify all are true:
-
-- final file exists and size > 0;
-- audio metadata reader can open it;
-- Local Library lists it;
-- `library_root_id` is non-NULL;
-- exact provider/local link exists with method `exact_id`;
-- Coverage returns `covered`;
-- no new Variant row was fabricated merely because the download was exact.
-
-A task must not be treated as successful if indexing/linking/coverage refresh failed after HTTP completion.
-
-## Existing destination / Retry
-
-- retry after a transient failure must not create duplicate final files;
-- a valid existing file for the same stable Yandex identity may be reused/indexed safely;
-- MusicArk must not overwrite arbitrary unrelated existing music;
-- corrupted/partial `.part` files must never appear as valid Local Library tracks.
-
-## Batch scenario
-
-Only after the 1–3 track checks pass:
-
-```text
-5–10 Missing tracks marked Нужен
-→ Скачать все «Нужные»
-→ queue starts automatically
-```
-
-Verify:
-
-- one task per provider identity;
-- no duplicate files;
-- queue runs with bounded concurrency (baseline v0.7 is sequential);
-- Flutter stays responsive;
-- binary data is not buffered into SQLite/Flutter;
-- Local Library is not fully rescanned after every completed file;
-- each completed file becomes Covered independently.
-
-## v0.4–v0.6 regression
-
-Confirm after v0.7:
-
-- Yandex Library / playlists still work;
-- Local Library existing files are not renamed/moved/deleted/tag-edited;
-- v0.5 Matching retains MATCHED/CONFLICT/UNMATCHED semantics and manual precedence;
-- v0.5.1 Variant remains independent, including `DIFFERENT_VERSION` staying Covered;
-- v0.6 Coverage truth table remains correct;
-- wanted/ignored triage persists;
-- strict reference cache still does not count as Local Library coverage.
-
-## Privacy / repository safety
-
-During testing verify:
-
-- token is absent from argv, queue DB, raw payload, logs, filename, audit detail and UI;
-- temporary direct URLs are not persisted or displayed;
-- Local Library data is not uploaded beyond the minimum selected Yandex provider request;
-- real downloaded `.mp3/.flac/.m4a/...` files are never staged/committed to Git;
-- `.musicark\musicark.db` and the saved credential are never deleted by setup/test instructions.
+Run v0.7 Local Playback checks (play/pause/seek/navigation) and confirm Sync work did not modify the player. Run existing Yandex, Local Library, Matching, Variant, Coverage and Download workflows.
 
 ## Automated commands
 
@@ -269,23 +128,4 @@ flutter test
 flutter run -d windows
 ```
 
-## Pass criteria
-
-- migration remains forward-only/idempotent and preserves existing state;
-- exact selected target survives tab/service recreation and restart;
-- direct `Missing -> Скачать` works without a prior `Нужен` click or triage mutation;
-- a Decision filter remains stable while direct download runs;
-- user queue is isolated from internal/reference queue history/actions;
-- progress/cancellation/retry/crash recovery behave as documented;
-- successful downloads become normal Local Library rows with non-NULL root IDs;
-- exact identity link is created without fuzzy matching or fabricated Variant state;
-- successful downloaded tracks become Covered automatically;
-- raw paths remain hidden by default;
-- local music plays inside MusicArk with play/pause/seek and persistent Now Playing;
-- external OS media player is not launched for playback;
-- Explorer reveal remains separate and functional;
-- 5–10 track batch has no duplicate tasks/files or full rescan-per-file behavior;
-- Python tests, Flutter analyzer and Flutter tests are green;
-- the real Windows 1–3 track + playback validation above is completed before release acceptance.
-
-Do not claim real Yandex download, Windows playback, Windows UI, or full release validation until these checks have actually run.
+Do not claim real Windows/Yandex/manual validation until these scenarios actually run.

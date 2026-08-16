@@ -2,157 +2,87 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.7.0 — Download.**
+**Текущая версия: 0.8.0 — Controlled Sync.**
 
-MusicArk — Windows desktop-приложение, которое связывает библиотеку Яндекс Музыки с локальной музыкальной коллекцией. v0.5 устанавливает identity, v0.5.1 отдельно проверяет вариант записи, v0.6 выводит Library Coverage / Missing Tracks, а v0.7 замыкает пользовательский цикл безопасной загрузкой явно отмеченных отсутствующих треков.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. v0.5 устанавливает identity, v0.5.1 отдельно проверяет вариант записи, v0.6 выводит Coverage/Missing, v0.7 добавляет production Download + Local Playback, а v0.8 координирует эти готовые слои через безопасный dry-run Sync Plan.
 
 ## Основной цикл
 
 ```text
-Yandex Library
-      ↓
-Local Library
-      ↓
-Identity Matching
-      ↓
-Missing Tracks / Coverage
-      ↓
-Wanted
-      ↓
-Download Queue
-      ↓
-authorized Yandex download
-      ↓
-normal Local Library index
-      ↓
-exact provider/local identity
-      ↓
-Coverage = covered
+Yandex Library = desired state
+        ↓
+all / liked / Yandex Playlist
+        ↓
+Coverage + Matching + Variant + Local Library = actual state
+        ↓
+Controlled Sync Planner (read only)
+        ↓
+Preview / blockers / explicit confirmation
+        ↓
+execution-time revalidation
+        ↓
+DownloadService.enqueue() for current Missing + Wanted
+        ↓
+Downloads → normal v0.7 transfer/index/link/coverage
 ```
 
-Обычный кандидат v0.7 определяется строго:
+Sync не является двунаправленным filesystem mirror.
+
+## Authoritative policy
+
+Provider identity — `(provider_id, external_id)`. Одна identity в Liked и нескольких playlists считается один раз. Playlist duplicate occurrences не создают duplicate downloads.
 
 ```text
-coverage_status = missing
-AND user_action = wanted
+covered                      → no acquisition
+missing + wanted             → ENQUEUE_DOWNLOAD
+missing + unreviewed         → USER_DECISION_REQUIRED
+missing + ignored            → summary / no download
+needs_review                 → REVIEW_IDENTITY
+not_analyzed                 → matching review blocker
+covered + uncertain/altered/
+different_version            → REVIEW_VARIANT
 ```
 
-`needs_review`, `conflict`, `not_analyzed`, уже `covered` треки и `MATCHED + DIFFERENT_VERSION` автоматически не загружаются.
+`DIFFERENT_VERSION` не превращается в Missing и не запускает replacement. Прямой v0.7 **Скачать** для одного Missing остаётся отдельным explicit user intent и не меняет консервативную bulk Sync policy.
 
-## Яндекс Музыка
+## Controlled Sync safety
 
-- вход по Yandex Music OAuth token через системный credential store;
-- cache-first сессия, «Мне нравится», плейлисты и offline cache;
-- одна provider identity `(yandex_music, external_id)` независимо от количества memberships;
-- v0.7 использует только существующий authenticated Yandex Music download workflow и возможности текущего аккаунта/API.
+Каждый план — immutable snapshot с `planner_version`, scope, exact download target, input fingerprint, summary и операциями. Relevant изменение active Yandex membership, matching/local state, wanted/ignored triage или download target делает план `stale`. Playback state fingerprint не меняет.
 
-MusicArk v0.7 **не** реализует YouTube ripping, VK scraping, торрент-поиск, pirate indexes, DRM circumvention, subscription/access bypass или автоматический поиск альтернативного источника.
-
-## Local Library
-
-- несколько roots и native Windows folder picker;
-- structured title/artists/album/duration/codec и технические поля;
-- incremental scan, SQL search/sort/pagination;
-- существующая музыка остаётся read-only: MusicArk не переименовывает, не перемещает, не удаляет и не редактирует её tags.
-
-Downloaded-файл является исключением только в смысле создания **нового** файла. После загрузки он проходит тот же `LocalMetadataReader` и `LocalLibraryStorageRepository`, что и обычный v0.4 scan, и получает настоящий `library_root_id` / `normalized_path`.
-
-## Identity / Variant / Coverage — независимые слои
-
-Identity Matching v0.5 отвечает: это тот же трек или нет (`MATCHED / CONFLICT / UNMATCHED`). Variant v0.5.1 отвечает: та же ли это запись/версия (`SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED`). Coverage v0.6 выводит:
+Apply требует подтверждения и перед каждой actionable operation повторно проверяет:
 
 ```text
-covered       — актуальный accepted local identity
-missing       — authoritative UNMATCHED без accepted local link
-needs_review  — conflict/stale/invalid accepted link
-not_analyzed  — matching отсутствует или устарел
+track still active/current?
+coverage still missing?
+action still wanted?
+accepted local link still absent?
+active user task already exists?
 ```
 
-После exact provider download MusicArk знает source identity и не запускает fuzzy matching для её угадывания: создаётся accepted `exact_id` link. При этом v0.7 **не создаёт ложный `Variant = SAME`** — Variant остаётся независимым результатом анализа.
+Затем вызывается production `DownloadService.enqueue()`. Sync **не вызывает `runQueue()`**, не запускает unrelated queued tasks и не содержит собственную HTTP download implementation.
 
-## v0.7 Download
-
-### Destination
-
-Пользователь выбирает папку через существующий Windows folder picker. Она становится Local Library root либо используется существующий parent root. Управляемая папка по умолчанию:
+Стандартный v0.8 Apply всегда даёт:
 
 ```text
-<Local Library root>\MusicArk\
+deleted local files = 0
+renamed/moved local files = 0
+modified existing local files/tags = 0
+Yandex mutations = 0
 ```
 
-Выбранный root хранится persistent в SQLite. Каждая задача также snapshot-ит destination/root при enqueue, поэтому последующая смена default target не перемещает уже поставленные задачи.
+Local-only / Outside selected scope — только informational category.
 
-Имена Windows-safe и содержат provider ID, например:
+## Existing layers remain independent
 
-```text
-Artist - Title [yandex_123456].mp3
-```
-
-### Queue
-
-Пользовательские состояния:
-
-```text
-queued
-running
-completed
-failed
-cancelled
-skipped
-```
-
-`paused` не показывается, потому что настоящий pause/resume не реализован. Worker v0.7 намеренно последовательный (`max concurrency = 1`) ради предсказуемой SQLite/файловой семантики.
-
-Очередь хранится в SQLite. Persisted `running` после crash/restart восстанавливается в retryable `failed / interrupted`. Повторный enqueue одной активной Yandex identity не создаёт вторую задачу.
-
-### Streaming / progress / cancel
-
-Yandex HTTP response пишется streaming-способом, без audio blobs в памяти/SQLite:
-
-```text
-final.mp3.part
-      ↓ success
-final.mp3
-```
-
-Если известен `Content-Length`, UI показывает downloaded bytes / total bytes / percentage. Если размер неизвестен — indeterminate progress. SQLite progress writes throttled, а не выполняются на каждый 64 KiB chunk.
-
-Running cancellation cooperative: worker проверяет persisted `cancel_requested` между chunks. `.part` удаляется, final-файл не появляется. HTTP Range resume в v0.7 не заявляется; Retry начинает загрузку заново.
-
-### Post-download quality gate
-
-`completed` разрешён только после всей цепочки:
-
-```text
-network complete
-  + non-empty atomic final file
-  + LocalMetadataReader can parse audio
-  + Local Library indexing with non-NULL root_id
-  + exact provider/local link
-  + Coverage refresh == covered
-```
-
-Если любой обязательный шаг не выполнен, задача не становится `completed`.
-
-## Credentials / privacy
-
-Production Download получает token из `SystemCredentialStore` и явно передаёт его provider-адаптеру. Token и временный direct download URL запрещены в argv, `download_tasks`, `raw_payload_json`, SQLite, filenames, UI details и audit log.
-
-Local Library data не отправляется во внешние сервисы, кроме минимального запроса выбранному provider для конкретного provider track.
-
-## Reference audio ≠ Download Library
-
-v0.5.1 exact-reference cache остаётся отдельным:
-
-```text
-.musicark/downloads/yandex/yandex_<id>.<ext>
-```
-
-Он нужен для Variant verification, не является пользовательской Local Library, не создаёт coverage и не используется как destination для wanted downloads.
+- **Yandex Library** — secure token via OS credential store, active cached Liked/playlists, offline cache.
+- **Local Library** — multiple roots, incremental read-only indexing, structured metadata.
+- **Identity Matching** — `MATCHED / CONFLICT / UNMATCHED` with manual precedence and fingerprints.
+- **Variant** — `SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED`, independent from identity/Coverage.
+- **Coverage** — derived `covered / missing / needs_review / not_analyzed` plus `wanted / ignored / unreviewed` triage.
+- **Download** — v0.7 persistent user queue, exact target, secure provider acquisition, atomic `.part`, normal Local indexing, exact identity link, Coverage rebase.
+- **Local Playback** — embedded player remains unchanged by v0.8.
 
 ## UI
-
-Основная навигация:
 
 ```text
 MusicArk
@@ -160,24 +90,28 @@ MusicArk
 ├── Локальная библиотека
 ├── Сопоставление
 ├── Недостающие
-└── Загрузки
+├── Загрузки
+└── Синхронизация
 ```
 
-На Missing row после решения **Нужен** появляется действие **В загрузки**. Страница «Загрузки» показывает summary, filters, target folder, очередь, real/indeterminate progress, Retry, Cancel и очистку completed history. Очистка history никогда не удаляет скачанные аудиофайлы.
+«Синхронизация» показывает scope, target, Current/Projected coverage, download candidates, undecided Missing, identity/matching blockers, Variant issues, Local-only/Outside scope, stale/legacy state, confirmation, Apply result и историю Sync Plan.
 
 ## SQLite
 
-Forward-only schema history:
+Forward-only schema:
 
 ```text
 1.3.0 — Local Library
 1.4.0 — Identity Matching
 1.5.0 — Variant Detection
-1.6.0 — Coverage user actions
-1.7.0 — Download queue/progress/settings
+1.6.0 — Coverage actions
+1.7.0 — Download queue/settings
+1.8.0 — Controlled Sync plan snapshots/results
 ```
 
-v1.7 расширяет существующую `download_tasks`, а не создаёт `download_tasks_v2`, и добавляет persistent download settings. Forward migration сохраняет Yandex cache, Local Library, matching/manual/conflict state, Variant results, wanted/ignored decisions и legacy download rows.
+`1.7.0 → 1.8.0` расширяет существующие `sync_plans` / `sync_operations`, не создаёт parallel v2 tables и сохраняет legacy rows. Новый executor legacy upload/replace/metadata plans не выполняет.
+
+Secrets (`Yandex token`, auth headers, cookies, temporary direct URLs) не хранятся в sync/download metadata.
 
 ## Запуск для разработки на Windows
 
@@ -207,8 +141,9 @@ v0.4   — Local Library
 v0.5.0 — Identity Matching
 v0.5.1 — Variant Detection
 v0.6   — Missing Tracks / Coverage
-v0.7   — Download
-v0.8   — Sync
+v0.7   — Download + Local Playback
+v0.8   — Controlled Sync
+next   — TBD / stabilization
 ```
 
-См. `docs/versions/v0.7.0.md`, `docs/architecture/architecture.md` и `docs/testing/manual-test-plan.md`.
+См. `docs/versions/v0.8.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md` и `docs/release/release-checklist.md`.

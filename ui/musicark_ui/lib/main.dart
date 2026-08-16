@@ -10,6 +10,8 @@ import 'local_library_page.dart';
 import 'matching_bridge.dart';
 import 'matching_page.dart';
 import 'musicark_bridge.dart';
+import 'sync_bridge.dart';
+import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
 
 void main() {
@@ -25,12 +27,14 @@ class MusicArkDesktopApp extends StatelessWidget {
     this.matchingBridge,
     this.coverageBridge,
     this.downloadBridge,
+    this.syncBridge,
   });
 
   final MusicArkBridgeClient? bridge;
   final MatchingBridgeClient? matchingBridge;
   final CoverageBridgeClient? coverageBridge;
   final DownloadBridgeClient? downloadBridge;
+  final SyncBridgeClient? syncBridge;
 
   @override
   Widget build(BuildContext context) {
@@ -38,8 +42,9 @@ class MusicArkDesktopApp extends StatelessWidget {
     final matchingClient = matchingBridge ?? MatchingBridge();
     final coverageClient = coverageBridge ?? CoverageBridge();
     final downloadClient = downloadBridge ?? DownloadBridge();
+    final syncClient = syncBridge ?? SyncBridge();
     return MaterialApp(
-      title: 'MusicArk 0.7',
+      title: 'MusicArk 0.8',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -49,6 +54,7 @@ class MusicArkDesktopApp extends StatelessWidget {
         matchingBridge: matchingClient,
         coverageBridge: coverageClient,
         downloadBridge: downloadClient,
+        syncBridge: syncClient,
       ),
     );
   }
@@ -60,12 +66,14 @@ class _MusicArkShell extends StatefulWidget {
     required this.matchingBridge,
     required this.coverageBridge,
     required this.downloadBridge,
+    required this.syncBridge,
   });
 
   final MusicArkBridgeClient bridge;
   final MatchingBridgeClient matchingBridge;
   final CoverageBridgeClient coverageBridge;
   final DownloadBridgeClient downloadBridge;
+  final SyncBridgeClient syncBridge;
 
   @override
   State<_MusicArkShell> createState() => _MusicArkShellState();
@@ -77,6 +85,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
   bool _matchingOpened = false;
   bool _coverageOpened = false;
   bool _downloadsOpened = false;
+  bool _syncOpened = false;
 
   void _selectSection(int index) {
     setState(() {
@@ -85,6 +94,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
       if (index == 2) _matchingOpened = true;
       if (index == 3) _coverageOpened = true;
       if (index == 4) _downloadsOpened = true;
+      if (index == 5) _syncOpened = true;
     });
   }
 
@@ -128,6 +138,11 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                 selectedIcon: Icon(Icons.download),
                 label: Text('Загрузки'),
               ),
+              NavigationRailDestination(
+                icon: Icon(Icons.sync_outlined, key: Key('nav-sync')),
+                selectedIcon: Icon(Icons.sync),
+                label: Text('Синхронизация'),
+              ),
             ],
           ),
           const VerticalDivider(width: 1),
@@ -156,6 +171,13 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                           : const SizedBox.shrink(),
                       _downloadsOpened
                           ? DownloadPage(bridge: widget.downloadBridge)
+                          : const SizedBox.shrink(),
+                      _syncOpened
+                          ? SyncPage(
+                              bridge: widget.syncBridge,
+                              onOpenDownloads: () => _selectSection(4),
+                              onOpenMatching: () => _selectSection(2),
+                            )
                           : const SizedBox.shrink(),
                     ],
                   ),

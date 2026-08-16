@@ -9,8 +9,9 @@
 | v0.5.0 | Identity Matching | complete |
 | v0.5.1 | Variant / Altered Track Detection | complete |
 | v0.6.0 | Missing Tracks / Library Coverage | complete |
-| v0.7.0 | Download | current development |
-| v0.8.0 | Sync | planned |
+| v0.7.0 | Download + Local Playback | complete |
+| v0.8.0 | Controlled Sync | current development |
+| next | stabilization / TBD | TBD |
 
 Version notes:
 
@@ -22,11 +23,8 @@ Version notes:
 - `docs/versions/v0.5.1.md`
 - `docs/versions/v0.6.0.md`
 - `docs/versions/v0.7.0.md`
+- `docs/versions/v0.8.0.md`
 
-v0.5.0 and v0.5.1 intentionally remain separate layers: identity matching answers whether provider/local objects belong to the same track; variant verification answers whether that established identity is the same recording/version.
+v0.5 identity, v0.5.1 Variant, v0.6 Coverage and v0.7 Download remain authoritative independent layers. v0.8 does not replace them: it creates an immutable preview and safely coordinates only current supported operations, primarily `missing + wanted → DownloadService.enqueue()` after confirmation and revalidation.
 
-v0.6 adds derived Library Coverage and user triage. v0.7 consumes only `missing + wanted` identities and closes the loop through an authorized provider download, normal Local Library indexing, an exact accepted provider/local link, and a refreshed `covered` result. Download does not manufacture a Variant result.
-
-v0.8 Sync remains future work; v0.7 performs only post-download indexing/linking/coverage refresh and does not introduce a sync planner.
-
-Standalone Windows packaging is infrastructure work and is not a substitute for the functional roadmap.
+No new large product slice is committed after v0.8; the next version is intentionally **TBD / stabilization** until there is a concrete need.

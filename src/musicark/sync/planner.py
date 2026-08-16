@@ -1,170 +1,121 @@
-"""Sync planner implementation for v0.8."""
+"""Read-only Controlled Sync planner for MusicArk v0.8."""
 
 from __future__ import annotations
 
+from contextlib import closing
+from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
+import sqlite3
+from typing import Any
 
-from musicark.core.config import load_config
+from musicark.coverage.repository import CoverageRepository
 from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.matching_storage import MatchingStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
 
-from .models import SyncOperation, SyncOperationType, SyncPlan
+from .models import (
+    SyncOperation,
+    SyncOperationStatus,
+    SyncOperationType,
+    SyncPlan,
+    SyncScopeType,
+)
+
+
+PLANNER_VERSION = 1
+SOURCE_PROVIDER = "yandex_music"
+DOWNLOAD_PROVIDER = "yandex_music_download"
+_VARIANT_REVIEW = {"uncertain", "altered", "different_version"}
+
+
+class SyncPlannerError(ValueError):
+    pass
+
+
+@dataclass(slots=True)
+class _PlanInput:
+    scope_type: SyncScopeType
+    scope_id: str | None
+    collection_id: str
+    target_root_id: int | None
+    target_folder: str | None
+    tracks: list[dict[str, Any]]
+    local_fingerprint: str
+    active_downloads: dict[str, str]
 
 
 class SyncPlanner:
-    """Builds dry-run sync operations by comparing provider/local/matching state."""
+    """Build immutable dry-run plans from existing authoritative state only."""
 
     def __init__(self, database_path: Path, base_dir: Path | None = None) -> None:
-        self._database_path = database_path
+        self._database_path = Path(database_path)
         self._base_dir = base_dir
-        self._matching_storage = MatchingStorageRepository(database_path)
-        self._sync_storage = SyncStorageRepository(database_path)
-        self._audit = AuditLogRepository(database_path)
+        self._coverage = CoverageRepository(self._database_path)
+        self._matching = MatchingStorageRepository(self._database_path)
+        self._storage = SyncStorageRepository(self._database_path)
+        self._audit = AuditLogRepository(self._database_path)
 
-    def build_plan(self, dry_run: bool = True) -> SyncPlan:
-        cfg = load_config(self._base_dir)
-        experimental_upload = cfg.experimental_yandex_upload
-
-        links_by_external: dict[str, int] = {}
-        if experimental_upload:
-            for row in self._matching_storage.list_track_links_for_provider("yandex_music"):
-                links_by_external[str(row["source_external_id"])] = int(row["local_file_id"])
-
-        provider_tracks = self._matching_storage.list_provider_track_candidates()
-        local_files = self._matching_storage.list_local_audio_files()
-        operations: list[SyncOperation] = []
-
-        local_by_external_id: dict[str, dict] = {}
-        for item in local_files:
-            path = str(item["path"])
-            name = Path(path).stem
-            if name.startswith("yandex_"):
-                external_id = name[len("yandex_") :]
-                local_by_external_id[external_id] = item
-
-        for candidate in provider_tracks:
-            payload = candidate["payload"]
-            external_id = candidate["external_id"]
-            availability = payload.get("availability")
-            has_local_copy = external_id in local_by_external_id
-
-            if availability == "unavailable":
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.MARK_UNAVAILABLE,
-                        entity_id=external_id,
-                        reason="remote_unavailable",
-                        confidence=1.0,
-                        is_dangerous=False,
-                    )
-                )
-                loc_id = links_by_external.get(external_id)
-                if experimental_upload and loc_id is not None:
-                    meta = {"local_file_id": loc_id, "original_external_id": external_id}
-                    operations.append(
-                        SyncOperation(
-                            operation_type=SyncOperationType.UPLOAD_CANDIDATE,
-                            entity_id=external_id,
-                            reason="remote_unavailable_matched_local_for_experimental_restore",
-                            confidence=0.55,
-                            is_dangerous=True,
-                            metadata=meta,
-                        )
-                    )
-                    operations.append(
-                        SyncOperation(
-                            operation_type=SyncOperationType.REPLACE_CANDIDATE,
-                            entity_id=external_id,
-                            reason="post_upload_hypothetical_playlist_catalog_replace_placeholder",
-                            confidence=0.40,
-                            is_dangerous=True,
-                            metadata=meta,
-                        )
-                    )
-                continue
-
-            if not has_local_copy:
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.DOWNLOAD_TRACK,
-                        entity_id=external_id,
-                        reason="missing_local_copy",
-                        confidence=0.95,
-                        is_dangerous=False,
-                    )
-                )
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.CREATE_DOWNLOAD_TASK,
-                        entity_id=external_id,
-                        reason="create_download_task_for_missing_local",
-                        confidence=0.95,
-                        is_dangerous=False,
-                        metadata={
-                            "task_type": "yandex_download",
-                            "provider_id": "yandex_music_download",
-                            "source_id": external_id,
-                        },
-                    )
-                )
-            else:
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.LINK_LOCAL,
-                        entity_id=external_id,
-                        reason="local_copy_exists",
-                        confidence=0.90,
-                        is_dangerous=False,
-                        metadata={"local_file_id": local_by_external_id[external_id]["id"]},
-                    )
-                )
-
-            if payload.get("source_type") == "yandex_music" and payload.get("raw_data"):
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.UPDATE_METADATA_CANDIDATE,
-                        entity_id=external_id,
-                        reason="metadata_changed_candidate",
-                        confidence=0.60,
-                        is_dangerous=True,
-                    )
-                )
-
-        # local-only files without yandex naming are review candidates
-        for local in local_files:
-            name = Path(str(local["path"])).stem
-            if not name.startswith("yandex_"):
-                operations.append(
-                    SyncOperation(
-                        operation_type=SyncOperationType.NEEDS_REVIEW,
-                        entity_id=str(local["id"]),
-                        reason="local_only_or_unmatched",
-                        confidence=0.40,
-                        is_dangerous=False,
-                        metadata={"path": local["path"]},
-                    )
-                )
-
-        summary = _summarize_operations(operations)
-        plan = SyncPlan(dry_run=dry_run, operations=operations, summary=summary)
-        self._sync_storage.save_plan(plan)
+    def build_plan(
+        self,
+        dry_run: bool = True,
+        *,
+        scope_type: str | SyncScopeType = SyncScopeType.ALL,
+        scope_id: str | None = None,
+        target_root_id: int | None = None,
+        target_folder: str | None = None,
+    ) -> SyncPlan:
+        """Compute and persist a plan. No downloads, matching or filesystem writes occur."""
+        data = self._read_inputs(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            target_root_id=target_root_id,
+            target_folder=target_folder,
+        )
+        plan = self._plan_from_inputs(data, dry_run=dry_run)
+        self._storage.save_plan(plan)
         self._audit.append(
             AuditEvent(
                 event_type="sync_plan_created",
                 entity_type="sync_plan",
                 entity_id=plan.id,
                 status="success",
-                details=f"operations={len(operations)} dry_run={dry_run}",
+                details=json.dumps(
+                    {
+                        "planner_version": PLANNER_VERSION,
+                        "scope_type": plan.scope_type.value,
+                        "scope_id": plan.scope_id,
+                        "operations": len(plan.operations),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )[:16000],
             )
         )
         return plan
 
+    def current_fingerprint(
+        self,
+        *,
+        scope_type: str | SyncScopeType,
+        scope_id: str | None,
+        target_root_id: int | None,
+        target_folder: str | None,
+    ) -> str:
+        data = self._read_inputs(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            target_root_id=target_root_id,
+            target_folder=target_folder,
+        )
+        return self._fingerprint(data)
+
     def show_plan(self, plan_id: str) -> SyncPlan:
-        return self._sync_storage.get_plan(plan_id)
+        return self._storage.get_plan(plan_id)
 
     def cancel_plan(self, plan_id: str) -> None:
-        self._sync_storage.cancel_plan(plan_id)
+        self._storage.cancel_plan(plan_id)
         self._audit.append(
             AuditEvent(
                 event_type="sync_plan_cancelled",
@@ -175,12 +126,331 @@ class SyncPlanner:
             )
         )
 
+    def _read_inputs(
+        self,
+        *,
+        scope_type: str | SyncScopeType,
+        scope_id: str | None,
+        target_root_id: int | None,
+        target_folder: str | None,
+    ) -> _PlanInput:
+        scope, clean_scope_id, collection_id = self._resolve_scope(scope_type, scope_id)
+        tracks: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch, total = self._coverage.list_tracks(
+                provider_id=SOURCE_PROVIDER,
+                collection_id=collection_id,
+                sort="position" if collection_id else "artist",
+                limit=500,
+                offset=offset,
+            )
+            tracks.extend(batch)
+            offset += len(batch)
+            if not batch or offset >= total:
+                break
+        return _PlanInput(
+            scope_type=scope,
+            scope_id=clean_scope_id,
+            collection_id=collection_id,
+            target_root_id=target_root_id,
+            target_folder=target_folder,
+            tracks=tracks,
+            local_fingerprint=self._matching.local_library_fingerprint(),
+            active_downloads=self._active_downloads(),
+        )
 
-def _summarize_operations(operations: list[SyncOperation]) -> dict[str, int]:
-    result: dict[str, int] = {}
-    for operation in operations:
-        key = operation.operation_type.value
-        result[key] = result.get(key, 0) + 1
-    result["total"] = len(operations)
-    result["dangerous"] = sum(1 for op in operations if op.is_dangerous)
-    return result
+    def _resolve_scope(
+        self, scope_type: str | SyncScopeType, scope_id: str | None
+    ) -> tuple[SyncScopeType, str | None, str]:
+        try:
+            scope = scope_type if isinstance(scope_type, SyncScopeType) else SyncScopeType(str(scope_type))
+        except ValueError as exc:
+            raise SyncPlannerError("Unsupported sync scope.") from exc
+        if scope == SyncScopeType.ALL:
+            return scope, None, ""
+        collections = {str(item["id"]): item for item in self._coverage.collections(provider_id=SOURCE_PROVIDER)}
+        if scope == SyncScopeType.LIKED:
+            if "liked" not in collections:
+                raise SyncPlannerError("Active Yandex 'Мне нравится' collection is not cached.")
+            return scope, "liked", "liked"
+        if scope == SyncScopeType.PLAYLIST:
+            clean = str(scope_id or "").strip()
+            item = collections.get(clean)
+            if not clean or item is None or str(item.get("type")) != "playlist":
+                raise SyncPlannerError("Selected Yandex playlist is not active in the local cache.")
+            return scope, clean, clean
+        raise SyncPlannerError("Legacy scope cannot be used to create a v0.8 plan.")
+
+    def _active_downloads(self) -> dict[str, str]:
+        """Read all active production user tasks once; avoid planner N+1 queue queries."""
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT source_id, id
+                    FROM download_tasks
+                    WHERE task_type='provider_download'
+                      AND provider_id=?
+                      AND status IN ('queued','running')
+                    ORDER BY created_at DESC
+                    """,
+                    (DOWNLOAD_PROVIDER,),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise SyncPlannerError("Failed to inspect current download queue.") from exc
+        result: dict[str, str] = {}
+        for source_id, task_id in rows:
+            result.setdefault(str(source_id), str(task_id))
+        return result
+
+    def _plan_from_inputs(self, data: _PlanInput, *, dry_run: bool) -> SyncPlan:
+        operations: list[SyncOperation] = []
+        counts = {
+            "desiredTracks": len(data.tracks),
+            "alreadyCovered": 0,
+            "readyToDownload": 0,
+            "alreadyQueued": 0,
+            "missingUndecided": 0,
+            "ignoredMissing": 0,
+            "identityReview": 0,
+            "notAnalyzed": 0,
+            "variantIssues": 0,
+            "localOnly": 0,
+        }
+
+        for track in data.tracks:
+            external_id = str(track.get("externalId") or "")
+            coverage = str(track.get("coverageStatus") or "not_analyzed")
+            action = str(track.get("userAction") or "unreviewed")
+            variant = str(track.get("variantStatus") or "not_checked")
+            metadata = self._track_snapshot(track)
+
+            if coverage == "covered":
+                counts["alreadyCovered"] += 1
+                if variant in _VARIANT_REVIEW:
+                    counts["variantIssues"] += 1
+                    operations.append(
+                        SyncOperation(
+                            operation_type=SyncOperationType.REVIEW_VARIANT,
+                            entity_id=external_id,
+                            reason=f"variant_{variant}",
+                            confidence=float(track.get("confidence") or 0.0),
+                            metadata=metadata,
+                            status=SyncOperationStatus.INFORMATIONAL,
+                        )
+                    )
+                continue
+
+            if coverage == "missing":
+                if action == "wanted":
+                    active_task = data.active_downloads.get(external_id)
+                    if active_task:
+                        counts["alreadyQueued"] += 1
+                        operations.append(
+                            SyncOperation(
+                                operation_type=SyncOperationType.ENQUEUE_DOWNLOAD,
+                                entity_id=external_id,
+                                reason="already_queued",
+                                confidence=1.0,
+                                metadata=metadata,
+                                status=SyncOperationStatus.SKIPPED,
+                                result={"reason": "already_queued", "task_id": active_task},
+                            )
+                        )
+                    else:
+                        counts["readyToDownload"] += 1
+                        operations.append(
+                            SyncOperation(
+                                operation_type=SyncOperationType.ENQUEUE_DOWNLOAD,
+                                entity_id=external_id,
+                                reason="missing_wanted",
+                                confidence=1.0,
+                                metadata=metadata,
+                                status=SyncOperationStatus.PENDING,
+                            )
+                        )
+                elif action == "ignored":
+                    counts["ignoredMissing"] += 1
+                else:
+                    counts["missingUndecided"] += 1
+                    operations.append(
+                        SyncOperation(
+                            operation_type=SyncOperationType.USER_DECISION_REQUIRED,
+                            entity_id=external_id,
+                            reason="missing_unreviewed",
+                            metadata=metadata,
+                            status=SyncOperationStatus.INFORMATIONAL,
+                        )
+                    )
+                continue
+
+            if coverage == "needs_review":
+                counts["identityReview"] += 1
+                operations.append(
+                    SyncOperation(
+                        operation_type=SyncOperationType.REVIEW_IDENTITY,
+                        entity_id=external_id,
+                        reason="identity_needs_review",
+                        confidence=float(track.get("confidence") or 0.0),
+                        metadata=metadata,
+                        status=SyncOperationStatus.INFORMATIONAL,
+                    )
+                )
+                continue
+
+            counts["notAnalyzed"] += 1
+            operations.append(
+                SyncOperation(
+                    operation_type=SyncOperationType.REVIEW_IDENTITY,
+                    entity_id=external_id,
+                    reason="matching_required",
+                    metadata={**metadata, "matchingRequired": True},
+                    status=SyncOperationStatus.INFORMATIONAL,
+                )
+            )
+
+        local_only = self._local_only_rows(data)
+        counts["localOnly"] = len(local_only)
+        outside_reason = "outside_selected_scope" if data.scope_type == SyncScopeType.PLAYLIST else "local_only"
+        for row in local_only:
+            operations.append(
+                SyncOperation(
+                    operation_type=SyncOperationType.LOCAL_ONLY,
+                    entity_id=str(row[0]),
+                    reason=outside_reason,
+                    metadata={
+                        "localFileId": int(row[0]),
+                        "title": str(row[1] or ""),
+                        "artists": self._safe_json_list(row[2]),
+                        "album": row[3],
+                    },
+                    status=SyncOperationStatus.INFORMATIONAL,
+                )
+            )
+
+        desired = counts["desiredTracks"]
+        covered = counts["alreadyCovered"]
+        projected = covered + counts["readyToDownload"]
+        counts["currentCoveragePercent"] = round((covered / desired * 100.0) if desired else 0.0, 1)
+        counts["projectedCoveragePercent"] = round((projected / desired * 100.0) if desired else 0.0, 1)
+        counts["operationCount"] = len(operations)
+        counts["blockerCount"] = (
+            counts["missingUndecided"] + counts["identityReview"] + counts["notAnalyzed"] + counts["variantIssues"]
+        )
+
+        return SyncPlan(
+            dry_run=dry_run,
+            operations=operations,
+            summary=counts,
+            planner_version=PLANNER_VERSION,
+            scope_type=data.scope_type,
+            scope_id=data.scope_id,
+            target_root_id=data.target_root_id,
+            target_folder=data.target_folder,
+            input_fingerprint=self._fingerprint(data),
+        )
+
+    def _local_only_rows(self, data: _PlanInput) -> list[tuple[Any, ...]]:
+        desired = [str(item.get("externalId") or "") for item in data.tracks if item.get("externalId")]
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                if desired:
+                    conn.execute("DROP TABLE IF EXISTS temp.sync_desired_ids")
+                    conn.execute("CREATE TEMP TABLE sync_desired_ids(external_id TEXT PRIMARY KEY)")
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO sync_desired_ids(external_id) VALUES (?)",
+                        ((value,) for value in desired),
+                    )
+                    rows = conn.execute(
+                        """
+                        SELECT laf.id, laf.title, laf.artists_json, laf.album
+                        FROM local_audio_files laf
+                        WHERE COALESCE(laf.availability, 'missing')='available'
+                          AND NOT EXISTS (
+                              SELECT 1 FROM track_links tl
+                              JOIN sync_desired_ids d ON d.external_id=tl.source_external_id
+                              WHERE tl.local_file_id=laf.id
+                                AND tl.source_provider_id=?
+                          )
+                        ORDER BY COALESCE(laf.title, laf.file_name, laf.path) COLLATE NOCASE, laf.id
+                        """,
+                        (SOURCE_PROVIDER,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, title, artists_json, album
+                        FROM local_audio_files
+                        WHERE COALESCE(availability, 'missing')='available'
+                        ORDER BY COALESCE(title, file_name, path) COLLATE NOCASE, id
+                        """
+                    ).fetchall()
+        except sqlite3.Error as exc:
+            raise SyncPlannerError("Failed to compute local-only sync information.") from exc
+        return list(rows)
+
+    def _fingerprint(self, data: _PlanInput) -> str:
+        tracks: list[dict[str, Any]] = []
+        for item in data.tracks:
+            collections = item.get("collections") if isinstance(item.get("collections"), list) else []
+            memberships = sorted(
+                (
+                    str(value.get("id") or ""),
+                    int(value.get("position") or 0),
+                )
+                for value in collections
+                if isinstance(value, dict)
+                and (
+                    data.scope_type == SyncScopeType.ALL
+                    or str(value.get("id") or "") == data.collection_id
+                )
+            )
+            tracks.append(
+                {
+                    "provider": str(item.get("providerId") or ""),
+                    "external": str(item.get("externalId") or ""),
+                    "membership": memberships,
+                    "coverage": str(item.get("coverageStatus") or ""),
+                    "matching": str(item.get("matchingStatus") or ""),
+                    "local": item.get("localFileId"),
+                    "matchingUpdatedAt": item.get("matchingUpdatedAt"),
+                    "action": str(item.get("userAction") or "unreviewed"),
+                    "variant": str(item.get("variantStatus") or "not_checked"),
+                }
+            )
+        payload = {
+            "plannerVersion": PLANNER_VERSION,
+            "scopeType": data.scope_type.value,
+            "scopeId": data.scope_id,
+            "targetRootId": data.target_root_id,
+            "targetFolder": data.target_folder,
+            "localLibraryFingerprint": data.local_fingerprint,
+            "tracks": sorted(tracks, key=lambda value: (value["provider"], value["external"])),
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _track_snapshot(track: dict[str, Any]) -> dict[str, Any]:
+        provider = track.get("provider") if isinstance(track.get("provider"), dict) else {}
+        raw_artists = provider.get("artists") or []
+        artists = [str(value) for value in raw_artists] if isinstance(raw_artists, list) else [str(raw_artists)]
+        return {
+            "providerId": str(track.get("providerId") or ""),
+            "externalId": str(track.get("externalId") or ""),
+            "title": str(provider.get("title") or track.get("externalId") or ""),
+            "artists": artists,
+            "album": provider.get("album_title") or provider.get("album"),
+            "coverageStatus": str(track.get("coverageStatus") or ""),
+            "userAction": str(track.get("userAction") or "unreviewed"),
+            "variantStatus": track.get("variantStatus"),
+        }
+
+    @staticmethod
+    def _safe_json_list(value: object) -> list[str]:
+        try:
+            decoded = json.loads(str(value or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return [str(item) for item in decoded] if isinstance(decoded, list) else []

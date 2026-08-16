@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
+import 'audio_player.dart';
 import 'coverage_bridge.dart';
 import 'coverage_page.dart';
 import 'download_bridge.dart';
@@ -10,7 +12,11 @@ import 'matching_page.dart';
 import 'musicark_bridge.dart';
 import 'yandex_app.dart' as yandex;
 
-void main() => runApp(const MusicArkDesktopApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+  runApp(const MusicArkDesktopApp());
+}
 
 class MusicArkDesktopApp extends StatelessWidget {
   const MusicArkDesktopApp({
@@ -126,24 +132,35 @@ class _MusicArkShellState extends State<_MusicArkShell> {
           ),
           const VerticalDivider(width: 1),
           Expanded(
-            child: IndexedStack(
-              index: _index,
+            child: Column(
               children: [
-                yandex.MusicArkHomePage(bridge: widget.bridge),
-                _localLibraryOpened ? LocalLibraryPage(bridge: widget.bridge) : const SizedBox.shrink(),
-                _matchingOpened ? MatchingPage(bridge: widget.matchingBridge) : const SizedBox.shrink(),
-                _coverageOpened
-                    ? CoveragePage(
-                        bridge: widget.coverageBridge,
-                        matchingBridge: widget.matchingBridge,
-                        downloadBridge: widget.downloadBridge,
-                        onOpenMatching: () => _selectSection(2),
-                        onOpenDownloads: () => _selectSection(4),
-                      )
-                    : const SizedBox.shrink(),
-                _downloadsOpened
-                    ? DownloadPage(bridge: widget.downloadBridge)
-                    : const SizedBox.shrink(),
+                Expanded(
+                  child: IndexedStack(
+                    index: _index,
+                    children: [
+                      yandex.MusicArkHomePage(bridge: widget.bridge),
+                      _localLibraryOpened
+                          ? LocalLibraryPage(bridge: widget.bridge)
+                          : const SizedBox.shrink(),
+                      _matchingOpened
+                          ? MatchingPage(bridge: widget.matchingBridge)
+                          : const SizedBox.shrink(),
+                      _coverageOpened
+                          ? CoveragePage(
+                              bridge: widget.coverageBridge,
+                              matchingBridge: widget.matchingBridge,
+                              downloadBridge: widget.downloadBridge,
+                              onOpenMatching: () => _selectSection(2),
+                              onOpenDownloads: () => _selectSection(4),
+                            )
+                          : const SizedBox.shrink(),
+                      _downloadsOpened
+                          ? DownloadPage(bridge: widget.downloadBridge)
+                          : const SizedBox.shrink(),
+                    ],
+                  ),
+                ),
+                const MusicArkNowPlayingBar(),
               ],
             ),
           ),

@@ -170,7 +170,10 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                             )
                           : const SizedBox.shrink(),
                       _downloadsOpened
-                          ? DownloadPage(bridge: widget.downloadBridge)
+                          ? DownloadPage(
+                              bridge: widget.downloadBridge,
+                              active: _index == 4,
+                            )
                           : const SizedBox.shrink(),
                       _syncOpened
                           ? SyncPage(

@@ -26,135 +26,157 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('renders scope selector, target and creates preview plan', (tester) async {
+  testWidgets('shows synchronization diff immediately without plan/history UI', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
 
-    expect(find.byKey(const Key('sync-scope-selector')), findsOneWidget);
-    expect(find.byKey(const Key('sync-target-state')), findsOneWidget);
-    expect(find.byKey(const Key('sync-create-plan')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('sync-create-plan')));
-    await tester.pumpAndSettle();
     expect(bridge.createCalls, 1);
     expect(find.byKey(const Key('sync-summary')), findsOneWidget);
-    expect(find.textContaining('Current coverage: 30.0%'), findsOneWidget);
-    expect(find.byKey(const Key('sync-plan-details')), findsOneWidget);
+    expect(find.textContaining('Разница: Вся библиотека'), findsOneWidget);
+    expect(find.text('В Яндекс Музыке'), findsOneWidget);
+    expect(find.text('Уже локально'), findsOneWidget);
+    expect(find.text('К скачиванию'), findsOneWidget);
+    expect(find.byKey(const Key('sync-diff-details')), findsOneWidget);
+
+    expect(find.text('Создать план'), findsNothing);
+    expect(find.text('Текущий план'), findsNothing);
+    expect(find.text('История планов'), findsNothing);
+    expect(find.textContaining('stale'), findsNothing);
   });
 
-  testWidgets('shows no-target state and disables Apply', (tester) async {
-    final bridge = FakeSyncBridge(targetConfigured: false);
-    bridge.currentPlan = bridge.samplePlan();
-    await tester.pumpWidget(_app(bridge));
-    await _settle(tester);
-
-    expect(find.textContaining('Не выбран'), findsOneWidget);
-    final apply = tester.widget<FilledButton>(find.byKey(const Key('sync-apply')));
-    expect(apply.onPressed, isNull);
-  });
-
-  testWidgets('stale plan shows banner and disables Apply', (tester) async {
+  testWidgets('changing scope rebuilds diff for exactly the selected collection', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
-    bridge.currentPlan = bridge.samplePlan(status: 'stale');
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
 
-    expect(find.byKey(const Key('sync-stale-banner')), findsOneWidget);
-    final apply = tester.widget<FilledButton>(find.byKey(const Key('sync-apply')));
-    expect(apply.onPressed, isNull);
-  });
+    final selector = find.byKey(
+      const ValueKey('sync-scope-selector-all|'),
+    );
+    expect(selector, findsOneWidget);
 
-  testWidgets('Apply requires confirmation and reports queue-only result', (tester) async {
-    final bridge = FakeSyncBridge();
-    bridge.currentPlan = bridge.samplePlan();
-    await tester.pumpWidget(_app(bridge));
-    await _settle(tester);
-
-    await tester.tap(find.byKey(const Key('sync-apply')));
+    await tester.tap(selector);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('sync-apply-confirmation')), findsOneWidget);
+    await tester.tap(find.text('Focus').last);
+    await tester.pumpAndSettle();
+
+    expect(bridge.createCalls, 2);
+    expect(find.textContaining('Разница: Focus'), findsOneWidget);
+  });
+
+  testWidgets('no target disables synchronization but still shows diff', (
+    tester,
+  ) async {
+    final bridge = FakeSyncBridge(targetConfigured: false);
+    await tester.pumpWidget(_app(bridge));
+    await _settle(tester);
+
+    expect(find.text('Папка не выбрана.'), findsOneWidget);
+    expect(find.byKey(const Key('sync-summary')), findsOneWidget);
+    final button =
+        tester.widget<FilledButton>(find.byKey(const Key('sync-now')));
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets('synchronize rebuilds current diff and requires confirmation', (
+    tester,
+  ) async {
+    final bridge = FakeSyncBridge();
+    await tester.pumpWidget(_app(bridge));
+    await _settle(tester);
+
+    expect(bridge.createCalls, 1);
+    await tester.tap(find.byKey(const Key('sync-now')));
+    await tester.pumpAndSettle();
+
+    expect(bridge.createCalls, 2);
+    expect(find.byKey(const Key('sync-confirmation')), findsOneWidget);
     expect(bridge.applyCalls, 0);
 
-    await tester.tap(find.byKey(const Key('sync-confirm-apply')));
+    await tester.tap(find.byKey(const Key('sync-confirm')));
     await tester.pumpAndSettle();
+
     expect(bridge.applyCalls, 1);
-    expect(find.byKey(const Key('sync-apply-result')), findsOneWidget);
-    expect(find.textContaining('В очередь добавлено: 3'), findsOneWidget);
+    expect(bridge.createCalls, 3);
+    expect(find.textContaining('Добавлено в очередь: 3'), findsOneWidget);
   });
 
-  testWidgets('decision buttons update Coverage action and make plan stale', (tester) async {
+  testWidgets('decision actions immediately rebuild the visible diff', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
-    bridge.currentPlan = bridge.samplePlan();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
 
     await tester.scrollUntilVisible(
-      find.text('Требует решения (1)'),
+      find.text('Нужно решить (1)'),
       200,
       scrollable: find.byKey(const Key('sync-page')),
     );
-    await tester.tap(find.text('Требует решения (1)'));
+    await tester.tap(find.text('Нужно решить (1)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Нужен'));
+    await tester.tap(find.text('Скачать'));
     await tester.pumpAndSettle();
 
     expect(bridge.lastActionId, '2');
     expect(bridge.lastAction, 'wanted');
-    expect(find.byKey(const Key('sync-stale-banner')), findsOneWidget);
+    expect(bridge.createCalls, 2);
+    expect(find.textContaining('stale'), findsNothing);
   });
 
-  testWidgets('identity and variant review link to Matching', (tester) async {
+  testWidgets('matching problems route to Matching without exposing planner terms', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
-    bridge.currentPlan = bridge.samplePlan();
     var matchingOpens = 0;
-    await tester.pumpWidget(_app(bridge, onMatching: () => matchingOpens++));
+    await tester.pumpWidget(
+      _app(bridge, onMatching: () => matchingOpens++),
+    );
     await _settle(tester);
 
     await tester.scrollUntilVisible(
-      find.text('Проверить сопоставление (1)'),
+      find.text('Нужно сопоставить (2)'),
       200,
       scrollable: find.byKey(const Key('sync-page')),
     );
-    await tester.tap(find.text('Проверить сопоставление (1)'));
+    await tester.tap(find.text('Нужно сопоставить (2)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Открыть сопоставление'));
+
+    await tester.tap(find.text('Открыть сопоставление').first);
     expect(matchingOpens, 1);
-
-    await tester.tap(find.text('Проблемы версии (1)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Открыть проверку версии'));
-    expect(matchingOpens, 2);
   });
 
-  testWidgets('history plan is persisted surface and planned plan can be cancelled', (tester) async {
-    final bridge = FakeSyncBridge();
-    bridge.currentPlan = bridge.samplePlan();
-    await tester.pumpWidget(_app(bridge));
-    await _settle(tester);
-
-    expect(find.byKey(const Key('sync-history')), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('sync-cancel-plan')),
-      200,
-      scrollable: find.byKey(const Key('sync-page')),
-    );
-    await tester.tap(find.byKey(const Key('sync-cancel-plan')));
-    await tester.pumpAndSettle();
-    expect(bridge.cancelCalls, 1);
-    expect(find.textContaining('cancelled'), findsOneWidget);
-  });
-
-  testWidgets('download target can be selected', (tester) async {
+  testWidgets('download target selection refreshes diff', (tester) async {
     final bridge = FakeSyncBridge(targetConfigured: false);
     await tester.pumpWidget(
       _app(bridge, picker: FakeLocalFolderPicker(r'D:\Music')),
     );
     await _settle(tester);
 
+    expect(bridge.createCalls, 1);
     await tester.tap(find.byKey(const Key('sync-select-target')));
     await tester.pumpAndSettle();
+
     expect(bridge.targetConfigured, isTrue);
     expect(find.text(r'D:\Music'), findsOneWidget);
+    expect(bridge.createCalls, 2);
+  });
+
+  testWidgets('downloads shortcut remains available from diff view', (
+    tester,
+  ) async {
+    final bridge = FakeSyncBridge();
+    var opens = 0;
+    await tester.pumpWidget(
+      _app(bridge, onDownloads: () => opens++),
+    );
+    await _settle(tester);
+
+    await tester.tap(find.byKey(const Key('sync-open-downloads')));
+    expect(opens, 1);
   });
 }

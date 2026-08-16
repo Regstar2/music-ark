@@ -38,6 +38,7 @@ class _CoveragePageState extends State<CoveragePage> {
   List<Map<String, dynamic>> _collections = [];
   List<Map<String, dynamic>> _items = [];
   final Set<String> _selected = {};
+  final Set<String> _downloading = {};
 
   String _status = 'missing';
   String _collectionId = '';
@@ -210,23 +211,54 @@ class _CoveragePageState extends State<CoveragePage> {
 
   Future<void> _enqueueDownload(String externalId) async {
     final bridge = widget.downloadBridge;
-    if (bridge == null) return;
+    if (bridge == null || _downloading.contains(externalId)) return;
+    _updateView(() {
+      _downloading.add(externalId);
+      _error = null;
+    });
     try {
-      final result = await bridge.enqueue(externalId);
+      // Download is a one-click user action. Wanted remains an internal eligibility
+      // invariant and is set here automatically instead of forcing a separate click.
+      await widget.bridge.coverageSetAction(externalId, 'wanted');
+      final queued = await bridge.enqueue(externalId);
+      final rawTask = queued['task'];
+      final task = rawTask is Map ? Map<String, dynamic>.from(rawTask) : const <String, dynamic>{};
+      var finalStatus = (task['status'] ?? '').toString();
+      if (finalStatus == 'queued') {
+        try {
+          final run = await bridge.runQueue();
+          final rawItems = run['items'];
+          if (rawItems is List) {
+            for (final raw in rawItems.whereType<Map>()) {
+              final item = Map<String, dynamic>.from(raw);
+              if ('${item['externalId']}' == externalId) {
+                finalStatus = (item['status'] ?? finalStatus).toString();
+              }
+            }
+          }
+        } on DownloadBridgeException catch (error) {
+          // Another download worker can legitimately own the queue. In that case
+          // the requested track remains queued instead of surfacing a false failure.
+          if (error.code != 'worker_busy') rethrow;
+        }
+      }
+      await _reloadTracks();
       if (!mounted) return;
-      final created = result['created'] == true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(created ? 'Добавлено в загрузки.' : 'Трек уже в очереди.')),
-      );
+      final message = finalStatus == 'completed'
+          ? 'Трек скачан.'
+          : finalStatus == 'failed' || finalStatus == 'needs_review'
+              ? 'Загрузка завершилась с ошибкой. Подробности — в «Загрузках».'
+              : 'Загрузка запущена.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } on DownloadBridgeException catch (error) {
       if (!mounted) return;
       setState(() => _error = error.message);
       if (error.code == 'target_required' && widget.onOpenDownloads != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Сначала выберите папку на странице «Загрузки».'),
+            content: const Text('Сначала выберите папку для скачивания.'),
             action: SnackBarAction(
-              label: 'Открыть',
+              label: 'Выбрать',
               onPressed: widget.onOpenDownloads!,
             ),
           ),
@@ -234,6 +266,8 @@ class _CoveragePageState extends State<CoveragePage> {
       }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    } finally {
+      _updateView(() => _downloading.remove(externalId));
     }
   }
 

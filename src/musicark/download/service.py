@@ -30,6 +30,7 @@ from musicark.storage.download_storage import DownloadStorageRepository
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository, normalize_local_path
 from musicark.storage.matching_storage import MatchingStorageRepository
 
+from .freshness import rebase_after_exact_download
 from .models import DownloadStatus, DownloadTask
 from .provider import (
     DownloadCancelledError,
@@ -425,10 +426,12 @@ class DownloadService:
                 task.raw_payload["target_filename"] = actual_path.name
                 self._downloads.upsert_task(task)
 
+            previous_local_fingerprint = self._matching.local_library_fingerprint()
             indexed = self._local.index_file(actual_path, int(task.target_root_id or 0))["track"]
             self._validate_duration(current.get("provider") or {}, indexed)
             local_id = int(indexed["id"])
             provider_payload = dict(current.get("provider") or {})
+            current_local_fingerprint = self._matching.local_library_fingerprint()
             decision = MatchDecision(
                 provider_id=self.SOURCE_PROVIDER,
                 external_id=task.source_id,
@@ -436,7 +439,7 @@ class DownloadService:
                 provider_fingerprint=provider_fingerprint(
                     self.SOURCE_PROVIDER, task.source_id, provider_payload
                 ),
-                local_fingerprint=self._matching.local_library_fingerprint(),
+                local_fingerprint=current_local_fingerprint,
                 status=MatchStatus.MATCHED,
                 local_file_id=local_id,
                 confidence=1.0,
@@ -445,6 +448,13 @@ class DownloadService:
                 reason="download_exact",
             )
             self._matching.persist_batch([decision])
+            rebased = rebase_after_exact_download(
+                self._database_path,
+                previous_fingerprint=previous_local_fingerprint,
+                current_fingerprint=current_local_fingerprint,
+                provider_id=self.SOURCE_PROVIDER,
+                external_id=task.source_id,
+            )
             refreshed = self._coverage.get_track(
                 provider_id=self.SOURCE_PROVIDER, external_id=task.source_id
             )
@@ -470,7 +480,7 @@ class DownloadService:
             self._audit_event(
                 "download_completed",
                 "success",
-                f"source={task.source_id} local_file_id={local_id}",
+                f"source={task.source_id} local_file_id={local_id} freshness_rebased={rebased}",
                 task.id,
             )
             return task

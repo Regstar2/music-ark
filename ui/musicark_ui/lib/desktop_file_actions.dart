@@ -28,10 +28,17 @@ class SystemLocalFileActions implements LocalFileActions {
   @override
   Future<void> reveal(String path) async {
     final file = _requireFile(path);
+    final folder = file.parent.absolute;
+    if (!folder.existsSync()) {
+      throw FileSystemException('Папка музыкального файла не найдена.', folder.path);
+    }
     if (Platform.isWindows) {
+      // Opening the containing directory is more reliable than Explorer /select
+      // for Unicode/space-heavy paths. /select may silently fall back to the
+      // default Documents folder when Explorer rejects the argument.
       await Process.start(
         'explorer.exe',
-        ['/select,${file.path}'],
+        [folder.path],
         runInShell: false,
         mode: ProcessStartMode.detached,
       );
@@ -41,6 +48,6 @@ class SystemLocalFileActions implements LocalFileActions {
       await Process.start('open', ['-R', file.path], mode: ProcessStartMode.detached);
       return;
     }
-    await Process.start('xdg-open', [file.parent.path], mode: ProcessStartMode.detached);
+    await Process.start('xdg-open', [folder.path], mode: ProcessStartMode.detached);
   }
 }

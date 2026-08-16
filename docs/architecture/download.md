@@ -22,18 +22,22 @@ DownloadService
 
 The legacy `DownloadProviderRegistry` and `YandexMusicDownloadProvider` remain reusable. The legacy `DownloadSystem` is compatibility code only; production v0.7 orchestration lives in `DownloadService` because the old system stopped at a legacy local-file row and could leave `library_root_id = NULL`.
 
-## Eligibility and one-click UX
+## Direct download intent vs triage
 
-The backend invariant for a normal enqueue remains:
+Coverage triage and direct acquisition are separate concepts.
+
+Bulk intent remains:
 
 ```text
 coverage_status = missing
 user_action = wanted
 ```
 
-This is not a multi-step requirement for the user. On a Missing row, **Скачать** is a one-click action: Flutter first persists `wanted`, immediately enqueues the exact provider identity, and starts/joins the user download queue. The explicit `Нужен` control remains useful for triage and bulk intent, but it is not required before downloading one track.
+A direct **Скачать** click does not require or persist `wanted`. The click itself is explicit user intent. `musicark.download.bridge` verifies the track is currently `missing`, creates/reuses the normal user task and persists `direct_request=true` in the safe task payload.
 
-The service rechecks eligibility immediately before execution. If the state genuinely changed before transfer, the task becomes `skipped` and no duplicate is downloaded.
+The existing `DownloadService` historically expects `userAction=wanted`. For a `direct_request` task, the bridge supplies an in-memory Coverage proxy that presents `wanted` only to that service call while the real `wanted / ignored / unreviewed` row in SQLite remains unchanged. The same scoped proxy is used for Retry.
+
+This prevents direct downloading from changing the current `Решение` filter and unexpectedly removing Missing rows from the UI. After successful acquisition, the downloaded track still correctly leaves Missing because its derived Coverage becomes `covered`.
 
 One active user task is allowed per download-provider identity `(yandex_music_download, external_id)`. Multiple Liked/playlist memberships therefore remain one queue item.
 
@@ -129,19 +133,21 @@ Variant analysis is not invoked and no `SAME` result is manufactured.
 
 v0.5.1 reference files in `.musicark/downloads/yandex/` remain verification cache only. They are not v0.7 destinations, are not indexed into Local Library, cannot make Coverage `covered`, and are hidden from the v0.7 user Downloads history.
 
-## File actions / playback boundary
+## Embedded playback boundary
 
 Raw local paths are not permanently printed on track/download cards. They are shown only after an explicit **Показать путь** action.
 
 For completed/local tracks the desktop UI exposes:
 
-- **Воспроизвести** — open the local audio file with the operating system's associated/default player;
+- **Воспроизвести** — route the local file into the application-wide MusicArk audio player;
 - **Открыть расположение файла** — reveal/select the actual file in Explorer/Finder (or open its directory on Linux).
 
-This is intentionally a v0.7 file-launch baseline, not an embedded media engine. A native MusicArk player with play/pause/seek/queue is a separate future feature.
+Playback never delegates to the OS default media application. `MusicArkAudioPlayer` owns one `media_kit` `Player` instance lazily and exposes a persistent Flutter Now Playing bar with play/pause, seek, position, duration, buffering/error state and stop controls. The player remains active while the user navigates between MusicArk sections.
+
+`media_kit_libs_audio` supplies the audio-only native playback libraries. This avoids creating another media index: sources are the existing Local Library/download file paths.
 
 ## Bridge/UI boundary
 
-Flutter receives only JSON task metadata and periodically polls while a worker is active. Binary chunks never cross the Flutter↔Python boundary. The dedicated bridge exposes summary/list/enqueue/bulk-enqueue/run/retry/cancel/history/settings/target/recovery operations using `Process.run(..., runInShell: false)` from Flutter.
+Flutter receives only JSON task metadata and periodically polls while a download worker is active. Binary download chunks never cross the Flutter↔Python boundary. The dedicated bridge exposes summary/list/direct-enqueue/bulk-enqueue/run/retry/cancel/history/settings/target/recovery operations using `Process.run(..., runInShell: false)` from Flutter.
 
 The Downloads page polls at 800 ms while queue execution is active and otherwise refreshes on demand. The queue/history page remains available for progress, cancellation, retry and diagnostics, but ordinary single-track download does not require visiting it.

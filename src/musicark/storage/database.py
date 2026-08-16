@@ -10,6 +10,7 @@ from musicark.core.errors import StorageError
 from musicark.storage.coverage_migration import migrate_coverage_v06
 from musicark.storage.download_migration import migrate_download_v07
 from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
+from musicark.storage.sync_migration import migrate_sync_v08
 
 
 SCHEMA_STATEMENTS = (
@@ -190,9 +191,10 @@ def initialize_database(database_path: Path) -> None:
                     conn.execute(statement)
                 ensure_schema_version_seed(conn)
                 migrate_schema(conn)
-                # v0.6 and v0.7 are intentionally sequential migrations outside the
-                # historical chain: v0.7 must never skip creation of v0.6 actions.
+                # v0.6+ migrations are sequential and deliberately isolated from the
+                # historical chain so no modern state can be skipped.
                 migrate_coverage_v06(conn)
                 migrate_download_v07(conn)
+                migrate_sync_v08(conn)
     except sqlite3.Error as exc:
         raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

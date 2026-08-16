@@ -1,4 +1,4 @@
-"""Bounded SQL-backed candidate generation for MusicArk v0.5."""
+"""Bounded SQL-backed candidate generation for MusicArk v0.5/v0.8."""
 
 from __future__ import annotations
 
@@ -14,8 +14,16 @@ from .normalize import artists_key, normalize_text
 from .policy import CANDIDATE_LIMIT
 
 
+_ACTIVE_ROOT_CLAUSE = """
+    AND (
+        NOT EXISTS (SELECT 1 FROM local_library_roots WHERE enabled=1)
+        OR library_root_id IN (SELECT id FROM local_library_roots WHERE enabled=1)
+    )
+"""
+
+
 class CandidateGenerator:
-    """Generate a small plausible local set before expensive similarity scoring."""
+    """Generate plausible candidates only from the configured Local Library."""
 
     def __init__(
         self,
@@ -49,7 +57,7 @@ class CandidateGenerator:
 
         remaining = max(0, self._limit - len(found))
         if remaining:
-            for candidate in self._repository.find_local_candidates(
+            for candidate in self._metadata_candidates(
                 normalized_title=title,
                 normalized_artists=artists,
                 duration_seconds=float(duration) if duration is not None else None,
@@ -63,6 +71,95 @@ class CandidateGenerator:
         self.comparison_count += len(candidates)
         return candidates
 
+    def _metadata_candidates(
+        self,
+        *,
+        normalized_title: str,
+        normalized_artists: str,
+        duration_seconds: float | None,
+        limit: int,
+        excluded_local_ids: set[int],
+    ) -> list[dict[str, Any]]:
+        if not normalized_title and not normalized_artists:
+            return []
+        page_limit = max(1, min(int(limit), 100))
+        found: dict[int, tuple[Any, ...]] = {}
+
+        def add_rows(conn: sqlite3.Connection, sql: str, params: list[Any]) -> None:
+            remaining = page_limit - len(found)
+            if remaining <= 0:
+                return
+            for row in conn.execute(sql, [*params, remaining]).fetchall():
+                file_id = int(row[0])
+                if file_id not in excluded_local_ids:
+                    found.setdefault(file_id, row)
+                    if len(found) >= page_limit:
+                        break
+
+        columns = """
+            id, path, title, artists_json, album, duration_seconds, codec,
+            metadata_json, normalized_title, normalized_artists_text,
+            duration_bucket, modified_ns, updated_at
+        """
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                if normalized_title:
+                    add_rows(
+                        conn,
+                        f"""
+                        SELECT {columns} FROM local_audio_files
+                        WHERE availability='available' AND normalized_title=?
+                        {_ACTIVE_ROOT_CLAUSE}
+                        ORDER BY CASE WHEN normalized_artists_text=? THEN 0 ELSE 1 END,
+                                 COALESCE(duration_seconds, 0)
+                        LIMIT ?
+                        """,
+                        [normalized_title, normalized_artists],
+                    )
+                if normalized_title and len(found) < page_limit:
+                    add_rows(
+                        conn,
+                        f"""
+                        SELECT {columns} FROM local_audio_files
+                        WHERE availability='available' AND normalized_title LIKE ?
+                        {_ACTIVE_ROOT_CLAUSE}
+                        ORDER BY CASE WHEN normalized_artists_text=? THEN 0 ELSE 1 END,
+                                 LENGTH(normalized_title)
+                        LIMIT ?
+                        """,
+                        [f"{normalized_title} %", normalized_artists],
+                    )
+                if normalized_artists and duration_seconds is not None and len(found) < page_limit:
+                    bucket = int(round(float(duration_seconds))) // 5
+                    add_rows(
+                        conn,
+                        f"""
+                        SELECT {columns} FROM local_audio_files
+                        WHERE availability='available'
+                          AND normalized_artists_text=?
+                          AND duration_bucket BETWEEN ? AND ?
+                          {_ACTIVE_ROOT_CLAUSE}
+                        ORDER BY ABS(COALESCE(duration_seconds, 0) - ?)
+                        LIMIT ?
+                        """,
+                        [normalized_artists, bucket - 2, bucket + 2, float(duration_seconds)],
+                    )
+                if normalized_artists and len(found) < page_limit:
+                    add_rows(
+                        conn,
+                        f"""
+                        SELECT {columns} FROM local_audio_files
+                        WHERE availability='available' AND normalized_artists_text=?
+                        {_ACTIVE_ROOT_CLAUSE}
+                        ORDER BY CASE WHEN normalized_title=? THEN 0 ELSE 1 END, normalized_title
+                        LIMIT ?
+                        """,
+                        [normalized_artists, normalized_title],
+                    )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to generate Local Library matching candidates.") from exc
+        return [self._row(row) for row in found.values()]
+
     def _exact_id_candidates(self, provider: dict[str, Any]) -> list[dict[str, Any]]:
         if provider.get("provider_id") != "yandex_music":
             return []
@@ -74,12 +171,18 @@ class CandidateGenerator:
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id, path, title, artists_json, album, duration_seconds, codec,
                            metadata_json, normalized_title, normalized_artists_text,
                            duration_bucket, modified_ns, updated_at
                     FROM local_audio_files
-                    WHERE availability IN ('available', 'legacy')
+                    WHERE (
+                        (NOT EXISTS (SELECT 1 FROM local_library_roots WHERE enabled=1)
+                         AND availability IN ('available', 'legacy'))
+                        OR
+                        (availability='available'
+                         AND library_root_id IN (SELECT id FROM local_library_roots WHERE enabled=1))
+                    )
                       AND (
                         file_name=? COLLATE NOCASE OR file_name LIKE ? COLLATE NOCASE
                         OR file_name=? COLLATE NOCASE OR file_name LIKE ? COLLATE NOCASE
@@ -101,7 +204,7 @@ class CandidateGenerator:
                     ),
                 ).fetchall()
         except sqlite3.Error as exc:
-            raise StorageError("Failed to query exact-id matching candidates.") from exc
+            raise StorageError("Failed to query exact-id Local Library candidates.") from exc
         return [self._row(row) for row in rows]
 
     @staticmethod

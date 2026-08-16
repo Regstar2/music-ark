@@ -25,6 +25,8 @@ from .service import DownloadService, DownloadServiceError
 
 _USER_TASK_TYPE = "provider_download"
 _USER_SOURCE_PROVIDER = "yandex_music"
+_TERMINAL_HISTORY_LIMIT = 100
+_ACTIVE_STATUSES = {"queued", "running", "failed", "needs_review"}
 
 
 class _DirectCoverageProxy:
@@ -140,7 +142,45 @@ def _summary_counts(items: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _prune_user_completed_history(
+    service: DownloadService,
+    *,
+    keep: int = _TERMINAL_HISTORY_LIMIT,
+) -> int:
+    """Bound successful task history; Local Library/audit remain authoritative."""
+    keep_count = max(0, int(keep))
+    try:
+        with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
+            with conn:
+                if keep_count == 0:
+                    cursor = conn.execute(
+                        "DELETE FROM download_tasks WHERE status='completed' AND task_type=?",
+                        (_USER_TASK_TYPE,),
+                    )
+                else:
+                    cursor = conn.execute(
+                        """
+                        DELETE FROM download_tasks
+                        WHERE status='completed' AND task_type=?
+                          AND id NOT IN (
+                              SELECT id
+                              FROM download_tasks
+                              WHERE status='completed' AND task_type=?
+                              ORDER BY COALESCE(finished_at, updated_at, created_at) DESC, id DESC
+                              LIMIT ?
+                          )
+                        """,
+                        (_USER_TASK_TYPE, _USER_TASK_TYPE, keep_count),
+                    )
+                return max(0, int(cursor.rowcount))
+    except sqlite3.Error as exc:
+        raise DownloadServiceError(
+            "Failed to prune completed download history.", code="storage_error"
+        ) from exc
+
+
 def _user_summary(service: DownloadService) -> dict[str, Any]:
+    _prune_user_completed_history(service)
     items = _user_items(service, limit=5000)
     return {"counts": _summary_counts(items), "settings": service.settings()}
 
@@ -151,7 +191,18 @@ def _user_tasks(
     status: str,
     limit: int,
 ) -> dict[str, Any]:
-    items = _user_items(service, status=status, limit=5000)
+    clean_status = str(status or "").strip().casefold()
+    if clean_status == "completed":
+        _prune_user_completed_history(service)
+    items = _user_items(service, status=clean_status, limit=5000)
+    # The default Downloads page is operational state, not an unbounded archive.
+    # Completed/cancelled/skipped rows are available only through explicit history filters.
+    if not clean_status:
+        items = [
+            item
+            for item in items
+            if str(item.get("status") or "") in _ACTIVE_STATUSES
+        ]
     items = items[: max(1, min(int(limit), 5000))]
     return {"count": len(items), "items": items}
 
@@ -216,7 +267,8 @@ def _user_run_one(service: DownloadService, task_id: str) -> dict[str, Any]:
             code="worker_busy",
         )
     task = _run_user_task(service, task_id)
-    return {"task": service._task_payload(task)}  # noqa: SLF001
+    pruned = _prune_user_completed_history(service)
+    return {"task": service._task_payload(task), "historyPruned": pruned}  # noqa: SLF001
 
 
 def _user_run(service: DownloadService) -> dict[str, Any]:
@@ -233,7 +285,8 @@ def _user_run(service: DownloadService) -> dict[str, Any]:
             continue
         task = _run_user_task(service, task_id)
         results.append(service._task_payload(task))  # noqa: SLF001
-    return {"processed": len(results), "items": results}
+    pruned = _prune_user_completed_history(service)
+    return {"processed": len(results), "items": results, "historyPruned": pruned}
 
 
 def _user_clear_completed(service: DownloadService) -> dict[str, Any]:

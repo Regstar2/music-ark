@@ -213,10 +213,12 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   bool runCalled = false;
   int runTaskCalls = 0;
   String? lastRunTaskId;
+  final List<String> runTaskIds = [];
   int enqueueCalls = 0;
   int enqueueWantedCalls = 0;
   String? lastEnqueuedId;
   String? selectedPath;
+
   final List<Map<String, dynamic>> items = [
     {
       'id': 'queued-1',
@@ -304,7 +306,24 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   @override
   Future<Map<String, dynamic>> enqueueWanted() async {
     enqueueWantedCalls++;
-    return {'created': 1, 'existing': 0};
+    final id = 'wanted-$enqueueWantedCalls';
+    final item = <String, dynamic>{
+      'id': id,
+      'provider': 'yandex_music',
+      'externalId': 'wanted-$enqueueWantedCalls',
+      'title': 'Wanted Song $enqueueWantedCalls',
+      'artists': ['Artist'],
+      'status': 'queued',
+      'progress': null,
+      'downloadedBytes': 0,
+      'totalBytes': null,
+      'targetPath': r'C:\Music\MusicArk\Wanted.mp3',
+      'error': null,
+      'canRetry': false,
+      'canCancel': true,
+    };
+    items.add(item);
+    return {'created': 1, 'existing': 0, 'items': [item]};
   }
 
   @override
@@ -317,6 +336,21 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   Future<Map<String, dynamic>> runTask(String taskId) async {
     runTaskCalls++;
     lastRunTaskId = taskId;
+    runTaskIds.add(taskId);
+    Map<String, dynamic>? existing;
+    for (final item in items) {
+      if (item['id'] == taskId) {
+        existing = item;
+        break;
+      }
+    }
+    if (existing != null) {
+      existing['status'] = 'completed';
+      existing['progress'] = 1.0;
+      existing['canRetry'] = false;
+      existing['canCancel'] = false;
+      return {'task': existing};
+    }
     return {
       'task': {
         'id': taskId,

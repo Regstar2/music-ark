@@ -2,100 +2,63 @@
 
 All notable project changes are recorded here.
 
-## Unreleased — v0.7.0 Download
+## Unreleased — v0.8.0 Controlled Sync
 
 ### Added
 
-- application-level `DownloadService` that owns Coverage eligibility, persisted queue state, provider execution, Local Library indexing, exact identity linking, and Coverage refresh;
-- strict ordinary eligibility `coverage_status=missing AND user_action=wanted`, including a second eligibility check immediately before execution;
-- persistent queue lifecycle with `queued`, `running`, `completed`, `failed`, `cancelled`, `skipped`, retry, task history, and crash recovery from stale `running` to retryable `failed/interrupted`;
-- real byte progress from streaming HTTP responses, indeterminate progress when `Content-Length` is unavailable, and throttled SQLite progress persistence;
-- cooperative running cancellation through persisted `cancel_requested`, with `.part` cleanup and no fake resume support;
-- persistent download target rooted in Local Library, with per-task target snapshots and a managed `MusicArk` child folder;
-- Windows-safe stable filenames containing the Yandex external ID;
-- efficient `LocalFileIndexer.index_file()` reusing v0.4 `LocalMetadataReader` and `LocalLibraryStorageRepository.apply_scan(... allow_removals=False)` without a full root rescan;
-- exact post-download identity persistence using existing `MatchMethod.EXACT_ID` and a current post-index Local Library fingerprint;
-- dedicated `musicark.download.bridge` commands for summary/tasks/enqueue/bulk/run/retry/cancel/history/settings/target/recovery;
-- Flutter **Загрузки** navigation/page with summary, filters, target selection, real/indeterminate progress, Retry, Cancel, bulk wanted enqueue, and completed-history cleanup;
-- single-track **В загрузки** action on `missing + wanted` Coverage rows;
-- schema `1.7.0` forward migration extending the existing `download_tasks` table and adding `download_settings`;
-- v0.7 Python integration/security/migration/progress/cancellation tests and Flutter Downloads widget tests;
-- Flutter analyze/test job in pull-request CI;
-- `.gitignore` protection against accidental commits of common downloaded audio formats.
+- `SyncService` application boundary coordinating authoritative Coverage, Local/Matching fingerprint state, persisted Sync plans and the production v0.7 `DownloadService`;
+- read-only SQL/batched Sync Planner for all / Liked / one active Yandex Playlist scope with provider-identity and duplicate-occurrence deduplication;
+- production operations `ENQUEUE_DOWNLOAD`, `REVIEW_IDENTITY`, `REVIEW_VARIANT`, `USER_DECISION_REQUIRED`, and informational `LOCAL_ONLY`;
+- immutable plan snapshots with planner version, scope, exact target, input fingerprint, summary, persisted operation state/results and plan history;
+- staleness detection for active Yandex membership, Matching/Local state, triage, Variant review state and target changes, excluding playback state;
+- explicit-confirmation enqueue-only Apply with per-operation execution-time revalidation and active task deduplication;
+- safe legacy compatibility: historical enum values/rows remain readable while v0.8 refuses legacy upload/replace/metadata plans;
+- schema `1.8.0` forward migration extending existing `sync_plans` / `sync_operations` in place;
+- audit events for plan creation/staleness/cancel/apply and operation enqueue/skip;
+- Flutter **Синхронизация** navigation/page with scope/target, Current/Projected coverage, grouped blockers/operations, stale/legacy banners, confirmation, history/cancel and Matching/Downloads navigation;
+- Python integration/migration/safety tests and Flutter Controlled Sync widget/navigation tests;
+- `docs/versions/v0.8.0.md` plus updated architecture, roadmap, manual plan and release checklist.
 
-### Changed
+### Policy / safety
 
-- Python and Flutter versions advanced to `0.7.0`;
-- the existing `YandexMusicDownloadProvider` now supports explicit secure token injection, real streaming progress, cooperative cancellation, atomic `.part` promotion, provider error categories, and path-safe filenames;
-- production Download reads credentials from `SystemCredentialStore`; legacy environment/local-properties lookup remains only for compatibility with older tooling/reference flows;
-- v0.6 is now the completed Coverage input layer and v0.8 Sync remains future work.
+- only current `missing + wanted` is the default bulk acquisition input;
+- `missing + unreviewed` requires a decision; ignored Missing is never automatically downloaded;
+- identity conflicts/not-analyzed state and Variant issues remain review work;
+- `DIFFERENT_VERSION` never triggers a replacement download;
+- Sync Apply delegates to `DownloadService.enqueue()` and never drains the global Downloads queue;
+- local delete/move/rename/tag edits and Yandex likes/playlists/upload/replacement remain out of scope and must stay zero.
 
-### Post-download quality gate
+## v0.7.0 — Download + Local Playback
 
-A task becomes `completed` only after all of the following succeed:
-
-```text
-atomic valid file
-→ normal Local Library index with non-NULL library_root_id
-→ exact provider/local accepted identity
-→ Coverage refresh = covered
-```
-
-HTTP success alone is not completion. Exact acquisition identity does not run fuzzy candidate selection and does not fabricate `Variant = SAME`.
-
-### Safety / scope
-
-- reference cache `.musicark/downloads/yandex/` remains separate from the user Download Library;
-- token/direct download URLs are not persisted in queue payloads, SQLite, filenames, UI, or audit details;
-- no YouTube ripping, VK scraping, torrent search/download, pirate index, DRM circumvention, subscription/access bypass, or automatic third-party fallback is introduced;
-- existing local music remains read-only; v0.7 only creates new downloaded files inside the selected managed destination;
-- baseline queue execution is intentionally sequential (`max concurrency = 1`) for reliability.
+- added production `DownloadService`, persistent user queue/target, secure authorized provider transfer, byte progress/cancel/recovery, exact Local indexing/link/Coverage rebase, Downloads UI and embedded Local Playback;
+- direct single-track Missing download remains explicit user intent and does not require or rewrite triage;
+- schema advanced to `1.7.0`.
 
 ## v0.6.0 — Missing Tracks / Library Coverage
 
-### Added
-
-- SQL-backed Coverage deriving `covered`, `missing`, `needs_review`, and `not_analyzed` from active Yandex membership plus authoritative matching state;
-- independent identity coverage, Variant state, and persistent `wanted / ignored / unreviewed` triage;
-- global provider-identity deduplication across Liked/playlists, scopes/order, search/sort/filter/pagination, details and matching navigation;
-- schema `1.6.0` forward migration adding `provider_track_actions`;
-- Flutter **Недостающие** section and Python/Flutter regression coverage.
-
-### Policy
-
-- only current authoritative `UNMATCHED` without an accepted local link is Missing;
-- accepted automatic/manual identity is Covered;
-- conflict/stale/invalid accepted state is Needs Review;
-- absent/stale automatic state is Not Analyzed;
-- Variant states never turn an accepted identity into Missing;
-- strict reference cache never establishes Local Library coverage.
+- added SQL-backed `covered / missing / needs_review / not_analyzed` Coverage and independent `wanted / ignored / unreviewed` triage;
+- schema advanced to `1.6.0`.
 
 ## v0.5.1 — Variant / Altered Track Detection
 
-- added independent `SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED` recording/version analysis;
-- semantic variant metadata, strict exact-reference resolution/acquisition, optional ffmpeg decoded-audio comparison, bounded alignment, segment evidence, altered regions, cache/fingerprints, bridge/UI, and schema `1.5.0`;
-- identity confidence remains independent from Variant/audio evidence;
-- technical failures never become `DIFFERENT_VERSION`, and unclear evidence prefers `UNCERTAIN` over false `SAME`.
+- added independent `SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED` recording/version analysis; schema `1.5.0`.
 
 ## v0.5.0 — Identity Matching
 
-- added bounded candidate generation, transparent scoring, ambiguity handling, automatic/manual match persistence, stale-link invalidation, fingerprints, matching bridge/UI, and schema `1.4.0`;
-- automatic matching remains precision-first: false positive identity is worse than conflict/unmatched.
+- added precision-first persisted identity matching, conflicts/manual decisions and fingerprints; schema `1.4.0`.
 
 ## v0.4.0 — Local Library
 
-- added multiple Local Library roots, read-only recursive/incremental scan, structured metadata via mutagen, SQL search/sort/pagination, native Windows folder picker, Local Library UI, and schema `1.3.0`;
-- removing a root removes index state only; existing user audio is not mutated.
+- added multiple roots, read-only incremental indexing and Local Library UI; schema `1.3.0`.
 
 ## v0.3.0 — Yandex Library / Playlists
 
-- added cache-first Yandex Liked/playlists metadata/content, ordered playlist membership, generic collection snapshots, stale playlist cleanup, bridge/UI, and schema `1.2.0`.
+- added cache-first Liked/playlists metadata/content and active collection snapshots; schema `1.2.0`.
 
 ## v0.2.0 — Persistent Library
 
-- added secure Yandex token persistence through OS keyring, persistent Liked cache, cache-first startup/refresh, and schema `1.1.x` migrations.
+- added secure credential persistence and persistent Liked cache; schema `1.1.x`.
 
 ## v0.1.0 — Verified Yandex Likes MVP
 
-- focused Flutter sign-in/Liked UI, Python bridge, real Yandex account/liked-track provider flow, tests, and Windows setup documentation;
-- real Windows launch, token authentication, and Liked retrieval were manually confirmed on 2026-08-11.
+- added focused Flutter sign-in/Liked UI, Python bridge and initial Yandex provider/storage flow.

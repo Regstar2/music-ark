@@ -10,11 +10,13 @@ class DownloadPage extends StatefulWidget {
   const DownloadPage({
     super.key,
     required this.bridge,
+    this.active = true,
     this.folderPicker = const SystemLocalFolderPicker(),
     this.fileActions = const SystemLocalFileActions(),
   });
 
   final DownloadBridgeClient bridge;
+  final bool active;
   final LocalFolderPicker folderPicker;
   final LocalFileActions fileActions;
 
@@ -34,6 +36,7 @@ class _DownloadPageState extends State<DownloadPage> {
   String _filter = '';
   bool _loading = true;
   bool _workerActive = false;
+  bool _stopWorker = false;
   String? _error;
   Map<String, dynamic> _summary = const {};
   Map<String, dynamic> _settings = const {};
@@ -48,7 +51,20 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   @override
+  void didUpdateWidget(covariant DownloadPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active && !widget.active) {
+      // IndexedStack keeps this State alive off-screen. Never let a queue worker
+      // silently drain old tasks after the user leaves Downloads.
+      _stopWorker = true;
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
+  }
+
+  @override
   void dispose() {
+    _stopWorker = true;
     _pollTimer?.cancel();
     super.dispose();
   }
@@ -110,19 +126,46 @@ class _DownloadPageState extends State<DownloadPage> {
     }
   }
 
+  List<String> _idsFromPayload(Map<String, dynamic> payload) {
+    final raw = payload['items'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => (item['id'] ?? '').toString().trim())
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<List<String>> _queuedTaskIds() async {
+    final payload = await widget.bridge.tasks(status: 'queued', limit: 5000);
+    return _idsFromPayload(payload);
+  }
+
   Future<void> _enqueueWanted() async {
+    if (_workerActive || !widget.active) return;
     if (!await _ensureTarget()) return;
     try {
+      // Snapshot existing queue first. "Download all Wanted" may enqueue thousands
+      // of new tasks, but it must never auto-run unrelated leftovers from old tests.
+      final before = (await _queuedTaskIds()).toSet();
       final result = await widget.bridge.enqueueWanted();
       final created = (result['created'] as num?)?.toInt() ?? 0;
       final existing = (result['existing'] as num?)?.toInt() ?? 0;
+      final after = await _queuedTaskIds();
+      final newTaskIds = after.where((id) => !before.contains(id)).toList(growable: false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('К скачиванию: ${created + existing}')),
+          SnackBar(
+            content: Text(
+              newTaskIds.isEmpty && existing > 0
+                  ? 'Новых загрузок нет. Старые задачи оставлены в очереди.'
+                  : 'Добавлено в текущую загрузку: ${newTaskIds.length}',
+            ),
+          ),
         );
       }
-      if (created + existing > 0) {
-        await _runQueue(skipTargetCheck: true);
+      if (created > 0 && newTaskIds.isNotEmpty) {
+        await _runQueue(skipTargetCheck: true, taskIds: newTaskIds);
       } else {
         await _load();
       }
@@ -131,17 +174,49 @@ class _DownloadPageState extends State<DownloadPage> {
     }
   }
 
-  Future<void> _runQueue({bool skipTargetCheck = false}) async {
-    if (_workerActive) return;
+  Future<void> _runQueue({
+    bool skipTargetCheck = false,
+    Iterable<String>? taskIds,
+  }) async {
+    if (_workerActive || !widget.active) return;
     if (!skipTargetCheck && !await _ensureTarget()) return;
+
+    final ids = taskIds == null
+        ? await _queuedTaskIds()
+        : taskIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) {
+      await _load();
+      return;
+    }
+
     setState(() {
       _workerActive = true;
+      _stopWorker = false;
       _error = null;
     });
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 800), (_) => _load());
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
+      if (widget.active && !_stopWorker) _load();
+    });
     try {
-      await widget.bridge.runQueue();
+      // Run one persisted task at a time. Unlike bridge.runQueue(), this gives the
+      // UI a cancellation boundary between tracks and prevents an off-screen page
+      // from draining thousands of stale queued tasks.
+      for (final taskId in ids) {
+        if (_stopWorker || !widget.active) break;
+        try {
+          await widget.bridge.runTask(taskId);
+        } on DownloadBridgeException catch (error) {
+          if (error.code == 'invalid_state') continue;
+          if (error.code == 'worker_busy') {
+            if (mounted) {
+              setState(() => _error = 'Уже выполняется другая загрузка. Очередь остановлена.');
+            }
+            break;
+          }
+          rethrow;
+        }
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -153,9 +228,11 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Future<void> _retry(String taskId) async {
+    if (_workerActive || !widget.active) return;
     try {
       await widget.bridge.retry(taskId);
-      await _runQueue();
+      // Retry means this task only. It must not wake unrelated queued work.
+      await _runQueue(taskIds: [taskId]);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -164,6 +241,47 @@ class _DownloadPageState extends State<DownloadPage> {
   Future<void> _cancel(String taskId) async {
     try {
       await widget.bridge.cancel(taskId);
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _cancelQueued() async {
+    if (_workerActive) return;
+    try {
+      final ids = await _queuedTaskIds();
+      if (!mounted) return;
+      if (ids.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Очередь уже пуста.')),
+        );
+        return;
+      }
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Отменить очередь?'),
+          content: Text(
+            'Будут отменены ${ids.length} ожидающих загрузок. Уже скачанные файлы не удаляются.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Назад'),
+            ),
+            FilledButton(
+              key: const Key('downloads-cancel-queued-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Отменить очередь'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      for (final id in ids) {
+        await widget.bridge.cancel(id);
+      }
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -239,11 +357,15 @@ class _DownloadPageState extends State<DownloadPage> {
                   ],
                   const SizedBox(height: 12),
                   if (_items.isEmpty)
-                    const Card(
-                      key: Key('downloads-empty'),
+                    Card(
+                      key: const Key('downloads-empty'),
                       child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text('История загрузок пуста.'),
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          _filter.isEmpty
+                              ? 'Активных загрузок нет.'
+                              : 'Для выбранного фильтра загрузок нет.',
+                        ),
                       ),
                     )
                   else
@@ -282,7 +404,7 @@ class _DownloadPageState extends State<DownloadPage> {
         subtitle: configured ? Text('${_settings['targetPath']}') : null,
         trailing: TextButton(
           key: const Key('downloads-select-target'),
-          onPressed: _chooseTarget,
+          onPressed: _workerActive ? null : _chooseTarget,
           child: Text(configured ? 'Изменить' : 'Выбрать'),
         ),
       ),
@@ -290,27 +412,35 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Widget _actions() {
+    final queued = (_summary['queued'] as num?)?.toInt() ?? 0;
     return Wrap(
       spacing: 10,
       runSpacing: 8,
       children: [
         FilledButton.icon(
           key: const Key('downloads-enqueue-wanted'),
-          onPressed: _enqueueWanted,
+          onPressed: _workerActive || !widget.active ? null : _enqueueWanted,
           icon: const Icon(Icons.download_for_offline_outlined),
           label: const Text('Скачать все «Нужные»'),
         ),
         FilledButton.tonalIcon(
           key: const Key('downloads-run'),
-          onPressed: _workerActive ? null : _runQueue,
+          onPressed: _workerActive || !widget.active ? null : _runQueue,
           icon: _workerActive
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.play_arrow),
           label: const Text('Продолжить очередь'),
         ),
+        if (queued > 0)
+          TextButton.icon(
+            key: const Key('downloads-cancel-queued'),
+            onPressed: _workerActive ? null : _cancelQueued,
+            icon: const Icon(Icons.clear_all),
+            label: Text('Отменить очередь ($queued)'),
+          ),
         TextButton(
           key: const Key('downloads-clear-completed'),
-          onPressed: _clearCompleted,
+          onPressed: _workerActive ? null : _clearCompleted,
           child: const Text('Очистить завершённые'),
         ),
       ],
@@ -440,7 +570,7 @@ class _DownloadPageState extends State<DownloadPage> {
                   if (task['canRetry'] == true)
                     TextButton(
                       key: Key('download-retry-$id'),
-                      onPressed: () => _retry(id),
+                      onPressed: _workerActive ? null : () => _retry(id),
                       child: const Text('Повторить'),
                     ),
                   if (task['canCancel'] == true)

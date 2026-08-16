@@ -24,11 +24,36 @@ class MatchingResultQueries:
         status: str,
         search: str,
         sort: str,
+        collection_id: str = "",
     ) -> tuple[list[dict[str, Any]], int]:
         page_limit = max(1, min(int(limit), 500))
         page_offset = max(0, int(offset))
         where = ["mr.provider_id=?"]
         params: list[Any] = [provider_id]
+        if collection_id:
+            where.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM provider_collection_items pci
+                    JOIN provider_collection_snapshots pcs
+                      ON pcs.provider_id=pci.provider_id
+                     AND pcs.collection_id=pci.collection_id
+                    WHERE pcs.active=1
+                      AND pci.provider_id=mr.provider_id
+                      AND pci.collection_id=?
+                      AND CASE
+                            WHEN json_valid(pci.payload_json)
+                            THEN COALESCE(
+                                NULLIF(CAST(json_extract(pci.payload_json,'$.external_id') AS TEXT),''),
+                                pci.external_id
+                            )
+                            ELSE pci.external_id
+                          END = mr.external_id
+                )
+                """
+            )
+            params.append(collection_id)
         if status in {"matched", "conflict", "unmatched"}:
             where.append("mr.status=?")
             params.append(status)

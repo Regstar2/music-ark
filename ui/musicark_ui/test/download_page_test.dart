@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,18 +21,36 @@ class FakeFileActions implements LocalFileActions {
   Future<void> reveal(String path) async => revealed.add(path);
 }
 
+class BlockingDownloadBridge extends FakeDownloadBridge {
+  final Completer<void> firstStarted = Completer<void>();
+  final Completer<void> releaseFirst = Completer<void>();
+  bool _blocked = false;
+
+  @override
+  Future<Map<String, dynamic>> runTask(String taskId) async {
+    if (!_blocked) {
+      _blocked = true;
+      firstStarted.complete();
+      await releaseFirst.future;
+    }
+    return super.runTask(taskId);
+  }
+}
+
 void main() {
   Future<void> pumpDownloads(
     WidgetTester tester,
     FakeDownloadBridge bridge, {
     LocalFolderPicker? picker,
     LocalFileActions? fileActions,
+    bool active = true,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
     await tester.pumpWidget(
       MaterialApp(
         home: DownloadPage(
           bridge: bridge,
+          active: active,
           folderPicker: picker ?? FakeLocalFolderPicker(r'C:\Music'),
           fileActions: fileActions ?? FakeFileActions(),
         ),
@@ -53,6 +73,7 @@ void main() {
     expect(find.byKey(const Key('download-progress-running-1')), findsOneWidget);
     expect(find.byKey(const Key('download-retry-failed-1')), findsOneWidget);
     expect(find.byKey(const Key('download-cancel-queued-1')), findsOneWidget);
+    expect(find.byKey(const Key('downloads-cancel-queued')), findsOneWidget);
 
     await tester.binding.setSurfaceSize(null);
   });
@@ -90,13 +111,23 @@ void main() {
     await tester.binding.setSurfaceSize(null);
   });
 
-  testWidgets('retry and queued cancel update persisted view', (tester) async {
+  testWidgets('retry runs only the selected task and does not wake old queue', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
     await tester.tap(find.byKey(const Key('download-retry-failed-1')));
     await tester.pumpAndSettle();
-    expect(bridge.items.firstWhere((e) => e['id'] == 'failed-1')['status'], 'queued');
+
+    expect(bridge.runCalled, isFalse);
+    expect(bridge.runTaskIds, ['failed-1']);
+    expect(
+      bridge.items.firstWhere((e) => e['id'] == 'failed-1')['status'],
+      'completed',
+    );
+    expect(
+      bridge.items.firstWhere((e) => e['id'] == 'queued-1')['status'],
+      'queued',
+    );
 
     await tester.tap(find.byKey(const Key('download-cancel-queued-1')));
     await tester.pumpAndSettle();
@@ -105,14 +136,86 @@ void main() {
     await tester.binding.setSurfaceSize(null);
   });
 
-  testWidgets('bulk wanted action starts the queue automatically', (tester) async {
+  testWidgets('bulk wanted runs only tasks created by that action', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
     await tester.tap(find.byKey(const Key('downloads-enqueue-wanted')));
     await tester.pumpAndSettle();
+
     expect(bridge.enqueueWantedCalls, 1);
-    expect(bridge.runCalled, isTrue);
+    expect(bridge.runCalled, isFalse);
+    expect(bridge.runTaskIds, ['wanted-1']);
+    expect(
+      bridge.items.firstWhere((e) => e['id'] == 'queued-1')['status'],
+      'queued',
+      reason: 'pre-existing queue must not be auto-run by a new bulk action',
+    );
+
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('explicit cancel queue cancels waiting tasks without deleting files', (tester) async {
+    final bridge = FakeDownloadBridge();
+    await pumpDownloads(tester, bridge);
+
+    await tester.tap(find.byKey(const Key('downloads-cancel-queued')));
+    await tester.pumpAndSettle();
+    expect(find.text('Отменить очередь?'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('downloads-cancel-queued-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(bridge.items.firstWhere((e) => e['id'] == 'queued-1')['status'], 'cancelled');
+    expect(find.text('В очереди: 0'), findsOneWidget);
+
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('leaving Downloads stops queue after the current track', (tester) async {
+    final bridge = BlockingDownloadBridge();
+    bridge.items.add({
+      'id': 'queued-2',
+      'provider': 'yandex_music',
+      'externalId': '104',
+      'title': 'Second Queued Song',
+      'artists': ['Artist'],
+      'status': 'queued',
+      'progress': null,
+      'downloadedBytes': 0,
+      'totalBytes': null,
+      'targetPath': r'C:\Music\Second.mp3',
+      'error': null,
+      'canRetry': false,
+      'canCancel': true,
+    });
+
+    await tester.binding.setSurfaceSize(const Size(1500, 900));
+    await tester.pumpWidget(
+      MusicArkDesktopApp(
+        bridge: FakeMusicArkBridge(startSignedIn: true),
+        downloadBridge: bridge,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-downloads')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('downloads-run')));
+    await tester.pump();
+    await bridge.firstStarted.future;
+
+    await tester.tap(find.text('Яндекс Музыка').first);
+    await tester.pump();
+    bridge.releaseFirst.complete();
+    await tester.pumpAndSettle();
+
+    expect(bridge.runTaskIds, ['queued-1']);
+    expect(
+      bridge.items.firstWhere((e) => e['id'] == 'queued-2')['status'],
+      'queued',
+      reason: 'off-screen Downloads page must not keep draining the queue',
+    );
 
     await tester.binding.setSurfaceSize(null);
   });

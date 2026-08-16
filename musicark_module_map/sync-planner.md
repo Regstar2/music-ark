@@ -2,44 +2,42 @@
 
 ## Назначение
 
-Модуль построения плана действий перед изменениями коллекции.
+Production planner MusicArk v0.8 строит **immutable dry-run Sync Plan** для направления `Yandex desired → Local actual`.
 
-## Отвечает за
+## Authoritative inputs
 
-- сравнивать состояние сервиса и локального архива;
-- использовать предыдущие снимки из [[storage]];
-- получать связи из [[matching-engine]];
-- создавать SyncOperation;
-- создавать [[download-task]] для будущих загрузок;
-- отправлять конфликты в [[conflict-resolver]];
-- передавать подтверждённый план в [[sync-executor]];
+Planner не определяет наличие локальной копии по имени файла и не повторяет Matching/Coverage. Он читает:
+
+- active Yandex collection membership;
+- `CoverageRepository` (`covered / missing / needs_review / not_analyzed`);
+- `matching_results` и accepted `track_links` через Coverage state;
+- `provider_track_actions` (`wanted / ignored / unreviewed`);
+- `track_variant_results`;
+- Local Library fingerprint/state;
+- active production `download_tasks` только для queue deduplication;
+- текущий production download target.
+
+Scope: вся активная Yandex Library, `Мне нравится` или один active Yandex Playlist. Identity — `provider_id + external_id`; duplicate membership не создаёт duplicate operation.
+
+## Production operations v0.8
+
+- `ENQUEUE_DOWNLOAD` — только `missing + wanted`;
+- `USER_DECISION_REQUIRED` — `missing + unreviewed`;
+- `REVIEW_IDENTITY` — identity conflict / matching required;
+- `REVIEW_VARIANT` — covered track с uncertain/altered/different-version result;
+- `LOCAL_ONLY` — только informational; для playlist это `Outside this scope`.
+
+Covered и ignored Missing отражаются в summary без тысяч NOOP rows.
+
+## Safety
+
+Создание плана не запускает Matching, Variant verification, HTTP download, filesystem mutations или Yandex mutations. Legacy enum values сохраняются для чтения старых rows, но новый planner их не генерирует.
+
+Plan fingerprint включает planner version, scope, active membership, Coverage/Matching/Local state, triage, Variant state и exact download target. Playback state исключён. Download queue не является snapshot truth: duplicate queue state повторно проверяется непосредственно перед enqueue.
 
 ## Связи
 
-- [[sync-planner]] -> [[sync-executor]]
-- [[sync-planner]] -> [[download-system]]
-- [[sync-planner]] -> [[download-task]]
-- [[sync-planner]] -> [[matching-engine]]
-- [[sync-planner]] -> [[conflict-resolver]]
-- [[sync-planner]] -> [[ui]]
-- [[sync-planner]] -> [[history-audit-log]]
-- [[sync-planner]] -> [[storage]]
-
-## Правила
-
-[[sync-planner]] не выполняет опасные действия. Он только строит план. Удаление, замена и массовая загрузка — только после подтверждения.
-
-## Реализация v0.8
-
-В `v0.8-sync-planner` реализован `SyncPlanner` в `src/musicark/sync/planner.py`:
-
-- строит `SyncPlan` и `SyncOperation` в режиме dry-run;
-- анализирует remote/local состояние и формирует операции:
-  - `download_track`
-  - `create_download_task`
-  - `link_local`
-  - `needs_review`
-  - `mark_unavailable`
-  - `update_metadata_candidate`
-- сохраняет план в [[storage]];
-- не выполняет опасные действия автоматически.
+- [[sync-planner]] → Coverage/Matching/Local authoritative state;
+- [[sync-planner]] → [[storage]] (`sync_plans`, `sync_operations`);
+- [[sync-planner]] → [[sync-executor]] только после preview/confirmation;
+- [[sync-planner]] → [[history-audit-log]].

@@ -29,7 +29,7 @@ class DatabaseTests(unittest.TestCase):
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
 
-            self.assertEqual(version, "1.7.0")
+            self.assertEqual(version, "1.8.0")
             self.assertIn("app_metadata", tables)
             self.assertIn("audit_log", tables)
             self.assertIn("providers", tables)

@@ -1,89 +1,38 @@
 # MusicArk — карта версий
 
-## Назначение
+## Актуальная product sequence
 
-Эта карта описывает последовательность разработки MusicArk по версиям.
-
-Каждая версия является отдельным этапом с понятной целью, границами, зависимостями и связями с модулями из карты проекта.
-
-## Главная идея roadmap
+Эта карта синхронизирована с фактически реализованной desktop-линейкой. Старые файлы с ранними speculative названиями этапов сохранены как исторические материалы, но **не являются текущим roadmap**.
 
 ```text
-Сначала строим устойчивое ядро и модели.
-Потом подключаем Яндекс Музыку.
-Потом добавляем локальный архив.
-Потом выносим загрузки в универсальную систему.
-Потом делаем UI.
-Потом Android и будущие расширения.
+v0.1   — Yandex Likes MVP
+v0.2   — Persistent Library
+v0.3   — Yandex Library / Playlists
+v0.4   — Local Library
+v0.5.0 — Identity Matching
+v0.5.1 — Variant Detection
+v0.6   — Missing Tracks / Coverage
+v0.7   — Download + Local Playback
+v0.8   — Controlled Sync
 ```
 
-## Последовательность версий
+## Current
 
-- [[v0.1-core-foundation]]
-- [[v0.2-provider-architecture]]
-- [[v0.3-yandex-scan]]
-- [[v0.4-local-library]]
-- [[v0.5-download-system]]
-- [[v0.6-yandex-download]]
-- [[v0.7-matching]]
-- [[v0.8-sync-planner]]
-- [[v0.9-desktop-ui]]
-- [[v0.10-metadata-editor]]
-- [[v0.11-restore-upload-experimental]]
-- [[v1.0-stable-desktop-mvp]]
-- [[v1.1-android-mvp]]
-- [[future-torrent-support]]
-- [[future-providers-support]]
+[[v0.8-sync-planner]] соответствует production `v0.8.0 — Controlled Sync`: Yandex Library задаёт desired state, Local Library/Coverage — actual state, а пользователь получает immutable preview, blockers, explicit confirmation, stale-plan protection и enqueue-only safe Apply через production `DownloadService`.
 
-## Версионная цепочка
+## После v0.8
 
-```text
-[[v0.1-core-foundation]]
--> [[v0.2-provider-architecture]]
--> [[v0.3-yandex-scan]]
--> [[v0.4-local-library]]
--> [[v0.5-download-system]]
--> [[v0.6-yandex-download]]
--> [[v0.7-matching]]
--> [[v0.8-sync-planner]]
--> [[v0.9-desktop-ui]]
--> [[v0.10-metadata-editor]]
--> [[v0.11-restore-upload-experimental]]
--> [[v1.0-stable-desktop-mvp]]
--> [[v1.1-android-mvp]]
-```
+Следующий крупный product scope **TBD / stabilization**. Файлы `v0.9-*`, `v0.10-*`, `v0.11-*`, `v1.*` в этой папке — ранние исторические идеи и не считаются обещанным порядком разработки.
 
-## Будущие направления
+## Ключевые актуальные модули
 
-- [[future-torrent-support]]
-- [[future-providers-support]]
-
-## Ключевые модули из карты проекта
-
-- [[core]]
-- [[providers]]
-- [[provider-capabilities]]
-- [[yandex-music-provider]]
-- [[local-library-provider]]
-- [[download-system]]
-- [[download-task]]
-- [[download-provider]]
 - [[local-archive]]
-- [[local-audio-file]]
 - [[matching-engine]]
 - [[sync-planner]]
 - [[sync-executor]]
-- [[metadata-engine]]
-- [[ui]]
-- [[platform-bridge]]
 - [[storage]]
 - [[history-audit-log]]
-- [[risks]]
+- [[ui]]
+- [[platform-bridge]]
 
-## Важное правило
-
-Версии должны строиться вертикально, но без архитектурного самоубийства.
-
-То есть сначала делаем реально работающий путь для Яндекс Музыки, но модели называем не `YandexEverything`, а универсально: [[track]], [[track-source]], [[download-task]], [[local-audio-file]].
-
-Два дня экономии на названиях обычно превращаются в два месяца рефакторинга. Прекрасная сделка, если ненавидеть себя будущего.
+Главное правило v0.8: Sync координирует существующие authoritative layers и не переизобретает Coverage, Matching, Download или Local indexing.

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from musicark.core.config import load_config
 from musicark.credentials import CredentialStore, SystemCredentialStore
+from musicark.matching.scope import MatchingScopeState
 from musicark.providers.yandex_music_provider import (
     YandexMusicProvider,
     YandexTokenMissingError,
@@ -31,8 +32,10 @@ class YandexLibraryService:
         self._base_dir = base_dir
         self._credentials = credential_store or SystemCredentialStore()
         database_path = self._resolve_database_path()
+        self._database_path = database_path
         self._liked_cache = liked_cache or LikedCacheRepository(database_path)
         self._playlist_cache = playlist_cache or PlaylistCacheRepository(database_path)
+        self._matching_scope = MatchingScopeState(database_path)
         self._provider_factory = provider_factory
 
     def _resolve_database_path(self) -> Path:
@@ -133,6 +136,8 @@ class YandexLibraryService:
         token = self._credentials.get_token()
         liked = self._liked_cache.load()
         playlists = self._playlist_cache.list_metadata()
+        if token:
+            self._matching_scope.ensure_default()
         return self._library_state(
             has_token=token is not None,
             account=liked.account,
@@ -156,6 +161,7 @@ class YandexLibraryService:
         try:
             liked_diff = self._liked_cache.replace(account, tracks)
             playlists_diff = self._playlist_cache.replace_index(playlists)
+            self._matching_scope.set_liked()
         except Exception:
             self._credentials.delete_token()
             raise
@@ -177,6 +183,7 @@ class YandexLibraryService:
         account = provider.auth_check()
         tracks = provider.list_tracks()
         diff = self._liked_cache.replace(account, tracks)
+        self._matching_scope.set_liked()
         return self._library_state(
             has_token=True,
             account=account,
@@ -207,6 +214,10 @@ class YandexLibraryService:
         snapshot = self._playlist_cache.load(external_id)
         liked = self._liked_cache.load()
         token = self._credentials.get_token()
+        # A stale/deleted cached playlist can still be queried by legacy callers; only
+        # an active playlist is allowed to become the current Matching scope.
+        if snapshot.metadata:
+            self._matching_scope.set_playlist(external_id)
         return {
             "session": self._session(token is not None, liked.account),
             "playlist": snapshot.metadata,
@@ -220,6 +231,7 @@ class YandexLibraryService:
         diff = self._playlist_cache.replace_playlist(playlist, tracks)
         snapshot = self._playlist_cache.load(external_id)
         liked = self._liked_cache.load()
+        self._matching_scope.set_playlist(external_id)
         return {
             "session": self._session(True, liked.account),
             "playlist": snapshot.metadata,
@@ -240,6 +252,7 @@ class YandexLibraryService:
 
         liked_diff = self._liked_cache.replace(account, tracks)
         playlists_diff = self._playlist_cache.replace_index(playlists)
+        self._matching_scope.ensure_default()
         return self._library_state(
             has_token=True,
             account=account,
@@ -258,6 +271,7 @@ class YandexLibraryService:
         self._credentials.delete_token()
         self._liked_cache.clear()
         self._playlist_cache.clear()
+        self._matching_scope.clear()
         liked = self._liked_cache.load()
         return self._library_state(
             has_token=False,

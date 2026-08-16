@@ -27,8 +27,7 @@ class _SyncPageState extends State<SyncPage> {
   String? _error;
   List<Map<String, dynamic>> _scopes = const [];
   Map<String, dynamic> _target = const {};
-  Map<String, dynamic>? _plan;
-  List<Map<String, dynamic>> _history = const [];
+  Map<String, dynamic>? _diff;
   String _scopeType = 'all';
   String? _scopeId;
 
@@ -39,24 +38,53 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final results = await Future.wait([
         widget.bridge.scopes(),
         widget.bridge.target(),
         widget.bridge.current(),
-        widget.bridge.history(),
       ]);
       if (!mounted) return;
-      final rawPlan = results[2]['plan'];
+
+      final scopes = _maps(results[0]['items']);
+      final target = Map<String, dynamic>.from(results[1]);
+      final rawCurrent = results[2]['plan'];
+      final current =
+          rawCurrent is Map ? Map<String, dynamic>.from(rawCurrent) : null;
+
+      var scopeType = 'all';
+      String? scopeId;
+      if (current != null && current['legacy'] != true) {
+        final candidateType = '${current['scopeType'] ?? 'all'}';
+        final candidateId = _nullableString(current['scopeId']);
+        if (_scopeExists(scopes, candidateType, candidateId)) {
+          scopeType = candidateType;
+          scopeId = candidateId;
+        }
+      }
+      if (!_scopeExists(scopes, scopeType, scopeId) && scopes.isNotEmpty) {
+        scopeType = '${scopes.first['type'] ?? 'all'}';
+        scopeId = _nullableString(scopes.first['id']);
+      }
+
       setState(() {
-        _scopes = _maps(results[0]['items']);
-        _target = Map<String, dynamic>.from(results[1]);
-        _plan = rawPlan is Map ? Map<String, dynamic>.from(rawPlan) : null;
-        _history = _maps(results[3]['items']);
-        _error = null;
+        _scopes = scopes;
+        _target = target;
+        _scopeType = scopeType;
+        _scopeId = scopeId;
+        _diff = _currentCanBeShown(current, scopeType, scopeId) ? current : null;
         _loading = false;
       });
+
+      if (_diff == null || _needsRefresh(_diff!)) {
+        await _refreshDiff();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -66,68 +94,112 @@ class _SyncPageState extends State<SyncPage> {
     }
   }
 
+  bool _currentCanBeShown(
+    Map<String, dynamic>? current,
+    String scopeType,
+    String? scopeId,
+  ) {
+    if (current == null || current['legacy'] == true) return false;
+    return '${current['scopeType'] ?? ''}' == scopeType &&
+        _nullableString(current['scopeId']) == scopeId;
+  }
+
+  bool _needsRefresh(Map<String, dynamic> diff) {
+    final status = '${diff['status'] ?? ''}';
+    return status != 'planned';
+  }
+
+  Future<void> _refreshDiff() async {
+    await _run(() async {
+      _diff = await widget.bridge.createPlan(
+        scopeType: _scopeType,
+        scopeId: _scopeType == 'all' ? null : _scopeId,
+      );
+    });
+  }
+
   Future<void> _chooseTarget() async {
     final path = await widget.folderPicker.pickDirectory();
     if (path == null || path.trim().isEmpty) return;
     await _run(() async {
       _target = await widget.bridge.setTarget(path);
-      if (_plan != null) {
-        _plan = await widget.bridge.plan('${_plan!['id']}');
-      }
-    });
-  }
-
-  Future<void> _createPlan() async {
-    await _run(() async {
-      _plan = await widget.bridge.createPlan(
+      _diff = await widget.bridge.createPlan(
         scopeType: _scopeType,
         scopeId: _scopeType == 'all' ? null : _scopeId,
       );
-      _history = _maps((await widget.bridge.history())['items']);
     });
   }
 
-  Future<void> _refreshPlan() async {
-    final plan = _plan;
-    if (plan == null) return;
-    await _run(() async {
-      _plan = await widget.bridge.plan('${plan['id']}');
-      _history = _maps((await widget.bridge.history())['items']);
+  Future<void> _changeScope(String value) async {
+    final parts = value.split('|');
+    final nextType = parts.first;
+    final nextId =
+        parts.length > 1 && parts[1].isNotEmpty ? parts[1] : null;
+    if (nextType == _scopeType && nextId == _scopeId) return;
+    setState(() {
+      _scopeType = nextType;
+      _scopeId = nextId;
+      _diff = null;
     });
-  }
-
-  Future<void> _cancelPlan() async {
-    final plan = _plan;
-    if (plan == null) return;
-    await _run(() async {
-      _plan = await widget.bridge.cancel('${plan['id']}');
-      _history = _maps((await widget.bridge.history())['items']);
-    });
+    await _refreshDiff();
   }
 
   Future<void> _setAction(String externalId, String action) async {
     await _run(() async {
       await widget.bridge.setAction(externalId, action);
-      if (_plan != null) {
-        _plan = await widget.bridge.plan('${_plan!['id']}');
-      }
+      _diff = await widget.bridge.createPlan(
+        scopeType: _scopeType,
+        scopeId: _scopeType == 'all' ? null : _scopeId,
+      );
     });
   }
 
-  Future<void> _apply() async {
-    final plan = _plan;
-    if (plan == null) return;
-    final summary = _summary(plan);
+  Future<void> _synchronize() async {
+    if (_busy) return;
+    if (_target['targetConfigured'] != true) {
+      setState(() => _error = 'Сначала выберите папку для загрузок.');
+      return;
+    }
+
+    Map<String, dynamic>? fresh;
+    await _run(() async {
+      fresh = await widget.bridge.createPlan(
+        scopeType: _scopeType,
+        scopeId: _scopeType == 'all' ? null : _scopeId,
+      );
+      _diff = fresh;
+    });
+    if (!mounted || fresh == null) return;
+
+    final summary = _summary(fresh!);
     final downloads = _int(summary['readyToDownload']);
+    final queued = _int(summary['alreadyQueued']);
+    final blockers = _blockerCount(summary);
+
+    if (downloads == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            queued > 0
+                ? 'Новых загрузок нет: нужные треки уже находятся в очереди.'
+                : blockers > 0
+                    ? 'Сейчас нечего скачивать. Сначала разберите треки, требующие решения или сопоставления.'
+                    : 'Синхронизация не требует новых загрузок.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        key: const Key('sync-apply-confirmation'),
-        title: const Text('Применить Sync Plan?'),
+        key: const Key('sync-confirmation'),
+        title: const Text('Синхронизировать?'),
         content: Text(
-          'Поставить $downloads треков в очередь загрузок?\n\n'
-          'Никакие существующие локальные файлы не будут удалены, переименованы или изменены. '
-          'Яндекс-библиотека также не изменяется.',
+          'В очередь загрузок будет добавлено: $downloads.\n\n'
+          'Существующие локальные файлы не удаляются, не перемещаются и не изменяются. '
+          'Коллекция Яндекс Музыки также не изменяется.',
         ),
         actions: [
           TextButton(
@@ -135,40 +207,43 @@ class _SyncPageState extends State<SyncPage> {
             child: const Text('Отмена'),
           ),
           FilledButton(
-            key: const Key('sync-confirm-apply'),
+            key: const Key('sync-confirm'),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Поставить в очередь'),
+            child: const Text('Синхронизировать'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
+
+    Map<String, dynamic>? result;
     await _run(() async {
-      final result = await widget.bridge.apply('${plan['id']}', confirm: true);
-      final rawPlan = result['plan'];
-      if (rawPlan is Map) _plan = Map<String, dynamic>.from(rawPlan);
-      _history = _maps((await widget.bridge.history())['items']);
+      result = await widget.bridge.apply('${fresh!['id']}', confirm: true);
+      _diff = await widget.bridge.createPlan(
+        scopeType: _scopeType,
+        scopeId: _scopeType == 'all' ? null : _scopeId,
+      );
     });
-    if (!mounted || _plan == null) return;
-    final result = _plan!['result'];
-    final data = result is Map ? Map<String, dynamic>.from(result) : const <String, dynamic>{};
+    if (!mounted || result == null) return;
+
+    final rawResult = result!['result'];
+    final data = rawResult is Map
+        ? Map<String, dynamic>.from(rawResult)
+        : const <String, dynamic>{};
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'В очередь добавлено: ${_int(data['enqueued'])}. '
+          'Добавлено в очередь: ${_int(data['enqueued'])}. '
           'Пропущено: ${_int(data['skipped'])}. Ошибок: ${_int(data['failed'])}.',
         ),
         action: widget.onOpenDownloads == null
             ? null
-            : SnackBarAction(label: 'Загрузки', onPressed: widget.onOpenDownloads!),
+            : SnackBarAction(
+                label: 'Загрузки',
+                onPressed: widget.onOpenDownloads!,
+              ),
       ),
     );
-  }
-
-  Future<void> _openHistoryPlan(String id) async {
-    await _run(() async {
-      _plan = await widget.bridge.plan(id);
-    });
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -196,8 +271,8 @@ class _SyncPageState extends State<SyncPage> {
         actions: [
           IconButton(
             key: const Key('sync-refresh'),
-            tooltip: 'Обновить',
-            onPressed: _busy ? null : _refreshPlan,
+            tooltip: 'Обновить список',
+            onPressed: _busy ? null : _refreshDiff,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -208,7 +283,7 @@ class _SyncPageState extends State<SyncPage> {
               key: const Key('sync-page'),
               padding: const EdgeInsets.all(20),
               children: [
-                _controlsCard(),
+                _controls(),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   MaterialBanner(
@@ -223,91 +298,87 @@ class _SyncPageState extends State<SyncPage> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                if (_plan == null)
+                if (_diff == null)
                   const Card(
-                    key: Key('sync-no-plan'),
+                    key: Key('sync-loading-diff'),
                     child: Padding(
                       padding: EdgeInsets.all(24),
                       child: Text(
-                        'Создайте план, чтобы увидеть dry-run изменений. До применения ничего не скачивается.',
+                        'Считаем разницу между Яндекс Музыкой и локальной библиотекой…',
                       ),
                     ),
                   )
                 else ...[
-                  _planStatusBanner(_plan!),
-                  _summaryCard(_plan!),
+                  _summaryCard(_diff!),
                   const SizedBox(height: 12),
-                  _planActions(_plan!),
+                  _mainActions(_diff!),
                   const SizedBox(height: 12),
-                  _details(_plan!),
+                  _details(_diff!),
                 ],
-                const SizedBox(height: 20),
-                _historyCard(),
               ],
             ),
     );
   }
 
-  Widget _controlsCard() {
-    final selectedKey = _scopeType == 'all' ? 'all|' : '$_scopeType|${_scopeId ?? ''}';
+  Widget _controls() {
+    final selectedKey =
+        _scopeType == 'all' ? 'all|' : '$_scopeType|${_scopeId ?? ''}';
     final values = _scopes.map((scope) {
       final type = '${scope['type'] ?? 'all'}';
       final id = '${scope['id'] ?? ''}';
       return DropdownMenuItem<String>(
         value: '$type|$id',
-        child: Text('${scope['title'] ?? id}'),
+        child: Text(
+          '${scope['title'] ?? id}',
+          overflow: TextOverflow.ellipsis,
+        ),
       );
     }).toList();
     final configured = _target['targetConfigured'] == true;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Область синхронизации', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Что синхронизировать',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              key: const Key('sync-scope-selector'),
-              initialValue: values.any((item) => item.value == selectedKey) ? selectedKey : (values.isEmpty ? null : values.first.value),
+              key: ValueKey('sync-scope-selector-$selectedKey'),
+              initialValue: values.any((item) => item.value == selectedKey)
+                  ? selectedKey
+                  : null,
               items: values,
               onChanged: _busy
                   ? null
                   : (value) {
-                      if (value == null) return;
-                      final parts = value.split('|');
-                      setState(() {
-                        _scopeType = parts.first;
-                        _scopeId = parts.length > 1 && parts[1].isNotEmpty ? parts[1] : null;
-                      });
+                      if (value != null) _changeScope(value);
                     },
-              decoration: const InputDecoration(border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
             ),
             const SizedBox(height: 16),
-            Text('Download target', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'Куда скачивать недостающие треки',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
             Text(
-              configured ? '${_target['targetPath']}' : 'Не выбран. План можно просмотреть, но Apply будет недоступен.',
+              configured ? '${_target['targetPath']}' : 'Папка не выбрана.',
               key: const Key('sync-target-state'),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  key: const Key('sync-select-target'),
-                  onPressed: _busy ? null : _chooseTarget,
-                  icon: const Icon(Icons.folder_open),
-                  label: Text(configured ? 'Изменить папку' : 'Выбрать папку'),
-                ),
-                FilledButton.icon(
-                  key: const Key('sync-create-plan'),
-                  onPressed: _busy ? null : _createPlan,
-                  icon: const Icon(Icons.fact_check_outlined),
-                  label: const Text('Создать план'),
-                ),
-              ],
+            OutlinedButton.icon(
+              key: const Key('sync-select-target'),
+              onPressed: _busy ? null : _chooseTarget,
+              icon: const Icon(Icons.folder_open),
+              label: Text(configured ? 'Изменить папку' : 'Выбрать папку'),
             ),
           ],
         ),
@@ -315,62 +386,25 @@ class _SyncPageState extends State<SyncPage> {
     );
   }
 
-  Widget _planStatusBanner(Map<String, dynamic> plan) {
-    final status = '${plan['status'] ?? ''}';
-    if (status == 'stale') {
-      return Card(
-        key: const Key('sync-stale-banner'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(Icons.warning_amber),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Состояние библиотеки изменилось после создания плана. Создайте новый план перед применением.',
-                ),
-              ),
-              FilledButton(
-                onPressed: _busy ? null : _createPlan,
-                child: const Text('Создать новый'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    if (plan['legacy'] == true) {
-      return const Card(
-        key: Key('sync-legacy-banner'),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('Legacy / unsupported plan. Он доступен только для просмотра и не может быть применён v0.8.'),
-        ),
-      );
-    }
-    if (status == 'applied' || status == 'partially_applied') {
-      return Card(
-        key: const Key('sync-apply-result'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(status == 'applied' ? 'План применён: безопасные операции обработаны.' : 'План применён частично: некоторые операции завершились ошибкой.'),
-        ),
-      );
-    }
-    return const SizedBox.shrink();
-  }
+  Widget _summaryCard(Map<String, dynamic> diff) {
+    final summary = _summary(diff);
+    final scope = _selectedScopeTitle();
+    final matching =
+        _int(summary['identityReview']) + _int(summary['notAnalyzed']);
 
-  Widget _summaryCard(Map<String, dynamic> plan) {
-    final summary = _summary(plan);
-    Widget value(String label, String key) => SizedBox(
-          width: 210,
+    Widget metric(String label, int value, IconData icon) => SizedBox(
+          width: 220,
           child: ListTile(
             dense: true,
+            leading: Icon(icon, size: 20),
             title: Text(label),
-            trailing: Text('${_int(summary[key])}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            trailing: Text(
+              '$value',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         );
+
     return Card(
       key: const Key('sync-summary'),
       child: Padding(
@@ -378,90 +412,144 @@ class _SyncPageState extends State<SyncPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Текущий план', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 4),
-            Text('${plan['scopeLabel'] ?? plan['scopeType']} · ${plan['createdAt'] ?? ''}'),
-            const SizedBox(height: 12),
+            Text(
+              'Разница: $scope',
+              key: const Key('sync-diff-title'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 4,
               children: [
-                value('Desired', 'desiredTracks'),
-                value('Covered', 'alreadyCovered'),
-                value('Download', 'readyToDownload'),
-                value('Already queued', 'alreadyQueued'),
-                value('Decide', 'missingUndecided'),
-                value('Ignored', 'ignoredMissing'),
-                value('Identity review', 'identityReview'),
-                value('Not analyzed', 'notAnalyzed'),
-                value('Variant issues', 'variantIssues'),
+                metric(
+                  'В Яндекс Музыке',
+                  _int(summary['desiredTracks']),
+                  Icons.cloud_outlined,
+                ),
+                metric(
+                  'Уже локально',
+                  _int(summary['alreadyCovered']),
+                  Icons.library_music_outlined,
+                ),
+                metric(
+                  'К скачиванию',
+                  _int(summary['readyToDownload']),
+                  Icons.download_outlined,
+                ),
+                metric(
+                  'Уже в очереди',
+                  _int(summary['alreadyQueued']),
+                  Icons.schedule,
+                ),
+                metric(
+                  'Нужно решить',
+                  _int(summary['missingUndecided']),
+                  Icons.help_outline,
+                ),
+                metric(
+                  'Нужно сопоставить',
+                  matching,
+                  Icons.compare_arrows,
+                ),
+                metric(
+                  'Проверить версию',
+                  _int(summary['variantIssues']),
+                  Icons.rule_outlined,
+                ),
               ],
             ),
             const Divider(),
             Text(
-              'Current coverage: ${summary['currentCoveragePercent'] ?? 0}%   '
-              'Projected after successful planned downloads: ${summary['projectedCoveragePercent'] ?? 0}%',
-              key: const Key('sync-projected-coverage'),
+              'Сейчас локально: ${summary['currentCoveragePercent'] ?? 0}% · '
+              'после успешных загрузок: ${summary['projectedCoveragePercent'] ?? 0}%',
+              key: const Key('sync-coverage'),
             ),
-            const SizedBox(height: 4),
-            const Text('Projected — расчёт при условии успеха запланированных загрузок, а не гарантия.'),
+            if (_blockerCount(summary) > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${_blockerCount(summary)} треков требуют решения или проверки и пока не будут скачаны автоматически.',
+                key: const Key('sync-blockers'),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _planActions(Map<String, dynamic> plan) {
-    final status = '${plan['status'] ?? ''}';
-    final targetOk = _target['targetConfigured'] == true;
-    final canApply = !_busy && status == 'planned' && targetOk && plan['legacy'] != true;
+  Widget _mainActions(Map<String, dynamic> diff) {
+    final summary = _summary(diff);
+    final ready = _int(summary['readyToDownload']);
+    final configured = _target['targetConfigured'] == true;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
         FilledButton.icon(
-          key: const Key('sync-apply'),
-          onPressed: canApply ? _apply : null,
-          icon: const Icon(Icons.playlist_add_check),
-          label: const Text('Применить'),
-        ),
-        if (status == 'planned')
-          OutlinedButton(
-            key: const Key('sync-cancel-plan'),
-            onPressed: _busy ? null : _cancelPlan,
-            child: const Text('Отменить план'),
+          key: const Key('sync-now'),
+          onPressed: !_busy && configured ? _synchronize : null,
+          icon: const Icon(Icons.sync),
+          label: Text(
+            ready > 0 ? 'Синхронизировать ($ready)' : 'Синхронизировать',
           ),
+        ),
         if (widget.onOpenDownloads != null)
           TextButton.icon(
             key: const Key('sync-open-downloads'),
             onPressed: widget.onOpenDownloads,
             icon: const Icon(Icons.download_outlined),
-            label: const Text('Открыть Загрузки'),
+            label: const Text('Открыть загрузки'),
           ),
       ],
     );
   }
 
-  Widget _details(Map<String, dynamic> plan) {
-    final operations = _maps(plan['operations']);
-    final downloads = operations.where((item) => item['type'] == 'enqueue_download').toList();
-    final decisions = operations.where((item) => item['type'] == 'user_decision_required').toList();
-    final identity = operations.where((item) => item['type'] == 'review_identity' && item['reason'] != 'matching_required').toList();
-    final notAnalyzed = operations.where((item) => item['type'] == 'review_identity' && item['reason'] == 'matching_required').toList();
-    final variants = operations.where((item) => item['type'] == 'review_variant').toList();
-    final localOnly = operations.where((item) => item['type'] == 'local_only').toList();
+  Widget _details(Map<String, dynamic> diff) {
+    final operations = _maps(diff['operations']);
+    final downloads = operations
+        .where((item) => item['type'] == 'enqueue_download')
+        .toList();
+    final decisions = operations
+        .where((item) => item['type'] == 'user_decision_required')
+        .toList();
+    final matching =
+        operations.where((item) => item['type'] == 'review_identity').toList();
+    final variants =
+        operations.where((item) => item['type'] == 'review_variant').toList();
+    final localOnly =
+        operations.where((item) => item['type'] == 'local_only').toList();
+
     return Card(
-      key: const Key('sync-plan-details'),
+      key: const Key('sync-diff-details'),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            _group('К загрузке', downloads, _downloadRow),
-            _group('Требует решения', decisions, _decisionRow),
-            _group('Проверить сопоставление', identity, _identityRow),
-            _group('Matching required', notAnalyzed, _identityRow),
-            _group('Проблемы версии', variants, _variantRow),
-            _group('Local only / Outside scope', localOnly, _infoRow),
+            _group(
+              'Будет скачано',
+              downloads,
+              _downloadRow,
+              initiallyExpanded: downloads.isNotEmpty,
+            ),
+            _group(
+              'Нужно решить',
+              decisions,
+              _decisionRow,
+              initiallyExpanded: decisions.isNotEmpty,
+            ),
+            _group(
+              'Нужно сопоставить',
+              matching,
+              _matchingRow,
+              initiallyExpanded: matching.isNotEmpty && downloads.isEmpty,
+            ),
+            _group('Проверить версию', variants, _variantRow),
+            _group(
+              'Только локально / вне выбранной области',
+              localOnly,
+              _infoRow,
+            ),
           ],
         ),
       ),
@@ -471,24 +559,26 @@ class _SyncPageState extends State<SyncPage> {
   Widget _group(
     String title,
     List<Map<String, dynamic>> items,
-    Widget Function(Map<String, dynamic>) row,
-  ) {
+    Widget Function(Map<String, dynamic>) row, {
+    bool initiallyExpanded = false,
+  }) {
     return ExpansionTile(
       key: Key('sync-group-$title'),
-      initiallyExpanded: items.isNotEmpty && title == 'К загрузке',
+      initiallyExpanded: initiallyExpanded,
       title: Text('$title (${items.length})'),
-      children: items.isEmpty ? const [ListTile(title: Text('Нет элементов'))] : items.map(row).toList(),
+      children: items.isEmpty
+          ? const [ListTile(title: Text('Нет'))]
+          : items.map(row).toList(),
     );
   }
 
   Widget _downloadRow(Map<String, dynamic> item) {
     final metadata = _metadata(item);
-    final status = '${item['status'] ?? ''}';
     return ListTile(
       key: Key('sync-download-${item['externalId']}'),
+      leading: const Icon(Icons.download_outlined),
       title: Text(_trackTitle(metadata)),
-      subtitle: Text('Missing · Wanted${status == 'skipped' ? ' · Already queued' : ''}'),
-      trailing: const Icon(Icons.download_outlined),
+      subtitle: const Text('Будет добавлен в очередь загрузок'),
     );
   }
 
@@ -498,26 +588,40 @@ class _SyncPageState extends State<SyncPage> {
     return ListTile(
       key: Key('sync-decision-$id'),
       title: Text(_trackTitle(metadata)),
-      subtitle: const Text('Missing · требуется решение'),
+      subtitle: const Text('Трек отсутствует локально'),
       trailing: Wrap(
         spacing: 4,
         children: [
-          TextButton(onPressed: _busy ? null : () => _setAction(id, 'wanted'), child: const Text('Нужен')),
-          TextButton(onPressed: _busy ? null : () => _setAction(id, 'ignored'), child: const Text('Игнорировать')),
+          TextButton(
+            onPressed: _busy ? null : () => _setAction(id, 'wanted'),
+            child: const Text('Скачать'),
+          ),
+          TextButton(
+            onPressed: _busy ? null : () => _setAction(id, 'ignored'),
+            child: const Text('Игнорировать'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _identityRow(Map<String, dynamic> item) {
+  Widget _matchingRow(Map<String, dynamic> item) {
     final metadata = _metadata(item);
+    final required = item['reason'] == 'matching_required';
     return ListTile(
       key: Key('sync-review-${item['externalId']}'),
       title: Text(_trackTitle(metadata)),
-      subtitle: Text(item['reason'] == 'matching_required' ? 'Matching required' : 'Needs Review'),
+      subtitle: Text(
+        required
+            ? 'Ещё не проверялся по локальной библиотеке'
+            : 'Сопоставление требует проверки',
+      ),
       trailing: widget.onOpenMatching == null
           ? null
-          : TextButton(onPressed: widget.onOpenMatching, child: const Text('Открыть сопоставление')),
+          : TextButton(
+              onPressed: widget.onOpenMatching,
+              child: const Text('Открыть сопоставление'),
+            ),
     );
   }
 
@@ -527,10 +631,15 @@ class _SyncPageState extends State<SyncPage> {
     return ListTile(
       key: Key('sync-variant-${item['externalId']}'),
       title: Text(_trackTitle(metadata)),
-      subtitle: Text('Covered · $variant'),
+      subtitle: Text(
+        'Локальный трек найден, но версия требует проверки: $variant',
+      ),
       trailing: widget.onOpenMatching == null
           ? null
-          : TextButton(onPressed: widget.onOpenMatching, child: const Text('Открыть проверку версии')),
+          : TextButton(
+              onPressed: widget.onOpenMatching,
+              child: const Text('Проверить'),
+            ),
     );
   }
 
@@ -539,41 +648,44 @@ class _SyncPageState extends State<SyncPage> {
     return ListTile(
       key: Key('sync-local-${item['externalId']}'),
       title: Text(_trackTitle(metadata)),
-      subtitle: Text(item['reason'] == 'outside_selected_scope' ? 'Outside this scope' : 'Local only'),
-    );
-  }
-
-  Widget _historyCard() {
-    return Card(
-      key: const Key('sync-history'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('История планов', style: Theme.of(context).textTheme.titleMedium),
-            if (_history.isEmpty)
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: Text('Сохранённых планов пока нет.'),
-              )
-            else
-              ..._history.map(
-                (item) => ListTile(
-                  title: Text('${item['scopeLabel'] ?? item['scopeType']} · ${item['status']}'),
-                  subtitle: Text('${item['createdAt']} · operations: ${item['operationCount'] ?? 0}'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _openHistoryPlan('${item['id']}'),
-                ),
-              ),
-          ],
-        ),
+      subtitle: Text(
+        item['reason'] == 'outside_selected_scope'
+            ? 'Есть локально, но не относится к выбранной области'
+            : 'Есть только локально',
       ),
     );
   }
 
-  static Map<String, dynamic> _summary(Map<String, dynamic> plan) {
-    final value = plan['summary'];
+  String _selectedScopeTitle() {
+    for (final scope in _scopes) {
+      if ('${scope['type'] ?? ''}' == _scopeType &&
+          _nullableString(scope['id']) == _scopeId) {
+        return '${scope['title'] ?? _scopeId ?? 'Вся библиотека'}';
+      }
+    }
+    return _scopeId ?? 'Вся библиотека';
+  }
+
+  static bool _scopeExists(
+    List<Map<String, dynamic>> scopes,
+    String type,
+    String? id,
+  ) {
+    return scopes.any(
+      (scope) =>
+          '${scope['type'] ?? ''}' == type &&
+          _nullableString(scope['id']) == id,
+    );
+  }
+
+  static int _blockerCount(Map<String, dynamic> summary) =>
+      _int(summary['missingUndecided']) +
+      _int(summary['identityReview']) +
+      _int(summary['notAnalyzed']) +
+      _int(summary['variantIssues']);
+
+  static Map<String, dynamic> _summary(Map<String, dynamic> diff) {
+    final value = diff['summary'];
     return value is Map ? Map<String, dynamic>.from(value) : const {};
   }
 
@@ -584,16 +696,29 @@ class _SyncPageState extends State<SyncPage> {
 
   static String _trackTitle(Map<String, dynamic> metadata) {
     final rawArtists = metadata['artists'];
-    final artists = rawArtists is List ? rawArtists.map((e) => '$e').where((e) => e.isNotEmpty).join(', ') : '';
+    final artists = rawArtists is List
+        ? rawArtists.map((e) => '$e').where((e) => e.isNotEmpty).join(', ')
+        : '';
     final title = '${metadata['title'] ?? ''}';
     return artists.isEmpty ? title : '$artists — $title';
   }
 
-  static int _int(Object? value) => value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  static int _int(Object? value) =>
+      value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  static String? _nullableString(Object? value) {
+    if (value == null) return null;
+    final text = '$value'.trim();
+    return text.isEmpty || text == 'null' ? null : text;
+  }
 
   static List<Map<String, dynamic>> _maps(Object? value) => value is List
-      ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+      ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList()
       : <Map<String, dynamic>>[];
 
-  static String _message(Object error) => error is SyncBridgeException ? error.message : error.toString();
+  static String _message(Object error) =>
+      error is SyncBridgeException ? error.message : error.toString();
 }

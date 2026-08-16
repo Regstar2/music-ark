@@ -167,7 +167,9 @@ void main() {
     expect(coverage.setActionCalls, 0);
     expect(downloads.enqueueCalls, 1);
     expect(downloads.lastEnqueuedId, '203');
-    expect(downloads.runCalled, isTrue);
+    expect(downloads.runTaskCalls, 1);
+    expect(downloads.lastRunTaskId, 'direct-203');
+    expect(downloads.runCalled, isFalse);
   });
 
   testWidgets('direct download does not empty an unreviewed Missing filter', (
@@ -188,6 +190,8 @@ void main() {
 
     expect(coverage.items.first['userAction'], 'unreviewed');
     expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
+    expect(downloads.runTaskCalls, 1);
+    expect(downloads.runCalled, isFalse);
   });
 
   testWidgets('bulk selection applies wanted action without download control', (

@@ -98,87 +98,93 @@ class _CoverageRow extends StatelessWidget {
         onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (onSelectionChanged != null)
-                Checkbox(
-                  key: ValueKey('coverage-select-${item['externalId']}'),
-                  value: selected,
-                  onChanged: (value) => onSelectionChanged!(value ?? false),
-                ),
-              Expanded(
-                flex: 5,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('$artists — $title', style: Theme.of(context).textTheme.titleMedium),
-                    if (album.isNotEmpty) Text(album),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: collections
-                          .map((collection) => Text(
-                                collection['id'] == 'liked'
-                                    ? '♥ Мне нравится'
-                                    : '▤ ${collection['title']}',
-                              ))
-                          .toList(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (onSelectionChanged != null)
+                    Checkbox(
+                      key: ValueKey('coverage-select-${item['externalId']}'),
+                      value: selected,
+                      onChanged: (value) => onSelectionChanged!(value ?? false),
                     ),
-                  ],
-                ),
-              ),
-              SizedBox(
-                width: 190,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _StatusLabel(status: status),
-                    if (status == 'covered' && variant != null) _VariantLabel(status: variant),
-                    if ((status == 'needs_review' || status == 'not_analyzed') && onOpenMatching != null)
-                      TextButton(
-                        key: ValueKey('coverage-open-matching-${item['externalId']}'),
-                        onPressed: onOpenMatching,
-                        child: const Text('Открыть в сопоставлении'),
-                      ),
-                  ],
-                ),
-              ),
-              if (onWanted != null)
-                SizedBox(
-                  width: onDownload == null ? 260 : 360,
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 4,
-                    children: [
-                      TextButton(
-                        key: ValueKey('coverage-wanted-${item['externalId']}'),
-                        onPressed: action == 'wanted' ? null : onWanted,
-                        child: const Text('Нужен'),
-                      ),
-                      TextButton(
-                        key: ValueKey('coverage-ignored-${item['externalId']}'),
-                        onPressed: action == 'ignored' ? null : onIgnored,
-                        child: const Text('Игнорировать'),
-                      ),
-                      if (onDownload != null)
-                        FilledButton.tonalIcon(
-                          key: ValueKey('coverage-download-${item['externalId']}'),
-                          onPressed: onDownload,
-                          icon: const Icon(Icons.download, size: 18),
-                          label: const Text('Скачать'),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('$artists — $title', style: Theme.of(context).textTheme.titleMedium),
+                        if (album.isNotEmpty) Text(album),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: collections
+                              .map((collection) => Text(
+                                    collection['id'] == 'liked'
+                                        ? '♥ Мне нравится'
+                                        : '▤ ${collection['title']}',
+                                  ))
+                              .toList(),
                         ),
-                      if (action != 'unreviewed')
-                        IconButton(
-                          key: ValueKey('coverage-reset-${item['externalId']}'),
-                          tooltip: 'Сбросить решение',
-                          onPressed: onReset,
-                          icon: const Icon(Icons.undo),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 190),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _StatusLabel(status: status),
+                        if (status == 'covered' && variant != null) _VariantLabel(status: variant),
+                        if ((status == 'needs_review' || status == 'not_analyzed') && onOpenMatching != null)
+                          TextButton(
+                            key: ValueKey('coverage-open-matching-${item['externalId']}'),
+                            onPressed: onOpenMatching,
+                            child: const Text('Открыть в сопоставлении'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (onWanted != null) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (onDownload != null)
+                      FilledButton.icon(
+                        key: ValueKey('coverage-download-${item['externalId']}'),
+                        onPressed: onDownload,
+                        icon: const Icon(Icons.download, size: 18),
+                        label: const Text('Скачать'),
+                      ),
+                    TextButton(
+                      key: ValueKey('coverage-wanted-${item['externalId']}'),
+                      onPressed: action == 'wanted' ? null : onWanted,
+                      child: const Text('Нужен'),
+                    ),
+                    TextButton(
+                      key: ValueKey('coverage-ignored-${item['externalId']}'),
+                      onPressed: action == 'ignored' ? null : onIgnored,
+                      child: const Text('Игнорировать'),
+                    ),
+                    if (action != 'unreviewed')
+                      IconButton(
+                        key: ValueKey('coverage-reset-${item['externalId']}'),
+                        tooltip: 'Сбросить решение',
+                        onPressed: onReset,
+                        icon: const Icon(Icons.undo),
+                      ),
+                  ],
                 ),
+              ],
             ],
           ),
         ),

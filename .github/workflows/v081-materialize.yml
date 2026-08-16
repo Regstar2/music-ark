@@ -1,0 +1,39 @@
+name: v081 materialize
+on:
+  push:
+    branches:
+      - agent/v0.8.1-yandex-metadata
+permissions:
+  contents: write
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Materialize validated files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, json, zlib
+          manifest = json.loads(Path(".v081-stage/manifest.json").read_text())
+          for entry in manifest:
+              encoded = "".join(Path(p).read_text() for p in entry["chunks"])
+              data = zlib.decompress(base64.b64decode(encoded))
+              actual = hashlib.sha256(data).hexdigest()
+              if actual != entry["sha256"]:
+                  raise SystemExit(f"sha mismatch {entry['path']}: {actual}")
+              path = Path(entry["path"])
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(data)
+          PY
+      - name: Commit materialized files
+        run: |
+          rm -rf .v081-stage
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: materialize v0.8.1 payload"
+          git push origin HEAD:agent/v0.8.1-yandex-metadata

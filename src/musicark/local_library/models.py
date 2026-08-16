@@ -29,6 +29,8 @@ class LocalTrackMetadata:
     codec: str = ""
     bitrate: int | None = None
     sample_rate: int | None = None
+    source_provider_id: str | None = None
+    source_external_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

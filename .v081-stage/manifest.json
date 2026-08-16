@@ -1,0 +1,35 @@
+[
+  {
+    "path": "src/musicark/download/provider.py",
+    "chunks": [
+      ".v081-stage/payload/000.txt",
+      ".v081-stage/payload/001.txt"
+    ],
+    "sha256": "71939357deebb329dc60416b73992d38b3161321360befee821071f57476bf85"
+  },
+  {
+    "path": "src/musicark/download/service.py",
+    "chunks": [
+      ".v081-stage/payload/002.txt",
+      ".v081-stage/payload/003.txt",
+      ".v081-stage/payload/004.txt"
+    ],
+    "sha256": "a3ebe5fa79efd9bcdfa899c9ea001c78d6272f065b1498669e00308bc3e5452d"
+  },
+  {
+    "path": "src/musicark/matching/service.py",
+    "chunks": [
+      ".v081-stage/payload/005.txt",
+      ".v081-stage/payload/006.txt"
+    ],
+    "sha256": "41113f73ab3986c9255ad63d9ec40e83335eb1f736d3a1b9590e79bbdeec3000"
+  },
+  {
+    "path": "tests/test_download_metadata_v081.py",
+    "chunks": [
+      ".v081-stage/payload/007.txt",
+      ".v081-stage/payload/008.txt"
+    ],
+    "sha256": "a871ea8776f2fb2b989c29dd57ee67956e0b3587d8af748232b952a25d509029"
+  }
+]

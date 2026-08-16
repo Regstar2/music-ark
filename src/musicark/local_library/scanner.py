@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import sqlite3
 import stat
 
 from .metadata_reader import LocalMetadataReader
@@ -40,9 +42,11 @@ class LocalLibraryScanner:
         self,
         repository: LocalLibraryStorageRepository,
         metadata_reader: LocalMetadataReader | None = None,
+        database_path: Path | None = None,
     ) -> None:
         self._repository = repository
         self._metadata_reader = metadata_reader or LocalMetadataReader()
+        self._database_path = database_path
 
     def scan(self, root: LocalLibraryRoot) -> LocalScanResult:
         root_path = Path(root.path)
@@ -134,7 +138,35 @@ class LocalLibraryScanner:
             scanned_at=_utc_now(),
             allow_removals=not walk_failed,
         )
+        self._persist_origins(upserts)
         return result
+
+    def _persist_origins(self, records: list[LocalAudioRecord]) -> None:
+        if self._database_path is None or not records:
+            return
+        rows = [
+            (
+                item.metadata.source_provider_id,
+                item.metadata.source_external_id,
+                item.normalized_path,
+            )
+            for item in records
+        ]
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                with conn:
+                    conn.executemany(
+                        """
+                        UPDATE local_audio_files
+                        SET source_provider_id=?, source_external_id=?
+                        WHERE normalized_path=?
+                        """,
+                        rows,
+                    )
+        except sqlite3.Error:
+            # The primary scan already succeeded; origin enrichment must not turn a
+            # normal user-file scan into a destructive/failed operation.
+            return
 
     @staticmethod
     def _record_error(result: LocalScanResult, path: Path, error: Exception) -> None:

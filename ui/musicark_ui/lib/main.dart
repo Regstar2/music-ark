@@ -87,9 +87,19 @@ class _MusicArkShellState extends State<_MusicArkShell> {
   bool _downloadsOpened = false;
   bool _syncOpened = false;
 
+  // IndexedStack deliberately keeps pages alive, but the data pages must not keep
+  // stale database snapshots. Bumping the activation revision gives the selected
+  // page a fresh State/initState on every navigation activation. This is also the
+  // cross-screen invalidation boundary: mutations already reload their own page;
+  // any other page re-reads authoritative state the next time it is opened.
+  final List<int> _activationRevision = List<int>.filled(6, 0);
+
   void _selectSection(int index) {
     setState(() {
       _index = index;
+      if (index > 0 && index < _activationRevision.length) {
+        _activationRevision[index]++;
+      }
       if (index == 1) _localLibraryOpened = true;
       if (index == 2) _matchingOpened = true;
       if (index == 3) _coverageOpened = true;
@@ -153,15 +163,24 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                   child: IndexedStack(
                     index: _index,
                     children: [
+                      // Keep the Yandex page stateful: recreating it would lose the
+                      // currently opened playlist and could change matching scope.
                       yandex.MusicArkHomePage(bridge: widget.bridge),
                       _localLibraryOpened
-                          ? LocalLibraryPage(bridge: widget.bridge)
+                          ? LocalLibraryPage(
+                              key: ValueKey('local-${_activationRevision[1]}'),
+                              bridge: widget.bridge,
+                            )
                           : const SizedBox.shrink(),
                       _matchingOpened
-                          ? MatchingPage(bridge: widget.matchingBridge)
+                          ? MatchingPage(
+                              key: ValueKey('matching-${_activationRevision[2]}'),
+                              bridge: widget.matchingBridge,
+                            )
                           : const SizedBox.shrink(),
                       _coverageOpened
                           ? CoveragePage(
+                              key: ValueKey('coverage-${_activationRevision[3]}'),
                               bridge: widget.coverageBridge,
                               matchingBridge: widget.matchingBridge,
                               downloadBridge: widget.downloadBridge,
@@ -171,12 +190,14 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                           : const SizedBox.shrink(),
                       _downloadsOpened
                           ? DownloadPage(
+                              key: ValueKey('downloads-${_activationRevision[4]}'),
                               bridge: widget.downloadBridge,
                               active: _index == 4,
                             )
                           : const SizedBox.shrink(),
                       _syncOpened
                           ? SyncPage(
+                              key: ValueKey('sync-${_activationRevision[5]}'),
                               bridge: widget.syncBridge,
                               onOpenDownloads: () => _selectSection(4),
                               onOpenMatching: () => _selectSection(2),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -102,48 +103,48 @@ class VariantReferenceAcquisitionTests(unittest.TestCase):
             "duration_seconds": 146.0,
             "explicit": False,
         }
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "INSERT INTO provider_tracks(provider_id, external_id, payload_json) VALUES (?, ?, ?)",
-                ("yandex_music", "12345", json.dumps(provider)),
-            )
-            cursor = conn.execute(
-                """
-                INSERT INTO local_audio_files(
-                    path, sha256, file_size, duration_seconds, codec, metadata_json,
-                    modified_ns, title, artists_json, album, availability,
-                    normalized_path, file_name, extension
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(self.local),
-                    "hash",
-                    stat.st_size,
-                    146.0,
-                    "mp3",
-                    json.dumps({"title": "Song", "artist": "Artist"}),
-                    stat.st_mtime_ns,
-                    "Song",
-                    '["Artist"]',
-                    "Album",
-                    "available",
-                    str(self.local).casefold(),
-                    self.local.name,
-                    ".mp3",
-                ),
-            )
-            local_id = int(cursor.lastrowid)
-            conn.execute(
-                """
-                INSERT INTO matching_results(
-                    provider_id, external_id, status, local_file_id, confidence,
-                    method, score_breakdown_json, reason, matcher_version,
-                    provider_fingerprint, local_fingerprint, manual
-                ) VALUES (?, ?, 'matched', ?, 1.0, 'manual', '{}', 'manual_accept', 1, 'p', 'l', 1)
-                """,
-                ("yandex_music", "12345", local_id),
-            )
-            conn.commit()
+        with closing(sqlite3.connect(self.db)) as conn:
+            with conn:
+                conn.execute(
+                    "INSERT INTO provider_tracks(provider_id, external_id, payload_json) VALUES (?, ?, ?)",
+                    ("yandex_music", "12345", json.dumps(provider)),
+                )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO local_audio_files(
+                        path, sha256, file_size, duration_seconds, codec, metadata_json,
+                        modified_ns, title, artists_json, album, availability,
+                        normalized_path, file_name, extension
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(self.local),
+                        "hash",
+                        stat.st_size,
+                        146.0,
+                        "mp3",
+                        json.dumps({"title": "Song", "artist": "Artist"}),
+                        stat.st_mtime_ns,
+                        "Song",
+                        '["Artist"]',
+                        "Album",
+                        "available",
+                        str(self.local).casefold(),
+                        self.local.name,
+                        ".mp3",
+                    ),
+                )
+                local_id = int(cursor.lastrowid)
+                conn.execute(
+                    """
+                    INSERT INTO matching_results(
+                        provider_id, external_id, status, local_file_id, confidence,
+                        method, score_breakdown_json, reason, matcher_version,
+                        provider_fingerprint, local_fingerprint, manual
+                    ) VALUES (?, ?, 'matched', ?, 1.0, 'manual', '{}', 'manual_accept', 1, 'p', 'l', 1)
+                    """,
+                    ("yandex_music", "12345", local_id),
+                )
 
     def test_missing_reference_is_acquired_before_audio_comparison(self) -> None:
         verifier = _CountingVerifier()

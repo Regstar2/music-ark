@@ -7,60 +7,39 @@ v0.3   — Yandex Library / Playlists        complete
 v0.4   — Local Library                     complete
 v0.5.0 — Identity Matching                 complete
 v0.5.1 — Variant / Altered Track Detection complete
-v0.6   — Missing Tracks / Coverage         current
-v0.7   — Download                          planned
+v0.6   — Missing Tracks / Coverage         complete
+v0.7   — Download + Local Playback         current
 v0.8   — Sync                              planned
 ```
 
 ## v0.5.0 — Identity Matching
 
-Joins cached Yandex track identities with indexed Local Library files through bounded candidate generation, transparent scoring, ambiguity handling, and persistent manual decisions.
-
-Primary quality metric: **precision of automatic matches**. When confidence or best-vs-second separation is insufficient, `CONFLICT`/`UNMATCHED` is preferred over a false positive.
+Joins cached Yandex track identities with indexed Local Library files through bounded candidate generation, transparent scoring, ambiguity handling, and persistent manual decisions. Precision of automatic matches remains more important than recall.
 
 ## v0.5.1 — Variant / Altered Track Detection
 
-Runs only after a v0.5 identity is `MATCHED` or manually accepted and asks a different question: whether the linked objects are the same recording/version.
-
-Outputs are independent from identity:
-
-```text
-SAME
-ALTERED
-DIFFERENT_VERSION
-UNCERTAIN
-NOT_CHECKED
-```
-
-The milestone adds metadata variant markers, provider explicit evidence, strict exact-ID reference resolution, optional ffmpeg decoded-audio verification, bounded alignment, segment-level comparison, altered-region merging, caching/invalidation, SQLite schema 1.5.0, bridge commands, and Matching-page variant UI.
-
-Primary quality metric: **avoid false SAME**. Unclear evidence should become `UNCERTAIN`, not an optimistic result.
-
-Current-code clarification: an explicit single-track `variant_run` may boundedly acquire one exact reference when needed. Batch remains restricted to already-resolvable references. The acquired reference is verification-only, not Local Library and not a general download workflow.
+Runs only after an identity is accepted and independently asks whether the linked objects are the same recording/version. Results remain `SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED`. Exact reference acquisition is verification-only and never counts as Local Library coverage.
 
 ## v0.6 — Missing Tracks / Coverage
 
-Current product slice. It consumes v0.5 identity results and active Yandex collection membership without rebuilding matching.
+Consumes authoritative matching state and active Yandex membership to derive `covered / missing / needs_review / not_analyzed`, with persistent `wanted / ignored / unreviewed` triage. Variant remains secondary. Conflict, stale state and reference cache never masquerade as Missing or Covered.
 
-```text
-current accepted MATCHED → COVERED
-current UNMATCHED         → MISSING
-CONFLICT / stale manual   → NEEDS_REVIEW
-no/stale auto result      → NOT_ANALYZED
-```
+## v0.7 — Download + Local Playback
 
-Variant status remains secondary. Global coverage deduplicates `(provider_id, external_id)` across Liked/playlists, supports collection scopes and SQL-backed list/search/filter/pagination, and lets the user persist `wanted/ignored` triage.
+A direct **Скачать** click on any currently Missing track is its own explicit user intent. It does **not** rewrite the independent `wanted / ignored / unreviewed` triage state. `Нужен` remains useful for triage and bulk downloads, but is not a prerequisite for a single-track download.
 
-Primary quality metric: **do not lie about absence**. Conflict, unknown/stale state, different version, or reference cache must never be relabeled as Missing/Covered incorrectly.
+v0.7 adds a persistent provider-based queue around the existing authenticated Yandex Music acquisition backend. The exact folder chosen by the user is persisted and remains stable across page/service recreation. Transfers are streamed to `.part`, report real byte progress when `Content-Length` exists, support cooperative cancellation, and are intentionally sequential in the baseline implementation.
 
-Future v0.7 input is deliberately simple: `coverage_status = missing AND user_action = wanted`.
+A task is not successful at HTTP completion. It must produce a parseable file, index it through the normal v0.4 Local Library pipeline with a real `library_root_id`, persist an exact accepted provider/local identity link, and make Coverage return `covered`. Exact acquisition identity does not manufacture a Variant result.
 
-## v0.7 — Download
+Reference cache and user Download Library stay separate, including queue UI/history actions. Credentials come from the existing secure credential abstraction; token/direct URLs are not queue metadata. v0.7 adds no YouTube/VK/torrent/web-search fallback and no DRM/access bypass.
 
-Acquire explicitly requested wanted+missing tracks through supported download workflows. Source selection and actual download must not be pulled forward into matching, variant analysis, or v0.6 coverage.
+Local music is played **inside MusicArk**, not delegated to the Windows default media player. The v0.7 application-wide audio player provides current-track state, play/pause, seek, duration/progress and stop controls, and remains visible while navigating between MusicArk sections. `Открыть расположение файла` remains a separate Explorer/Finder action. Raw paths are hidden until explicitly requested.
+
+Primary quality metric: **the downloaded track must become a normal covered Local Library identity, or the task must not be marked completed**.
 
 ## v0.8 — Sync
 
-Build controlled synchronization plans above accepted matching, coverage, and download results.
+Build controlled synchronization plans above accepted matching, coverage, download, and local-playback results. v0.7 performs post-download indexing/linking/coverage refresh only and does not pre-build the sync planner.
 
-Standalone packaging/installer remains secondary infrastructure work and must not displace the product slices above.
+Standalone packaging/installer and advanced playback features such as queue editing, shuffle/repeat, artwork, media keys and richer Now Playing metadata remain secondary infrastructure/product work and must not displace the core slices above.

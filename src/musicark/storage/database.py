@@ -1,4 +1,4 @@
-"""SQLite storage bootstrap for v0.1 core foundation."""
+"""SQLite storage bootstrap for MusicArk."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sqlite3
 
 from musicark.core.errors import StorageError
 from musicark.storage.coverage_migration import migrate_coverage_v06
+from musicark.storage.download_migration import migrate_download_v07
 from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
 
 
@@ -180,7 +181,7 @@ SCHEMA_STATEMENTS = (
 
 
 def initialize_database(database_path: Path) -> None:
-    """Create SQLite file, apply schema DDL, run forward migrations."""
+    """Create SQLite file and apply all forward-only migrations idempotently."""
     database_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with closing(sqlite3.connect(database_path)) as conn:
@@ -189,6 +190,9 @@ def initialize_database(database_path: Path) -> None:
                     conn.execute(statement)
                 ensure_schema_version_seed(conn)
                 migrate_schema(conn)
+                # v0.6 and v0.7 are intentionally sequential migrations outside the
+                # historical chain: v0.7 must never skip creation of v0.6 actions.
                 migrate_coverage_v06(conn)
+                migrate_download_v07(conn)
     except sqlite3.Error as exc:
         raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

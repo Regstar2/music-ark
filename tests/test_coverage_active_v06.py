@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -23,24 +24,25 @@ class CoverageActiveDatasetV06Tests(unittest.TestCase):
                 "album_title": "Album",
                 "duration_seconds": 180.0,
             }
-            with sqlite3.connect(db) as conn:
-                conn.execute(
-                    """
-                    INSERT INTO provider_collection_snapshots(
-                        provider_id, collection_id, account_json, item_count,
-                        refreshed_at, collection_type, active
-                    ) VALUES ('yandex_music', 'liked', '{}', 1,
-                              datetime('now'), 'liked', 1)
-                    """
-                )
-                conn.execute(
-                    """
-                    INSERT INTO provider_collection_items(
-                        provider_id, collection_id, external_id, position, payload_json
-                    ) VALUES ('yandex_music', 'liked', '9', 0, ?)
-                    """,
-                    (json.dumps(payload),),
-                )
+            with closing(sqlite3.connect(db)) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO provider_collection_snapshots(
+                            provider_id, collection_id, account_json, item_count,
+                            refreshed_at, collection_type, active
+                        ) VALUES ('yandex_music', 'liked', '{}', 1,
+                                  datetime('now'), 'liked', 1)
+                        """
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO provider_collection_items(
+                            provider_id, collection_id, external_id, position, payload_json
+                        ) VALUES ('yandex_music', 'liked', '9', 0, ?)
+                        """,
+                        (json.dumps(payload),),
+                    )
 
             service = LibraryCoverageService(database_path=db)
             before = service.summary()
@@ -50,14 +52,15 @@ class CoverageActiveDatasetV06Tests(unittest.TestCase):
             # Simulate a refreshed Yandex dataset that marks the collection inactive
             # while an old membership row is still present. Coverage must begin from
             # active snapshots, not from orphan/stale membership rows.
-            with sqlite3.connect(db) as conn:
-                conn.execute(
-                    """
-                    UPDATE provider_collection_snapshots
-                    SET active=0
-                    WHERE provider_id='yandex_music' AND collection_id='liked'
-                    """
-                )
+            with closing(sqlite3.connect(db)) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        UPDATE provider_collection_snapshots
+                        SET active=0
+                        WHERE provider_id='yandex_music' AND collection_id='liked'
+                        """
+                    )
 
             after = service.summary()
             self.assertEqual(after["total"], 0)

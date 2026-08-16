@@ -25,7 +25,11 @@ class DatabaseTests(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type='table';"
                     ).fetchall()
                 }
+                version = conn.execute(
+                    "SELECT value FROM app_metadata WHERE key='schema_version'"
+                ).fetchone()[0]
 
+            self.assertEqual(version, "1.7.0")
             self.assertIn("app_metadata", tables)
             self.assertIn("audit_log", tables)
             self.assertIn("providers", tables)
@@ -35,6 +39,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("provider_raw_responses", tables)
             self.assertIn("local_audio_files", tables)
             self.assertIn("download_tasks", tables)
+            self.assertIn("download_settings", tables)
             self.assertIn("tracks", tables)
             self.assertIn("track_links", tables)
             self.assertIn("match_conflicts", tables)

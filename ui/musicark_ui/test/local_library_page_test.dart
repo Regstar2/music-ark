@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:musicark_ui/desktop_file_actions.dart';
 import 'package:musicark_ui/folder_picker.dart';
 import 'package:musicark_ui/local_library_page.dart';
 import 'package:musicark_ui/main.dart';
@@ -34,6 +35,17 @@ class SortingLocalBridge extends FakeMusicArkBridge {
     }
     return {'count': items.length, 'limit': limit, 'offset': offset, 'items': items};
   }
+}
+
+class FakeLocalFileActions implements LocalFileActions {
+  final List<String> played = [];
+  final List<String> revealed = [];
+
+  @override
+  Future<void> play(String path) async => played.add(path);
+
+  @override
+  Future<void> reveal(String path) async => revealed.add(path);
 }
 
 void main() {
@@ -103,6 +115,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Alpha'), findsOneWidget);
     expect(find.text('Zulu'), findsNothing);
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('track can be played/revealed and full path stays hidden until requested', (tester) async {
+    final bridge = SortingLocalBridge();
+    final actions = FakeLocalFileActions();
+    await bridge.localRootAdd(r'C:\Music');
+    await desktop(
+      tester,
+      LocalLibraryPage(
+        bridge: bridge,
+        folderPicker: FakeLocalFolderPicker(null),
+        fileActions: actions,
+      ),
+    );
+
+    const path = r'C:\Music\Zulu.flac';
+    expect(find.text(path), findsNothing);
+    expect(find.byKey(const Key('local-play-11')), findsOneWidget);
+    expect(find.byKey(const Key('local-reveal-11')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('local-play-11')));
+    await tester.tap(find.byKey(const Key('local-reveal-11')));
+    await tester.pump();
+    expect(actions.played, [path]);
+    expect(actions.revealed, [path]);
+
+    await tester.tap(find.text('Zulu'));
+    await tester.pumpAndSettle();
+    expect(find.text(path), findsNothing);
+    await tester.tap(find.byKey(const Key('local-detail-path-11')));
+    await tester.pumpAndSettle();
+    expect(find.text(path), findsOneWidget);
+
     await tester.binding.setSurfaceSize(null);
   });
 

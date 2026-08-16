@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'desktop_file_actions.dart';
 import 'folder_picker.dart';
 import 'musicark_bridge.dart';
 
@@ -8,10 +9,12 @@ class LocalLibraryPage extends StatefulWidget {
     super.key,
     required this.bridge,
     LocalFolderPicker? folderPicker,
+    this.fileActions = const SystemLocalFileActions(),
   }) : folderPicker = folderPicker ?? const SystemLocalFolderPicker();
 
   final MusicArkBridgeClient bridge;
   final LocalFolderPicker folderPicker;
+  final LocalFileActions fileActions;
 
   @override
   State<LocalLibraryPage> createState() => _LocalLibraryPageState();
@@ -186,24 +189,78 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
     return '$minutes:${remainder.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _play(Map<String, dynamic> track) async {
+    final path = (track['path'] ?? '').toString();
+    try {
+      await widget.fileActions.play(path);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Не удалось открыть трек: $error');
+    }
+  }
+
+  Future<void> _reveal(Map<String, dynamic> track) async {
+    final path = (track['path'] ?? '').toString();
+    try {
+      await widget.fileActions.reveal(path);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Не удалось открыть расположение файла: $error');
+    }
+  }
+
   void _showDetails(Map<String, dynamic> track) {
+    final path = (track['path'] ?? '').toString();
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text((track['title'] ?? track['fileName'] ?? 'Track').toString()),
         content: SizedBox(
           width: 620,
-          child: SelectableText(
-            'Исполнитель: ${_artists(track)}\n'
-            'Альбом: ${track['album'] ?? '—'}\n'
-            'Длительность: ${_duration(track['durationSeconds'])}\n'
-            'Формат: ${track['codec'] ?? track['extension'] ?? '—'}\n'
-            'Битрейт: ${track['bitrate'] ?? '—'}\n'
-            'Sample rate: ${track['sampleRate'] ?? '—'}\n\n'
-            'Путь: ${track['path'] ?? '—'}',
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  'Исполнитель: ${_artists(track)}\n'
+                  'Альбом: ${track['album'] ?? '—'}\n'
+                  'Длительность: ${_duration(track['durationSeconds'])}\n'
+                  'Формат: ${track['codec'] ?? track['extension'] ?? '—'}\n'
+                  'Битрейт: ${track['bitrate'] ?? '—'}\n'
+                  'Sample rate: ${track['sampleRate'] ?? '—'}',
+                ),
+                if (path.isNotEmpty)
+                  ExpansionTile(
+                    key: Key('local-detail-path-${track['id']}'),
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 8),
+                    title: const Text('Показать путь'),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: SelectableText(path),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть'))],
+        actions: [
+          if (path.isNotEmpty)
+            TextButton.icon(
+              key: Key('local-detail-play-${track['id']}'),
+              onPressed: () => _play(track),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Воспроизвести'),
+            ),
+          if (path.isNotEmpty)
+            TextButton.icon(
+              key: Key('local-detail-reveal-${track['id']}'),
+              onPressed: () => _reveal(track),
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Расположение'),
+            ),
+          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть')),
+        ],
       ),
     );
   }
@@ -332,12 +389,33 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                         return Center(child: Padding(padding: const EdgeInsets.all(16), child: OutlinedButton(key: const Key('local-load-more'), onPressed: _busy ? null : _loadMore, child: const Text('Показать ещё'))));
                       }
                       final track = _tracks[index];
+                      final path = (track['path'] ?? '').toString();
                       return ListTile(
                         key: Key('local-track-${track['id']}'),
                         leading: const Icon(Icons.audiotrack),
                         title: Text((track['title'] ?? track['fileName'] ?? 'Unknown').toString()),
                         subtitle: Text('${_artists(track)} • ${track['album'] ?? '—'} • ${track['codec'] ?? track['extension'] ?? '—'}'),
-                        trailing: Text(_duration(track['durationSeconds'])),
+                        trailing: Wrap(
+                          spacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(_duration(track['durationSeconds'])),
+                            if (path.isNotEmpty)
+                              IconButton(
+                                key: Key('local-play-${track['id']}'),
+                                tooltip: 'Воспроизвести',
+                                onPressed: () => _play(track),
+                                icon: const Icon(Icons.play_arrow),
+                              ),
+                            if (path.isNotEmpty)
+                              IconButton(
+                                key: Key('local-reveal-${track['id']}'),
+                                tooltip: 'Открыть расположение файла',
+                                onPressed: () => _reveal(track),
+                                icon: const Icon(Icons.folder_open_outlined),
+                              ),
+                          ],
+                        ),
                         onTap: () => _showDetails(track),
                       );
                     },

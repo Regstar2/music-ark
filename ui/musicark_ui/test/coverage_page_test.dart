@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/coverage_bridge.dart';
 import 'package:musicark_ui/coverage_page.dart';
+import 'package:musicark_ui/download_bridge.dart';
 import 'package:musicark_ui/main.dart';
 import 'package:musicark_ui/matching_bridge.dart';
 import 'package:musicark_ui/musicark_bridge.dart';
@@ -12,6 +13,7 @@ void main() {
     WidgetTester tester, {
     FakeCoverageBridge? coverage,
     FakeMatchingBridge? matching,
+    FakeDownloadBridge? downloads,
     VoidCallback? onOpenMatching,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
@@ -22,6 +24,7 @@ void main() {
           body: CoveragePage(
             bridge: coverage ?? FakeCoverageBridge(),
             matchingBridge: matching ?? FakeMatchingBridge(),
+            downloadBridge: downloads,
             onOpenMatching: onOpenMatching,
           ),
         ),
@@ -146,6 +149,51 @@ void main() {
     expect(coverage.items.first['userAction'], 'unreviewed');
   });
 
+  testWidgets('missing track can be downloaded in one click without mutating triage action', (
+    tester,
+  ) async {
+    final coverage = FakeCoverageBridge();
+    final downloads = FakeDownloadBridge();
+    await page(tester, coverage: coverage, downloads: downloads);
+
+    expect(coverage.items.first['userAction'], 'unreviewed');
+    expect(find.byKey(const ValueKey('coverage-download-203')), findsOneWidget);
+    expect(find.text('Скачать'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
+    await tester.pumpAndSettle();
+
+    expect(coverage.items.first['userAction'], 'unreviewed');
+    expect(coverage.setActionCalls, 0);
+    expect(downloads.enqueueCalls, 1);
+    expect(downloads.lastEnqueuedId, '203');
+    expect(downloads.runTaskCalls, 1);
+    expect(downloads.lastRunTaskId, 'direct-203');
+    expect(downloads.runCalled, isFalse);
+  });
+
+  testWidgets('direct download does not empty an unreviewed Missing filter', (
+    tester,
+  ) async {
+    final coverage = FakeCoverageBridge();
+    final downloads = FakeDownloadBridge();
+    await page(tester, coverage: coverage, downloads: downloads);
+
+    await tester.tap(find.byKey(const Key('coverage-action-filter')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Не решено').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
+    await tester.pumpAndSettle();
+
+    expect(coverage.items.first['userAction'], 'unreviewed');
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
+    expect(downloads.runTaskCalls, 1);
+    expect(downloads.runCalled, isFalse);
+  });
+
   testWidgets('bulk selection applies wanted action without download control', (
     tester,
   ) async {
@@ -209,6 +257,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(matching.runCalls, 1);
   });
+
   testWidgets('coverage list paginates instead of materializing the full library', (
     tester,
   ) async {
@@ -247,5 +296,4 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('101–106 из 106'), findsOneWidget);
   });
-
 }

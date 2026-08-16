@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'coverage_bridge.dart';
+import 'download_bridge.dart';
 import 'matching_bridge.dart';
 
 part 'coverage_page_view.dart';
@@ -13,12 +14,16 @@ class CoveragePage extends StatefulWidget {
     super.key,
     required this.bridge,
     required this.matchingBridge,
+    this.downloadBridge,
     this.onOpenMatching,
+    this.onOpenDownloads,
   });
 
   final CoverageBridgeClient bridge;
   final MatchingBridgeClient matchingBridge;
+  final DownloadBridgeClient? downloadBridge;
   final VoidCallback? onOpenMatching;
+  final VoidCallback? onOpenDownloads;
 
   @override
   State<CoveragePage> createState() => _CoveragePageState();
@@ -33,6 +38,7 @@ class _CoveragePageState extends State<CoveragePage> {
   List<Map<String, dynamic>> _collections = [];
   List<Map<String, dynamic>> _items = [];
   final Set<String> _selected = {};
+  final Set<String> _downloading = {};
 
   String _status = 'missing';
   String _collectionId = '';
@@ -135,11 +141,34 @@ class _CoveragePageState extends State<CoveragePage> {
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;
-      final tracks = Map<String, dynamic>.from(results.last);
+      var tracks = Map<String, dynamic>.from(results.last);
+      var items = _maps(tracks['items']);
+      var total = _asInt(tracks['count']);
+
+      // If downloading the last row of a later page makes that page empty,
+      // return to the last valid page instead of rendering a false empty state.
+      if (items.isEmpty && total > 0 && _offset >= total) {
+        final nextOffset = ((total - 1) ~/ _pageSize) * _pageSize;
+        tracks = await widget.bridge.coverageTracks(
+          limit: _pageSize,
+          offset: nextOffset,
+          status: _status,
+          collectionId: _collectionId,
+          search: _searchController.text.trim(),
+          sort: _sort,
+          userAction: _userAction,
+          variantStatus: _variantStatus,
+        );
+        if (!mounted) return;
+        items = _maps(tracks['items']);
+        total = _asInt(tracks['count']);
+        _offset = nextOffset;
+      }
+
       setState(() {
         if (refreshSummary) _summary = Map<String, dynamic>.from(results.first);
-        _items = _maps(tracks['items']);
-        _total = _asInt(tracks['count']);
+        _items = items;
+        _total = total;
         _selected.clear();
         _loading = false;
       });
@@ -200,6 +229,64 @@ class _CoveragePageState extends State<CoveragePage> {
       await _reloadTracks();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _enqueueDownload(String externalId) async {
+    final bridge = widget.downloadBridge;
+    if (bridge == null || _downloading.contains(externalId)) return;
+    _updateView(() {
+      _downloading.add(externalId);
+      _error = null;
+    });
+    try {
+      // A direct Download click is its own explicit user intent. It must not
+      // mutate triage state or drain unrelated queued downloads.
+      final queued = await bridge.enqueue(externalId);
+      final rawTask = queued['task'];
+      final task = rawTask is Map
+          ? Map<String, dynamic>.from(rawTask)
+          : const <String, dynamic>{};
+      final taskId = (task['id'] ?? '').toString();
+      var finalStatus = (task['status'] ?? '').toString();
+      if (finalStatus == 'queued' && taskId.isNotEmpty) {
+        try {
+          final run = await bridge.runTask(taskId);
+          final rawResultTask = run['task'];
+          if (rawResultTask is Map) {
+            final resultTask = Map<String, dynamic>.from(rawResultTask);
+            finalStatus = (resultTask['status'] ?? finalStatus).toString();
+          }
+        } on DownloadBridgeException catch (error) {
+          if (error.code != 'worker_busy') rethrow;
+        }
+      }
+      await _reloadTracks();
+      if (!mounted) return;
+      final message = finalStatus == 'completed'
+          ? 'Трек скачан и добавлен в локальную библиотеку.'
+          : finalStatus == 'failed' || finalStatus == 'needs_review'
+              ? 'Загрузка завершилась с ошибкой. Подробности — в «Загрузках».'
+              : 'Загрузка поставлена в очередь.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } on DownloadBridgeException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+      if (error.code == 'target_required' && widget.onOpenDownloads != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Сначала выберите папку для скачивания.'),
+            action: SnackBarAction(
+              label: 'Выбрать',
+              onPressed: widget.onOpenDownloads!,
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      _updateView(() => _downloading.remove(externalId));
     }
   }
 

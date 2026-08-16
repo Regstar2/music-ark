@@ -70,7 +70,7 @@ class MusicArkAudioPlayer extends ChangeNotifier {
   Future<void> open(String rawPath) async {
     final path = rawPath.trim();
     if (path.isEmpty) {
-      throw const FileSystemException('Музыкальный файл не указан.');
+      throw FileSystemException('Музыкальный файл не указан.', path);
     }
     final file = File(path).absolute;
     if (!file.existsSync()) {
@@ -194,7 +194,7 @@ class MusicArkNowPlayingBar extends StatelessWidget {
                     key: const Key('player-seek'),
                     min: 0,
                     max: max,
-                    value: value.clamp(0, max),
+                    value: value.clamp(0.0, max).toDouble(),
                     onChanged: durationMs <= 0
                         ? null
                         : (next) => controller.seek(

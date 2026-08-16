@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import UTC, datetime
 import json
 import os
@@ -79,13 +80,25 @@ def _user_items(
     raw = payload.get("items")
     if not isinstance(raw, list):
         return []
-    return [
-        MapItem
-        for value in raw
-        if isinstance(value, dict)
-        for MapItem in [dict(value)]
-        if _is_user_item(MapItem)
-    ]
+    items: list[dict[str, Any]] = []
+    for value in raw:
+        if not isinstance(value, dict):
+            continue
+        item = dict(value)
+        if _is_user_item(item):
+            items.append(item)
+    return items
+
+
+def _require_user_task_id(service: DownloadService, value: str | None) -> str:
+    task_id = _required(value, "--task-id")
+    task = service._downloads.get_task(task_id)  # noqa: SLF001 - package bridge boundary.
+    if task.task_type != _USER_TASK_TYPE:
+        raise DownloadServiceError(
+            "This task belongs to an internal/legacy download workflow.",
+            code="invalid_task",
+        )
+    return task_id
 
 
 def _summary_counts(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -133,20 +146,21 @@ def _user_run(service: DownloadService) -> dict[str, Any]:
         if not task_id:
             continue
         task = service.run_task(task_id)
-        results.append(service._task_payload(task))  # noqa: SLF001 - same package bridge boundary.
+        results.append(service._task_payload(task))  # noqa: SLF001 - same package boundary.
     return {"processed": len(results), "items": results}
 
 
 def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
-    # clear_completed on the historical repository predates v0.7 ownership and would
-    # also remove reference-cache history. Restrict the UI action explicitly.
+    # Historical clear_completed predates v0.7 ownership and would also remove
+    # reference-cache history. Restrict the UI action explicitly.
     try:
-        with sqlite3.connect(service._database_path) as conn:  # noqa: SLF001
-            cursor = conn.execute(
-                "DELETE FROM download_tasks WHERE status='completed' AND task_type=?",
-                (_USER_TASK_TYPE,),
-            )
-            removed = max(0, int(cursor.rowcount))
+        with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
+            with conn:
+                cursor = conn.execute(
+                    "DELETE FROM download_tasks WHERE status='completed' AND task_type=?",
+                    (_USER_TASK_TYPE,),
+                )
+                removed = max(0, int(cursor.rowcount))
     except sqlite3.Error as exc:
         raise DownloadServiceError(
             "Failed to clear completed user downloads.", code="storage_error"
@@ -184,9 +198,9 @@ def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, A
     if args.command == "run":
         return _user_run(service)
     if args.command == "retry":
-        return service.retry(_required(args.task_id, "--task-id"))
+        return service.retry(_require_user_task_id(service, args.task_id))
     if args.command == "cancel":
-        return service.cancel(_required(args.task_id, "--task-id"))
+        return service.cancel(_require_user_task_id(service, args.task_id))
     if args.command == "clear_completed":
         return _user_clear_completed(service)
     if args.command == "settings":

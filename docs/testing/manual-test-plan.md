@@ -1,10 +1,11 @@
-# Manual Test Plan — MusicArk v0.7.0 Download
+# Manual Test Plan — MusicArk v0.7.0 Download + Local Playback
 
 Use Windows and the real cached Yandex Library together with the real Local Library. Begin with **1–3 tracks**, never with the full wanted set. Do not delete `.musicark\musicark.db`, the saved Yandex credential, existing Local Library files, matching/manual decisions, Variant results, or Coverage actions.
 
 ## Preconditions
 
 - Windows Flutter desktop target works;
+- `flutter pub get` has installed the v0.7 audio dependencies;
 - existing v0.6 database is available so `1.6.0 → 1.7.0` migration is exercised;
 - Yandex session/token works through the normal secure credential flow;
 - Yandex Liked/playlists are loaded;
@@ -30,31 +31,51 @@ For one proven `missing` track that is currently `unreviewed`:
 
 ```text
 1. open Недостающие
-2. find a Missing track
-3. do NOT press Нужен first
-4. press Скачать once
-5. if no target exists, choose the test download folder
-6. download starts without manually opening/starting the queue
-7. observe final success/error message
-8. open Загрузки only to inspect progress/history
-9. verify physical final file exists in the exact selected folder
-10. verify no .part remains
-11. open Local Library and find the file
-12. verify local_audio_files.library_root_id is non-NULL
-13. verify normalized_path/metadata are populated
-14. refresh Missing/Coverage
-15. track is covered and disappears from default Missing
-16. restart MusicArk
-17. completed user task history remains visible
+2. optionally set Решение = Не решено
+3. find a Missing track
+4. do NOT press Нужен first
+5. press Скачать once
+6. if no target exists, choose the test download folder
+7. download starts without manually opening/starting the queue
+8. confirm the user's triage action is still Не решено
+9. confirm other Missing rows remain visible
+10. observe final success/error message
+11. open Загрузки only to inspect progress/history
+12. verify physical final file exists in the exact selected folder
+13. verify no .part remains
+14. open Local Library and find the file
+15. verify local_audio_files.library_root_id is non-NULL
+16. verify normalized_path/metadata are populated
+17. refresh Missing/Coverage
+18. only the successfully downloaded identity becomes covered/leaves Missing
+19. restart MusicArk
+20. completed user task history remains visible
 ```
-
-Also confirm the single click internally changed the historical action to `wanted`; this is an implementation invariant, not a required separate user interaction.
 
 Repeat for at most 1–2 additional tracks before any batch test.
 
-## Exact destination persistence
+## Direct intent / triage separation
 
-This specifically covers the reported “folder changes after leaving Downloads” regression:
+Direct **Скачать** is explicit acquisition intent. It must not rewrite Coverage triage.
+
+```text
+Missing + unreviewed + direct Скачать → allowed; action remains unreviewed
+Missing + ignored    + direct Скачать → allowed; action remains ignored
+Missing + wanted     + direct Скачать → allowed; action remains wanted
+```
+
+The `Нужен` action remains the input for `Скачать все «Нужные»` and other triage/bulk workflows.
+
+Explicitly test the reported regression:
+
+1. Set `Решение = Не решено`.
+2. Confirm multiple Missing rows are visible.
+3. Press **Скачать** on one row.
+4. While downloading, the list must not be cleared merely because of a hidden action mutation.
+5. After success, the downloaded row may disappear because it is now Covered; the remaining Missing rows stay visible.
+6. On failure, the row remains Missing and retains its original triage action.
+
+## Exact destination persistence
 
 1. Open `Загрузки`.
 2. Select a distinctive disposable folder, for example `C:\MusicArkTest\ChosenHere`.
@@ -77,22 +98,6 @@ For a database created before exact `target_path` persistence, re-select the fol
 - titles/artists containing `< > : " / \\ | ? *`, trailing dots/spaces, or Windows reserved names cannot escape/create invalid paths;
 - reference cache `.musicark\downloads\yandex\` is not used as the user destination and is not shown as user history.
 
-## Eligibility
-
-Backend truth table remains:
-
-```text
-missing + wanted    → allowed
-missing + ignored   → direct Скачать first changes action to wanted, then allowed
-missing + unreviewed→ direct Скачать first changes action to wanted, then allowed
-covered + wanted    → rejected/skipped
-conflict + wanted   → rejected
-not_analyzed+wanted → rejected
-MATCHED + DIFFERENT_VERSION → not downloaded by default
-```
-
-A track present in Liked + several playlists still creates one active user download task.
-
 ## Queue / legacy isolation
 
 - queued/running/completed/failed/cancelled/skipped states display correctly;
@@ -105,18 +110,24 @@ A track present in Liked + several playlists still creates one active user downl
 - internal/legacy reference-download rows are not shown, run, cancelled, retried, recovered, or cleared by the v0.7 user queue UI;
 - restart preserves user completed/failed/queued/cancelled history.
 
-## File actions / path privacy
+## Embedded playback / path privacy
 
-For a completed download and an ordinary Local Library track:
+For a completed download and at least one ordinary Local Library track:
 
-- the full filesystem path is **not printed by default** on the row/card;
-- `Показать путь` reveals the full path only on request;
-- `Скрыть путь` hides it again where applicable;
-- `▶ / Воспроизвести` opens the local file using the Windows default associated audio player;
-- `Открыть расположение файла` opens Explorer and selects/reveals the real file;
-- a missing/deleted physical file produces an error instead of launching an unrelated path.
-
-This v0.7 check is for system-player launch only. An embedded MusicArk play/pause/seek player is not part of this release.
+1. Confirm the full filesystem path is **not printed by default**.
+2. `Показать путь` reveals it only on request.
+3. Press `▶ / Воспроизвести`.
+4. **No Windows Media Player or other external associated application may open.**
+5. Audio must begin from inside MusicArk.
+6. A bottom Now Playing bar appears.
+7. Verify Play/Pause.
+8. Verify seek after duration becomes known.
+9. Verify position and duration advance/render correctly.
+10. Switch between `Локальная библиотека`, `Недостающие`, `Загрузки` and Yandex; playback and Now Playing remain active.
+11. Stop/close the player; playback stops and the bar disappears.
+12. `Открыть расположение файла` still opens Explorer and selects/reveals the real file.
+13. Test at least one MP3 and, if present in the real collection, one FLAC/M4A/OGG file.
+14. A missing/deleted physical file produces an error and does not launch an external player.
 
 ## Crash recovery
 
@@ -167,7 +178,8 @@ For a queued user task, Cancel should be immediate. No arbitrary PID/process kil
 - app remains running;
 - task becomes failed with a network-class error;
 - queue persists;
-- track stays Missing + wanted;
+- track stays Missing;
+- original Coverage triage action remains unchanged;
 - Retry remains available.
 
 ### Authentication failure
@@ -261,15 +273,19 @@ flutter run -d windows
 
 - migration remains forward-only/idempotent and preserves existing state;
 - exact selected target survives tab/service recreation and restart;
-- one-click `Missing -> Скачать` works without a prior manual `Нужен` click;
+- direct `Missing -> Скачать` works without a prior `Нужен` click or triage mutation;
+- a Decision filter remains stable while direct download runs;
 - user queue is isolated from internal/reference queue history/actions;
 - progress/cancellation/retry/crash recovery behave as documented;
 - successful downloads become normal Local Library rows with non-NULL root IDs;
 - exact identity link is created without fuzzy matching or fabricated Variant state;
 - successful downloaded tracks become Covered automatically;
-- path is hidden by default and play/reveal file actions work on Windows;
+- raw paths remain hidden by default;
+- local music plays inside MusicArk with play/pause/seek and persistent Now Playing;
+- external OS media player is not launched for playback;
+- Explorer reveal remains separate and functional;
 - 5–10 track batch has no duplicate tasks/files or full rescan-per-file behavior;
 - Python tests, Flutter analyzer and Flutter tests are green;
-- the real Windows 1–3 track validation above is completed before release acceptance.
+- the real Windows 1–3 track + playback validation above is completed before release acceptance.
 
-Do not claim real Yandex download, Windows UI, or full release validation until these checks have actually run.
+Do not claim real Yandex download, Windows playback, Windows UI, or full release validation until these checks have actually run.

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'desktop_file_actions.dart';
 import 'download_bridge.dart';
 import 'folder_picker.dart';
 
@@ -10,10 +11,12 @@ class DownloadPage extends StatefulWidget {
     super.key,
     required this.bridge,
     this.folderPicker = const SystemLocalFolderPicker(),
+    this.fileActions = const SystemLocalFileActions(),
   });
 
   final DownloadBridgeClient bridge;
   final LocalFolderPicker folderPicker;
+  final LocalFileActions fileActions;
 
   @override
   State<DownloadPage> createState() => _DownloadPageState();
@@ -35,6 +38,7 @@ class _DownloadPageState extends State<DownloadPage> {
   Map<String, dynamic> _summary = const {};
   Map<String, dynamic> _settings = const {};
   List<Map<String, dynamic>> _items = const [];
+  final Set<String> _visiblePaths = {};
   Timer? _pollTimer;
 
   @override
@@ -74,6 +78,8 @@ class _DownloadPageState extends State<DownloadPage> {
         _items = rawItems is List
             ? rawItems.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : <Map<String, dynamic>>[];
+        final ids = _items.map((item) => '${item['id']}').toSet();
+        _visiblePaths.removeWhere((id) => !ids.contains(id));
         _error = null;
         _loading = false;
       });
@@ -108,19 +114,26 @@ class _DownloadPageState extends State<DownloadPage> {
     if (!await _ensureTarget()) return;
     try {
       final result = await widget.bridge.enqueueWanted();
+      final created = (result['created'] as num?)?.toInt() ?? 0;
+      final existing = (result['existing'] as num?)?.toInt() ?? 0;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Добавлено в очередь: ${result['created'] ?? 0}')),
+          SnackBar(content: Text('К скачиванию: ${created + existing}')),
         );
       }
-      await _load();
+      if (created + existing > 0) {
+        await _runQueue(skipTargetCheck: true);
+      } else {
+        await _load();
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
   }
 
-  Future<void> _runQueue() async {
-    if (_workerActive || !await _ensureTarget()) return;
+  Future<void> _runQueue({bool skipTargetCheck = false}) async {
+    if (_workerActive) return;
+    if (!skipTargetCheck && !await _ensureTarget()) return;
     setState(() {
       _workerActive = true;
       _error = null;
@@ -142,7 +155,7 @@ class _DownloadPageState extends State<DownloadPage> {
   Future<void> _retry(String taskId) async {
     try {
       await widget.bridge.retry(taskId);
-      await _load();
+      await _runQueue();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -163,6 +176,22 @@ class _DownloadPageState extends State<DownloadPage> {
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _play(String path) async {
+    try {
+      await widget.fileActions.play(path);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Не удалось открыть трек: $error');
+    }
+  }
+
+  Future<void> _reveal(String path) async {
+    try {
+      await widget.fileActions.reveal(path);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Не удалось открыть расположение файла: $error');
     }
   }
 
@@ -214,7 +243,7 @@ class _DownloadPageState extends State<DownloadPage> {
                       key: Key('downloads-empty'),
                       child: Padding(
                         padding: EdgeInsets.all(24),
-                        child: Text('Очередь пуста.'),
+                        child: Text('История загрузок пуста.'),
                       ),
                     )
                   else
@@ -268,16 +297,16 @@ class _DownloadPageState extends State<DownloadPage> {
         FilledButton.icon(
           key: const Key('downloads-enqueue-wanted'),
           onPressed: _enqueueWanted,
-          icon: const Icon(Icons.playlist_add),
-          label: const Text('Добавить все «Нужные»'),
+          icon: const Icon(Icons.download_for_offline_outlined),
+          label: const Text('Скачать все «Нужные»'),
         ),
         FilledButton.tonalIcon(
           key: const Key('downloads-run'),
           onPressed: _workerActive ? null : _runQueue,
           icon: _workerActive
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.download),
-          label: const Text('Запустить очередь'),
+              : const Icon(Icons.play_arrow),
+          label: const Text('Продолжить очередь'),
         ),
         TextButton(
           key: const Key('downloads-clear-completed'),
@@ -291,6 +320,7 @@ class _DownloadPageState extends State<DownloadPage> {
   Widget _filterBar() {
     return Wrap(
       spacing: 8,
+      runSpacing: 8,
       children: _filters.entries.map((entry) {
         return ChoiceChip(
           label: Text(entry.key),
@@ -305,6 +335,7 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Widget _taskCard(Map<String, dynamic> task) {
+    final id = '${task['id']}';
     final status = (task['status'] ?? '').toString();
     final progress = task['progress'];
     final progressValue = progress is num ? progress.toDouble().clamp(0.0, 1.0).toDouble() : null;
@@ -314,8 +345,12 @@ class _DownloadPageState extends State<DownloadPage> {
         : '';
     final downloaded = (task['downloadedBytes'] as num?)?.toInt() ?? 0;
     final total = (task['totalBytes'] as num?)?.toInt();
+    final path = (task['targetPath'] ?? '').toString();
+    final showPath = _visiblePaths.contains(id);
+    final completed = status == 'completed' && path.isNotEmpty;
+
     return Card(
-      key: Key('download-task-${task['id']}'),
+      key: Key('download-task-$id'),
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -338,7 +373,7 @@ class _DownloadPageState extends State<DownloadPage> {
             if (status == 'running') ...[
               const SizedBox(height: 10),
               LinearProgressIndicator(
-                key: Key('download-progress-${task['id']}'),
+                key: Key('download-progress-$id'),
                 value: progressValue,
               ),
               const SizedBox(height: 6),
@@ -346,13 +381,56 @@ class _DownloadPageState extends State<DownloadPage> {
                   ? '${_bytes(downloaded)} загружено'
                   : '${_bytes(downloaded)} / ${_bytes(total)} ($progressPercent%)'),
             ],
-            if ((task['targetPath'] ?? '').toString().isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text('Файл: ${task['targetPath']}', style: Theme.of(context).textTheme.bodySmall),
-            ],
             if ((task['error'] ?? '').toString().isNotEmpty) ...[
               const SizedBox(height: 8),
               Text('${task['error']}', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ],
+            if (path.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (completed)
+                    IconButton(
+                      key: Key('download-play-$id'),
+                      tooltip: 'Воспроизвести',
+                      onPressed: () => _play(path),
+                      icon: const Icon(Icons.play_arrow),
+                    ),
+                  if (completed)
+                    IconButton(
+                      key: Key('download-reveal-$id'),
+                      tooltip: 'Открыть расположение файла',
+                      onPressed: () => _reveal(path),
+                      icon: const Icon(Icons.folder_open_outlined),
+                    ),
+                  TextButton.icon(
+                    key: Key('download-toggle-path-$id'),
+                    onPressed: () {
+                      setState(() {
+                        if (showPath) {
+                          _visiblePaths.remove(id);
+                        } else {
+                          _visiblePaths.add(id);
+                        }
+                      });
+                    },
+                    icon: Icon(showPath ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
+                    label: Text(showPath ? 'Скрыть путь' : 'Показать путь'),
+                  ),
+                ],
+              ),
+              if (showPath)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: SelectableText(
+                    path,
+                    key: Key('download-path-$id'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
             ],
             if (task['canRetry'] == true || task['canCancel'] == true) ...[
               const SizedBox(height: 8),
@@ -361,14 +439,14 @@ class _DownloadPageState extends State<DownloadPage> {
                 children: [
                   if (task['canRetry'] == true)
                     TextButton(
-                      key: Key('download-retry-${task['id']}'),
-                      onPressed: () => _retry('${task['id']}'),
+                      key: Key('download-retry-$id'),
+                      onPressed: () => _retry(id),
                       child: const Text('Повторить'),
                     ),
                   if (task['canCancel'] == true)
                     TextButton(
-                      key: Key('download-cancel-${task['id']}'),
-                      onPressed: () => _cancel('${task['id']}'),
+                      key: Key('download-cancel-$id'),
+                      onPressed: () => _cancel(id),
                       child: const Text('Отменить'),
                     ),
                 ],

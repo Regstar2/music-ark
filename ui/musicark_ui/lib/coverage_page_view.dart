@@ -291,7 +291,6 @@ extension _CoveragePageView on _CoveragePageState {
         final item = _items[index];
         final id = (item['externalId'] ?? '').toString();
         final isMissing = item['coverageStatus'] == 'missing';
-        final isWanted = item['userAction'] == 'wanted';
         return _CoverageRow(
           key: ValueKey('coverage-row-$id'),
           item: item,
@@ -309,7 +308,7 @@ extension _CoveragePageView on _CoveragePageState {
           onWanted: isMissing ? () => _setAction(id, 'wanted') : null,
           onIgnored: isMissing ? () => _setAction(id, 'ignored') : null,
           onReset: isMissing ? () => _setAction(id, 'unreviewed') : null,
-          onDownload: isMissing && isWanted && widget.downloadBridge != null
+          onDownload: isMissing && widget.downloadBridge != null
               ? () => _enqueueDownload(id)
               : null,
           onOpenMatching: item['coverageStatus'] == 'needs_review' || item['coverageStatus'] == 'not_analyzed'

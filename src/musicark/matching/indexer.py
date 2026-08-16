@@ -12,12 +12,7 @@ from .normalize import artists_key, normalize_text
 
 
 class LocalMatchIndex:
-    """Refresh compact normalized columns once per matching run.
-
-    This is deliberately O(Local) once per run, never O(Yandex × Local). It keeps the
-    matching index correct even when v0.4 rescans update structured metadata without
-    knowing anything about v0.5 matching internals.
-    """
+    """Refresh normalized metadata only for the effective Local Library."""
 
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
@@ -32,6 +27,12 @@ class LocalMatchIndex:
                            normalized_title, normalized_artists_text, duration_bucket
                     FROM local_audio_files
                     WHERE availability='available'
+                      AND (
+                        NOT EXISTS (SELECT 1 FROM local_library_roots WHERE enabled=1)
+                        OR library_root_id IN (
+                            SELECT id FROM local_library_roots WHERE enabled=1
+                        )
+                      )
                     ORDER BY id
                     """
                 ).fetchall()

@@ -1,4 +1,4 @@
-"""Application-level orchestration for MusicArk v0.5 matching."""
+"""Application-level orchestration for MusicArk v0.5/v0.8 matching."""
 
 from __future__ import annotations
 
@@ -18,11 +18,12 @@ from .manual_state import ManualMatchState
 from .models import MatchDecision, MatchMethod, MatchStatus, ScoredCandidate
 from .policy import AMBIGUITY_MARGIN, AUTO_MATCH_THRESHOLD, CONFLICT_THRESHOLD, MATCHER_VERSION
 from .result_queries import MatchingResultQueries
+from .scope import MatchingScopeState
 from .scoring import MatchScorer
 
 
 class MatchingService:
-    """Offline-only matching orchestration over cached provider and local data."""
+    """Offline matching over the currently selected Yandex collection and Local Library."""
 
     def __init__(
         self,
@@ -42,6 +43,7 @@ class MatchingService:
         self._local_index = LocalMatchIndex(self._database_path)
         self._input = MatchingInputRepository(self._database_path)
         self._manual_state = ManualMatchState(self._database_path)
+        self._scope = MatchingScopeState(self._database_path)
 
     def _resolve_database_path(self) -> Path:
         config = load_config(self._base_dir)
@@ -59,17 +61,43 @@ class MatchingService:
             dict(provider["payload"]),
         )
 
-    def summary(self) -> dict[str, Any]:
-        self._input.sync_provider_tracks(self._provider_id)
-        return self._repository.summary(self._provider_id)
+    def _collection(self, collection_id: str | None) -> str:
+        return self._scope.resolve_collection(collection_id, self._provider_id)
 
-    def run(self) -> dict[str, Any]:
-        started = time.perf_counter()
-        provider_identity_count = self._input.sync_provider_tracks(self._provider_id)
-        stale = self._repository.cleanup_stale_links()
-        index_updates = self._local_index.refresh()
-        local_fingerprint = self._repository.local_library_fingerprint()
+    def _providers(self, collection_id: str) -> list[dict[str, Any]]:
         providers = self._repository.list_provider_track_candidates(self._provider_id)
+        scoped_ids = self._scope.external_ids(
+            provider_id=self._provider_id,
+            collection_id=collection_id,
+        )
+        if scoped_ids is None:
+            return providers
+        return [
+            item
+            for item in providers
+            if str(item.get("external_id") or "") in scoped_ids
+        ]
+
+    def summary(self, *, collection_id: str | None = None) -> dict[str, Any]:
+        self._input.sync_provider_tracks(self._provider_id)
+        collection = self._collection(collection_id)
+        return self._scope.summary(
+            self._repository,
+            provider_id=self._provider_id,
+            collection_id=collection,
+        )
+
+    def run(self, *, collection_id: str | None = None) -> dict[str, Any]:
+        started = time.perf_counter()
+        self._input.sync_provider_tracks(self._provider_id)
+        collection = self._collection(collection_id)
+        stale = self._scope.invalidate_non_library_matches()
+        index_updates = self._local_index.refresh()
+        # Keep the existing global fingerprint contract so v0.6 Coverage and v0.7
+        # Download freshness remain compatible. Root ownership is enforced separately.
+        local_fingerprint = self._repository.local_library_fingerprint()
+        providers = self._providers(collection)
+        provider_identity_count = len(providers)
         generator = CandidateGenerator(
             self._repository,
             database_path=self._database_path,
@@ -123,11 +151,16 @@ class MatchingService:
                 batch.clear()
         self._repository.persist_batch(batch)
 
-        summary = self._repository.summary(self._provider_id)
+        summary = self._scope.summary(
+            self._repository,
+            provider_id=self._provider_id,
+            collection_id=collection,
+        )
         duration = max(0.0, time.perf_counter() - started)
         result = {
             "total": summary["processed"],
             "providerIdentities": provider_identity_count,
+            "collectionId": collection,
             "matched": summary["matched"],
             "conflicts": summary["conflicts"],
             "unmatched": summary["unmatched"],
@@ -147,9 +180,10 @@ class MatchingService:
                 entity_id=self._provider_id,
                 status="success",
                 details=(
-                    f"matched={result['matched']} conflicts={result['conflicts']} "
-                    f"unmatched={result['unmatched']} unchanged={unchanged} "
-                    f"manual_stale={manual_stale} comparisons={generator.comparison_count}"
+                    f"collection={collection or 'all'} matched={result['matched']} "
+                    f"conflicts={result['conflicts']} unmatched={result['unmatched']} "
+                    f"unchanged={unchanged} manual_stale={manual_stale} "
+                    f"comparisons={generator.comparison_count}"
                 ),
             )
         )
@@ -225,19 +259,25 @@ class MatchingService:
         status: str = "",
         search: str = "",
         sort: str = "confidence",
+        collection_id: str | None = None,
     ) -> dict[str, Any]:
+        collection = self._collection(collection_id)
+        effective_search = self._scope.clean_search(search)
         items, total = self._queries.list_results(
             provider_id=self._provider_id,
             limit=limit,
             offset=offset,
             status=status,
-            search=search,
+            search=effective_search,
             sort=sort,
+            collection_id=collection,
         )
         return {
             "count": total,
             "limit": max(1, min(int(limit), 500)),
             "offset": max(0, int(offset)),
+            "collectionId": collection,
+            "search": effective_search,
             "items": items,
         }
 
@@ -257,6 +297,7 @@ class MatchingService:
         return {"result": item}
 
     def accept(self, external_id: str, local_file_id: int) -> dict[str, Any]:
+        self._scope.assert_local_file_allowed(int(local_file_id))
         self._repository.accept_manual(self._provider_id, external_id, int(local_file_id))
         self._manual_state.store_reference(self._provider_id, external_id)
         self._audit.append(

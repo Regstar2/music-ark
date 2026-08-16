@@ -63,7 +63,6 @@ class DownloadBridge implements DownloadBridgeClient {
       'PYTHONIOENCODING': 'utf-8',
       'PYTHONUTF8': '1',
     };
-    // Production downloads must obtain the Yandex token from SystemCredentialStore.
     environment.remove('YANDEX_MUSIC_TOKEN');
     if (targetPath != null && targetPath.isNotEmpty) {
       environment['MUSICARK_DOWNLOAD_TARGET'] = targetPath;
@@ -208,7 +207,9 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   FakeDownloadBridge({this.configured = true});
   bool configured;
   bool runCalled = false;
+  int enqueueCalls = 0;
   int enqueueWantedCalls = 0;
+  String? lastEnqueuedId;
   String? selectedPath;
   final List<Map<String, dynamic>> items = [
     {
@@ -280,7 +281,19 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   }
 
   @override
-  Future<Map<String, dynamic>> enqueue(String externalId) async => {'created': true};
+  Future<Map<String, dynamic>> enqueue(String externalId) async {
+    enqueueCalls++;
+    lastEnqueuedId = externalId;
+    return {
+      'created': true,
+      'task': {
+        'id': 'direct-$externalId',
+        'provider': 'yandex_music',
+        'externalId': externalId,
+        'status': 'queued',
+      },
+    };
+  }
 
   @override
   Future<Map<String, dynamic>> enqueueWanted() async {
@@ -321,12 +334,12 @@ class FakeDownloadBridge implements DownloadBridgeClient {
 
   @override
   Future<Map<String, dynamic>> settings() async {
-    final root = selectedPath ?? r'C:\Music';
+    final target = selectedPath ?? r'C:\Music';
     return {
       'targetConfigured': configured,
       'rootId': configured ? 1 : null,
-      'rootPath': configured ? root : null,
-      'targetPath': configured ? '$root\\MusicArk' : null,
+      'rootPath': configured ? target : null,
+      'targetPath': configured ? target : null,
     };
   }
 

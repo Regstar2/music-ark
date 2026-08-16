@@ -10,8 +10,8 @@ Use Windows and the real cached Yandex Library together with the real Local Libr
 - Yandex Liked/playlists are loaded;
 - one or more Local Library roots are configured and scanned;
 - Matching has run and there are representative `MATCHED`, `CONFLICT`, `UNMATCHED`, and preferably `not_analyzed` states;
-- several proven Missing rows can safely be marked `wanted`;
-- enough free disk space exists in the selected test root.
+- several proven Missing rows are available;
+- enough free disk space exists in the selected test folder.
 
 ## Migration / regression
 
@@ -21,82 +21,113 @@ Use Windows and the real cached Yandex Library together with the real Local Libr
 4. Confirm Yandex session/cache/Liked/playlists remain present.
 5. Confirm Local Library roots and existing indexed tracks remain present.
 6. Confirm Matching results, manual accept/reject, conflicts, Variant results, and wanted/ignored decisions remain present.
-7. Confirm legacy download-task rows remain readable.
+7. Confirm legacy download/reference rows remain in storage but are **not shown in the user Downloads page**.
 8. Confirm no DB reset or manual SQL is required.
 
-## Primary 1–3 track scenario
+## Primary 1–3 track scenario — one click
 
-For one proven `missing` track:
+For one proven `missing` track that is currently `unreviewed`:
 
 ```text
-1. Yandex Library loaded
-2. Local Library scanned
-3. Matching run
-4. open Недостающие
-5. mark track Нужен
-6. press В загрузки
-7. if needed choose a Local Library root/folder
-8. open Загрузки
-9. press Запустить очередь
-10. observe real/indeterminate progress
-11. wait for completed
-12. verify physical final file exists
-13. verify no .part remains
-14. open Local Library and find the file
-15. verify local_audio_files.library_root_id is non-NULL
-16. verify normalized_path/metadata are populated
-17. refresh Missing/Coverage
-18. track is covered and disappears from default Missing
-19. restart MusicArk
-20. completed task history remains visible
+1. open Недостающие
+2. find a Missing track
+3. do NOT press Нужен first
+4. press Скачать once
+5. if no target exists, choose the test download folder
+6. download starts without manually opening/starting the queue
+7. observe final success/error message
+8. open Загрузки only to inspect progress/history
+9. verify physical final file exists in the exact selected folder
+10. verify no .part remains
+11. open Local Library and find the file
+12. verify local_audio_files.library_root_id is non-NULL
+13. verify normalized_path/metadata are populated
+14. refresh Missing/Coverage
+15. track is covered and disappears from default Missing
+16. restart MusicArk
+17. completed user task history remains visible
 ```
+
+Also confirm the single click internally changed the historical action to `wanted`; this is an implementation invariant, not a required separate user interaction.
 
 Repeat for at most 1–2 additional tracks before any batch test.
 
-## Destination / filename
+## Exact destination persistence
 
-- with no target configured, enqueue/run workflow must ask the user to choose a folder rather than silently using `.musicark`;
-- selecting a new folder makes it a valid Local Library root;
-- selecting a folder under an existing root keeps downloads inside that root's managed `MusicArk` location;
-- restart preserves the selected default root;
+This specifically covers the reported “folder changes after leaving Downloads” regression:
+
+1. Open `Загрузки`.
+2. Select a distinctive disposable folder, for example `C:\MusicArkTest\ChosenHere`.
+3. Record exactly what the UI shows as the target.
+4. Switch to `Недостающие`, `Локальная библиотека`, and another tab.
+5. Return to `Загрузки`.
+6. Confirm the target is still the **same exact path**, not a parent Local Library root and not a newly derived `<root>\MusicArk` path.
+7. Restart MusicArk and confirm the exact selected path remains.
+8. Download one track and confirm its file is written directly into the selected folder.
+
+If the selected directory is inside an existing Local Library root, the parent root may remain the indexing owner internally, but the visible/download target must remain the exact selected directory.
+
+For a database created before exact `target_path` persistence, re-select the folder once. Thereafter it must remain stable.
+
+## Filename / path safety
+
+- with no target configured, pressing `Скачать` must route the user to choose a folder rather than silently using `.musicark`;
 - changing the default target affects newly enqueued tasks, not target snapshots already stored in queued tasks;
 - filenames contain the stable Yandex ID and remain valid with Cyrillic, spaces and Unicode;
 - titles/artists containing `< > : " / \\ | ? *`, trailing dots/spaces, or Windows reserved names cannot escape/create invalid paths;
-- reference cache `.musicark\downloads\yandex\` is not used as the user download destination.
+- reference cache `.musicark\downloads\yandex\` is not used as the user destination and is not shown as user history.
 
 ## Eligibility
 
-Verify the ordinary enqueue rule exactly:
+Backend truth table remains:
 
 ```text
 missing + wanted    → allowed
-missing + ignored   → rejected / not included in bulk
-missing + unreviewed→ rejected / not included in bulk
+missing + ignored   → direct Скачать first changes action to wanted, then allowed
+missing + unreviewed→ direct Скачать first changes action to wanted, then allowed
 covered + wanted    → rejected/skipped
 conflict + wanted   → rejected
 not_analyzed+wanted → rejected
 MATCHED + DIFFERENT_VERSION → not downloaded by default
 ```
 
-A track present in Liked + several playlists still creates one active download task.
+A track present in Liked + several playlists still creates one active user download task.
 
-## Queue / persistence
+## Queue / legacy isolation
 
 - queued/running/completed/failed/cancelled/skipped states display correctly;
 - filters All / queued / running / completed / errors work;
 - repeated enqueue of the same active provider identity does not duplicate tasks;
-- completed tasks are not rerun by ordinary Run queue;
-- clearing completed history removes only SQLite task history and never the audio file;
-- restart preserves completed/failed/queued/cancelled history.
+- completed tasks are not rerun;
+- `Скачать все «Нужные»` starts the user queue automatically;
+- `Продолжить очередь` remains a recovery/manual control, not a required ordinary step;
+- clearing completed history removes only v0.7 user task history and never audio files;
+- internal/legacy reference-download rows are not shown, run, cancelled, retried, recovered, or cleared by the v0.7 user queue UI;
+- restart preserves user completed/failed/queued/cancelled history.
+
+## File actions / path privacy
+
+For a completed download and an ordinary Local Library track:
+
+- the full filesystem path is **not printed by default** on the row/card;
+- `Показать путь` reveals the full path only on request;
+- `Скрыть путь` hides it again where applicable;
+- `▶ / Воспроизвести` opens the local file using the Windows default associated audio player;
+- `Открыть расположение файла` opens Explorer and selects/reveals the real file;
+- a missing/deleted physical file produces an error instead of launching an unrelated path.
+
+This v0.7 check is for system-player launch only. An embedded MusicArk play/pause/seek player is not part of this release.
 
 ## Crash recovery
 
-1. Start a download.
+1. Start a user download.
 2. Terminate MusicArk during `running` (use a disposable test track/location).
 3. Relaunch.
-4. Confirm the task does not remain permanently `running`.
-5. Expected v0.7 behavior: it is `failed` with an interrupted reason and Retry is available.
-6. Retry from zero and confirm exactly one final indexed file exists.
+4. Confirm the user task does not remain permanently `running`.
+5. Expected behavior: `failed` with an interrupted reason and Retry available.
+6. Confirm any matching `.part` was removed.
+7. Confirm internal/reference tasks were not changed by user-download recovery.
+8. Retry and confirm exactly one final indexed file exists.
 
 ## Progress
 
@@ -114,7 +145,7 @@ For unknown length, if a controlled mock/debug path is available:
 
 ## Cancellation
 
-For a running track:
+For a running user track:
 
 ```text
 start
@@ -126,13 +157,13 @@ start
 → Coverage remains missing
 ```
 
-For a queued task, Cancel should be immediate. No arbitrary PID/process kill should occur.
+For a queued user task, Cancel should be immediate. No arbitrary PID/process kill should occur.
 
 ## Failure scenarios
 
 ### Network off
 
-- start/attempt a wanted download with network unavailable;
+- press `Скачать` for a Missing track with network unavailable;
 - app remains running;
 - task becomes failed with a network-class error;
 - queue persists;
@@ -154,7 +185,7 @@ For a queued task, Cancel should be immediate. No arbitrary PID/process kill sho
 
 ## Post-download product gate
 
-For every reported `completed` task verify all are true:
+For every reported `completed` user task verify all are true:
 
 - final file exists and size > 0;
 - audio metadata reader can open it;
@@ -169,7 +200,7 @@ A task must not be treated as successful if indexing/linking/coverage refresh fa
 ## Existing destination / Retry
 
 - retry after a transient failure must not create duplicate final files;
-- a valid existing managed file for the same stable Yandex identity may be reused/indexed safely;
+- a valid existing file for the same stable Yandex identity may be reused/indexed safely;
 - MusicArk must not overwrite arbitrary unrelated existing music;
 - corrupted/partial `.part` files must never appear as valid Local Library tracks.
 
@@ -178,9 +209,9 @@ A task must not be treated as successful if indexing/linking/coverage refresh fa
 Only after the 1–3 track checks pass:
 
 ```text
-5–10 missing+wanted tracks
-→ Добавить все «Нужные»
-→ Run queue
+5–10 Missing tracks marked Нужен
+→ Скачать все «Нужные»
+→ queue starts automatically
 ```
 
 Verify:
@@ -228,13 +259,15 @@ flutter run -d windows
 
 ## Pass criteria
 
-- `1.6.0 → 1.7.0` migration is forward-only/idempotent and preserves existing state;
-- eligibility/dedup/recheck rules are correct;
-- real progress/cancellation/retry/crash recovery behave as documented;
+- migration remains forward-only/idempotent and preserves existing state;
+- exact selected target survives tab/service recreation and restart;
+- one-click `Missing -> Скачать` works without a prior manual `Нужен` click;
+- user queue is isolated from internal/reference queue history/actions;
+- progress/cancellation/retry/crash recovery behave as documented;
 - successful downloads become normal Local Library rows with non-NULL root IDs;
 - exact identity link is created without fuzzy matching or fabricated Variant state;
 - successful downloaded tracks become Covered automatically;
-- failure leaves technical Missing state intact;
+- path is hidden by default and play/reveal file actions work on Windows;
 - 5–10 track batch has no duplicate tasks/files or full rescan-per-file behavior;
 - Python tests, Flutter analyzer and Flutter tests are green;
 - the real Windows 1–3 track validation above is completed before release acceptance.

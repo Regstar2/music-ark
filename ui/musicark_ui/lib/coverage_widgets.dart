@@ -167,7 +167,7 @@ class _CoverageRow extends StatelessWidget {
                           key: ValueKey('coverage-download-${item['externalId']}'),
                           onPressed: onDownload,
                           icon: const Icon(Icons.download, size: 18),
-                          label: const Text('В загрузки'),
+                          label: const Text('Скачать'),
                         ),
                       if (action != 'unreviewed')
                         IconButton(

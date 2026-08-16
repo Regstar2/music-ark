@@ -225,8 +225,6 @@ class DownloadStorageRepository:
                 return
             partial.unlink(missing_ok=True)
         except OSError:
-            # Recovery state must remain repairable even if Windows temporarily
-            # prevents deletion; a subsequent Retry removes its own .part again.
             return
 
     def summary(self) -> dict[str, int]:
@@ -258,31 +256,64 @@ class DownloadStorageRepository:
             raise StorageError("Failed to clear completed download history.") from exc
 
     def get_target_root_id(self) -> int | None:
-        try:
-            with closing(sqlite3.connect(self._database_path)) as conn:
-                row = conn.execute(
-                    "SELECT value FROM download_settings WHERE key='target_root_id'"
-                ).fetchone()
-        except sqlite3.Error as exc:
-            raise StorageError("Failed to read download target setting.") from exc
-        if not row:
+        value = self._get_setting("target_root_id")
+        if value is None:
             return None
         try:
-            return int(row[0])
+            return int(value)
         except (TypeError, ValueError):
             return None
 
+    def get_target_path(self) -> str | None:
+        value = self._get_setting("target_path")
+        clean = (value or "").strip()
+        return clean or None
+
     def set_target_root_id(self, root_id: int) -> None:
+        self._set_setting("target_root_id", str(int(root_id)))
+
+    def set_target(self, root_id: int, path: Path | str) -> None:
+        """Persist both Local Library ownership and the user's exact folder choice."""
+        target = str(Path(path).expanduser().resolve(strict=False))
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                with conn:
+                    now = _now()
+                    for key, value in (("target_root_id", str(int(root_id))), ("target_path", target)):
+                        conn.execute(
+                            """
+                            INSERT INTO download_settings(key, value, updated_at)
+                            VALUES(?, ?, ?)
+                            ON CONFLICT(key) DO UPDATE
+                            SET value=excluded.value, updated_at=excluded.updated_at
+                            """,
+                            (key, value, now),
+                        )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to persist download target setting.") from exc
+
+    def _get_setting(self, key: str) -> str | None:
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                row = conn.execute(
+                    "SELECT value FROM download_settings WHERE key=?", (key,)
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to read download target setting.") from exc
+        return str(row[0]) if row and row[0] is not None else None
+
+    def _set_setting(self, key: str, value: str) -> None:
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 with conn:
                     conn.execute(
                         """
                         INSERT INTO download_settings(key, value, updated_at)
-                        VALUES('target_root_id', ?, ?)
-                        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                        VALUES(?, ?, ?)
+                        ON CONFLICT(key) DO UPDATE
+                        SET value=excluded.value, updated_at=excluded.updated_at
                         """,
-                        (str(int(root_id)), _now()),
+                        (key, value, _now()),
                     )
         except sqlite3.Error as exc:
             raise StorageError("Failed to persist download target setting.") from exc

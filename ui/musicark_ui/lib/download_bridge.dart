@@ -7,6 +7,7 @@ abstract interface class DownloadBridgeClient {
   Future<Map<String, dynamic>> enqueue(String externalId);
   Future<Map<String, dynamic>> enqueueWanted();
   Future<Map<String, dynamic>> runQueue();
+  Future<Map<String, dynamic>> runTask(String taskId);
   Future<Map<String, dynamic>> retry(String taskId);
   Future<Map<String, dynamic>> cancel(String taskId);
   Future<Map<String, dynamic>> clearCompleted();
@@ -28,6 +29,9 @@ class DownloadBridge implements DownloadBridgeClient {
   Future<Map<String, dynamic>> enqueueWanted() => _run('enqueue_wanted');
   @override
   Future<Map<String, dynamic>> runQueue() => _run('run');
+  @override
+  Future<Map<String, dynamic>> runTask(String taskId) =>
+      _run('run_task', taskId: taskId);
   @override
   Future<Map<String, dynamic>> retry(String taskId) => _run('retry', taskId: taskId);
   @override
@@ -207,6 +211,8 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   FakeDownloadBridge({this.configured = true});
   bool configured;
   bool runCalled = false;
+  int runTaskCalls = 0;
+  String? lastRunTaskId;
   int enqueueCalls = 0;
   int enqueueWantedCalls = 0;
   String? lastEnqueuedId;
@@ -305,6 +311,19 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   Future<Map<String, dynamic>> runQueue() async {
     runCalled = true;
     return {'processed': 0, 'items': []};
+  }
+
+  @override
+  Future<Map<String, dynamic>> runTask(String taskId) async {
+    runTaskCalls++;
+    lastRunTaskId = taskId;
+    return {
+      'task': {
+        'id': taskId,
+        'externalId': taskId.startsWith('direct-') ? taskId.substring(7) : '',
+        'status': 'completed',
+      },
+    };
   }
 
   @override

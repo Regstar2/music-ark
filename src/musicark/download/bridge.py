@@ -27,6 +27,38 @@ _USER_TASK_TYPE = "provider_download"
 _USER_SOURCE_PROVIDER = "yandex_music"
 
 
+class _DirectCoverageProxy:
+    """Present direct user intent to DownloadService without mutating triage state.
+
+    DownloadService historically uses `userAction=wanted` as its safety gate. A
+    direct click on `Скачать` is already explicit user intent, so the bridge marks
+    the persisted task as `direct_request` and presents a transient wanted view only
+    to the service while that task is executed/retried. The real Coverage action in
+    SQLite remains untouched (`unreviewed`, `ignored`, or `wanted`).
+    """
+
+    def __init__(self, repository: Any, external_id: str) -> None:
+        self._repository = repository
+        self._external_id = str(external_id)
+
+    def get_track(self, *, provider_id: str, external_id: str) -> dict[str, Any] | None:
+        item = self._repository.get_track(
+            provider_id=provider_id,
+            external_id=external_id,
+        )
+        if (
+            item is not None
+            and str(external_id) == self._external_id
+            and item.get("coverageStatus") == "missing"
+        ):
+            item = dict(item)
+            item["userAction"] = "wanted"
+        return item
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._repository, name)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="musicark-download-bridge")
     parser.add_argument("--base-dir", default=None)
@@ -133,6 +165,59 @@ def _user_tasks(
     return {"count": len(items), "items": items}
 
 
+def _direct_enqueue(service: DownloadService, external_id: str) -> dict[str, Any]:
+    identity = str(external_id).strip()
+    track = service._coverage.get_track(  # noqa: SLF001 - package bridge boundary.
+        provider_id=service.SOURCE_PROVIDER,
+        external_id=identity,
+    )
+    if track is None:
+        raise DownloadServiceError(
+            "Provider track is not present in the cached library.",
+            code="track_missing",
+        )
+    if track.get("coverageStatus") != "missing":
+        raise DownloadServiceError(
+            "Only a currently Missing track can be downloaded directly.",
+            code="not_eligible",
+        )
+
+    # Reuse the existing queue construction, but do not persist a fake triage
+    # decision merely to satisfy its historical wanted gate.
+    service_view = dict(track)
+    service_view["userAction"] = "wanted"
+    task, created = service._enqueue_track(service_view)  # noqa: SLF001
+    task.raw_payload["direct_request"] = True
+    service._downloads.upsert_task(task)  # noqa: SLF001
+    return {"created": created, "task": service._task_payload(task)}  # noqa: SLF001
+
+
+def _run_user_task(service: DownloadService, task_id: str):  # type: ignore[no-untyped-def]
+    task = service._downloads.get_task(task_id)  # noqa: SLF001
+    if not bool(task.raw_payload.get("direct_request")):
+        return service.run_task(task_id)
+
+    original = service._coverage  # noqa: SLF001
+    service._coverage = _DirectCoverageProxy(original, task.source_id)  # noqa: SLF001
+    try:
+        return service.run_task(task_id)
+    finally:
+        service._coverage = original  # noqa: SLF001
+
+
+def _retry_user_task(service: DownloadService, task_id: str) -> dict[str, Any]:
+    task = service._downloads.get_task(task_id)  # noqa: SLF001
+    if not bool(task.raw_payload.get("direct_request")):
+        return service.retry(task_id)
+
+    original = service._coverage  # noqa: SLF001
+    service._coverage = _DirectCoverageProxy(original, task.source_id)  # noqa: SLF001
+    try:
+        return service.retry(task_id)
+    finally:
+        service._coverage = original  # noqa: SLF001
+
+
 def _user_run(service: DownloadService) -> dict[str, Any]:
     if _user_items(service, status="running", limit=1):
         raise DownloadServiceError("A download worker is already running.", code="worker_busy")
@@ -145,7 +230,7 @@ def _user_run(service: DownloadService) -> dict[str, Any]:
         task_id = str(item.get("id") or "").strip()
         if not task_id:
             continue
-        task = service.run_task(task_id)
+        task = _run_user_task(service, task_id)
         results.append(service._task_payload(task))  # noqa: SLF001 - same package boundary.
     return {"processed": len(results), "items": results}
 
@@ -192,13 +277,13 @@ def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, A
     if args.command == "tasks":
         return _user_tasks(service, status=args.status, limit=args.limit)
     if args.command == "enqueue":
-        return service.enqueue(_required(args.external_id, "--external-id"))
+        return _direct_enqueue(service, _required(args.external_id, "--external-id"))
     if args.command == "enqueue_wanted":
         return service.enqueue_wanted()
     if args.command == "run":
         return _user_run(service)
     if args.command == "retry":
-        return service.retry(_require_user_task_id(service, args.task_id))
+        return _retry_user_task(service, _require_user_task_id(service, args.task_id))
     if args.command == "cancel":
         return service.cancel(_require_user_task_id(service, args.task_id))
     if args.command == "clear_completed":

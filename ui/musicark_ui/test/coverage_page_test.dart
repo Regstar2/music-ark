@@ -149,7 +149,7 @@ void main() {
     expect(coverage.items.first['userAction'], 'unreviewed');
   });
 
-  testWidgets('missing track can be downloaded in one click without prior Wanted action', (
+  testWidgets('missing track can be downloaded in one click without mutating triage action', (
     tester,
   ) async {
     final coverage = FakeCoverageBridge();
@@ -163,10 +163,31 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
     await tester.pumpAndSettle();
 
-    expect(coverage.items.first['userAction'], 'wanted');
+    expect(coverage.items.first['userAction'], 'unreviewed');
+    expect(coverage.setActionCalls, 0);
     expect(downloads.enqueueCalls, 1);
     expect(downloads.lastEnqueuedId, '203');
     expect(downloads.runCalled, isTrue);
+  });
+
+  testWidgets('direct download does not empty an unreviewed Missing filter', (
+    tester,
+  ) async {
+    final coverage = FakeCoverageBridge();
+    final downloads = FakeDownloadBridge();
+    await page(tester, coverage: coverage, downloads: downloads);
+
+    await tester.tap(find.byKey(const Key('coverage-action-filter')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Не решено').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
+    await tester.pumpAndSettle();
+
+    expect(coverage.items.first['userAction'], 'unreviewed');
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
   });
 
   testWidgets('bulk selection applies wanted action without download control', (

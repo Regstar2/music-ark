@@ -28,14 +28,7 @@ _USER_SOURCE_PROVIDER = "yandex_music"
 
 
 class _DirectCoverageProxy:
-    """Present direct user intent to DownloadService without mutating triage state.
-
-    DownloadService historically uses `userAction=wanted` as its safety gate. A
-    direct click on `Скачать` is already explicit user intent, so the bridge marks
-    the persisted task as `direct_request` and presents a transient wanted view only
-    to the service while that task is executed/retried. The real Coverage action in
-    SQLite remains untouched (`unreviewed`, `ignored`, or `wanted`).
-    """
+    """Present direct user intent to DownloadService without mutating triage state."""
 
     def __init__(self, repository: Any, external_id: str) -> None:
         self._repository = repository
@@ -70,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
             "enqueue",
             "enqueue_wanted",
             "run",
+            "run_task",
             "retry",
             "cancel",
             "clear_completed",
@@ -93,7 +87,6 @@ def _required(value: str | None, name: str) -> str:
 
 
 def _is_user_item(item: dict[str, Any]) -> bool:
-    """Keep legacy/reference-cache tasks out of the v0.7 user queue surface."""
     return (
         str(item.get("provider") or "") == _USER_SOURCE_PROVIDER
         and str(item.get("downloadProvider") or "") == "yandex_music_download"
@@ -106,8 +99,6 @@ def _user_items(
     status: str = "",
     limit: int = 5000,
 ) -> list[dict[str, Any]]:
-    # Ask for all rows and apply the v0.7 ownership discriminator here. Older
-    # reference-acquisition rows share the table/provider but not source_provider_id.
     payload = service.tasks(status=status, limit=max(1, min(int(limit), 5000)))
     raw = payload.get("items")
     if not isinstance(raw, list):
@@ -124,7 +115,7 @@ def _user_items(
 
 def _require_user_task_id(service: DownloadService, value: str | None) -> str:
     task_id = _required(value, "--task-id")
-    task = service._downloads.get_task(task_id)  # noqa: SLF001 - package bridge boundary.
+    task = service._downloads.get_task(task_id)  # noqa: SLF001
     if task.task_type != _USER_TASK_TYPE:
         raise DownloadServiceError(
             "This task belongs to an internal/legacy download workflow.",
@@ -167,7 +158,7 @@ def _user_tasks(
 
 def _direct_enqueue(service: DownloadService, external_id: str) -> dict[str, Any]:
     identity = str(external_id).strip()
-    track = service._coverage.get_track(  # noqa: SLF001 - package bridge boundary.
+    track = service._coverage.get_track(  # noqa: SLF001
         provider_id=service.SOURCE_PROVIDER,
         external_id=identity,
     )
@@ -182,8 +173,6 @@ def _direct_enqueue(service: DownloadService, external_id: str) -> dict[str, Any
             code="not_eligible",
         )
 
-    # Reuse the existing queue construction, but do not persist a fake triage
-    # decision merely to satisfy its historical wanted gate.
     service_view = dict(track)
     service_view["userAction"] = "wanted"
     task, created = service._enqueue_track(service_view)  # noqa: SLF001
@@ -218,6 +207,18 @@ def _retry_user_task(service: DownloadService, task_id: str) -> dict[str, Any]:
         service._coverage = original  # noqa: SLF001
 
 
+def _user_run_one(service: DownloadService, task_id: str) -> dict[str, Any]:
+    """Run exactly one selected user task; never drain unrelated queued work."""
+    running = _user_items(service, status="running", limit=2)
+    if running and all(str(item.get("id") or "") != task_id for item in running):
+        raise DownloadServiceError(
+            "A download worker is already running.",
+            code="worker_busy",
+        )
+    task = _run_user_task(service, task_id)
+    return {"task": service._task_payload(task)}  # noqa: SLF001
+
+
 def _user_run(service: DownloadService) -> dict[str, Any]:
     if _user_items(service, status="running", limit=1):
         raise DownloadServiceError("A download worker is already running.", code="worker_busy")
@@ -231,13 +232,11 @@ def _user_run(service: DownloadService) -> dict[str, Any]:
         if not task_id:
             continue
         task = _run_user_task(service, task_id)
-        results.append(service._task_payload(task))  # noqa: SLF001 - same package boundary.
+        results.append(service._task_payload(task))  # noqa: SLF001
     return {"processed": len(results), "items": results}
 
 
 def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
-    # Historical clear_completed predates v0.7 ownership and would also remove
-    # reference-cache history. Restrict the UI action explicitly.
     try:
         with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
             with conn:
@@ -254,8 +253,6 @@ def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
 
 
 def _user_recover(service: DownloadService) -> dict[str, Any]:
-    # Recovery must not mutate legacy/reference rows either. New user downloads are
-    # identifiable by task_type even when their raw source-provider payload is damaged.
     recovered = 0
     for task in service._downloads.list_tasks(status="running", limit=5000):  # noqa: SLF001
         if task.task_type != _USER_TASK_TYPE:
@@ -282,6 +279,8 @@ def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, A
         return service.enqueue_wanted()
     if args.command == "run":
         return _user_run(service)
+    if args.command == "run_task":
+        return _user_run_one(service, _require_user_task_id(service, args.task_id))
     if args.command == "retry":
         return _retry_user_task(service, _require_user_task_id(service, args.task_id))
     if args.command == "cancel":
@@ -319,7 +318,7 @@ def main() -> int:
     try:
         service = DownloadService(base_dir=base_dir)
         payload = _dispatch(args, service)
-    except Exception as exc:  # noqa: BLE001 - process boundary normalizes failures.
+    except Exception as exc:  # noqa: BLE001
         print(json.dumps(_error(exc), ensure_ascii=False))
         return 2
     print(json.dumps(payload, ensure_ascii=False))

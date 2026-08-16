@@ -141,11 +141,34 @@ class _CoveragePageState extends State<CoveragePage> {
       ];
       final results = await Future.wait(futures);
       if (!mounted) return;
-      final tracks = Map<String, dynamic>.from(results.last);
+      var tracks = Map<String, dynamic>.from(results.last);
+      var items = _maps(tracks['items']);
+      var total = _asInt(tracks['count']);
+
+      // If downloading the last row of a later page makes that page empty,
+      // return to the last valid page instead of rendering a false empty state.
+      if (items.isEmpty && total > 0 && _offset >= total) {
+        final nextOffset = ((total - 1) ~/ _pageSize) * _pageSize;
+        tracks = await widget.bridge.coverageTracks(
+          limit: _pageSize,
+          offset: nextOffset,
+          status: _status,
+          collectionId: _collectionId,
+          search: _searchController.text.trim(),
+          sort: _sort,
+          userAction: _userAction,
+          variantStatus: _variantStatus,
+        );
+        if (!mounted) return;
+        items = _maps(tracks['items']);
+        total = _asInt(tracks['count']);
+        _offset = nextOffset;
+      }
+
       setState(() {
         if (refreshSummary) _summary = Map<String, dynamic>.from(results.first);
-        _items = _maps(tracks['items']);
-        _total = _asInt(tracks['count']);
+        _items = items;
+        _total = total;
         _selected.clear();
         _loading = false;
       });
@@ -218,29 +241,23 @@ class _CoveragePageState extends State<CoveragePage> {
     });
     try {
       // A direct Download click is its own explicit user intent. It must not
-      // mutate the triage decision (unreviewed/wanted/ignored), otherwise a
-      // currently selected Decision filter can make the Missing list disappear.
+      // mutate triage state or drain unrelated queued downloads.
       final queued = await bridge.enqueue(externalId);
       final rawTask = queued['task'];
       final task = rawTask is Map
           ? Map<String, dynamic>.from(rawTask)
           : const <String, dynamic>{};
+      final taskId = (task['id'] ?? '').toString();
       var finalStatus = (task['status'] ?? '').toString();
-      if (finalStatus == 'queued') {
+      if (finalStatus == 'queued' && taskId.isNotEmpty) {
         try {
-          final run = await bridge.runQueue();
-          final rawItems = run['items'];
-          if (rawItems is List) {
-            for (final raw in rawItems.whereType<Map>()) {
-              final item = Map<String, dynamic>.from(raw);
-              if ('${item['externalId']}' == externalId) {
-                finalStatus = (item['status'] ?? finalStatus).toString();
-              }
-            }
+          final run = await bridge.runTask(taskId);
+          final rawResultTask = run['task'];
+          if (rawResultTask is Map) {
+            final resultTask = Map<String, dynamic>.from(rawResultTask);
+            finalStatus = (resultTask['status'] ?? finalStatus).toString();
           }
         } on DownloadBridgeException catch (error) {
-          // Another download worker can legitimately own the queue. In that case
-          // the requested track remains queued instead of surfacing a false failure.
           if (error.code != 'worker_busy') rethrow;
         }
       }
@@ -250,7 +267,7 @@ class _CoveragePageState extends State<CoveragePage> {
           ? 'Трек скачан и добавлен в локальную библиотеку.'
           : finalStatus == 'failed' || finalStatus == 'needs_review'
               ? 'Загрузка завершилась с ошибкой. Подробности — в «Загрузках».'
-              : 'Загрузка запущена.';
+              : 'Загрузка поставлена в очередь.';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } on DownloadBridgeException catch (error) {
       if (!mounted) return;

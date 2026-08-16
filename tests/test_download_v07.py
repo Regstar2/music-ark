@@ -186,6 +186,12 @@ class DownloadV07Tests(unittest.TestCase):
         service = self._service()
         settings = service.set_target(str(self.music))
         self.assertEqual(settings["rootPath"], str(self.music.resolve()))
+        self.assertEqual(settings["targetPath"], str(self.music.resolve()))
+        self.assertEqual(
+            self._service().settings()["targetPath"],
+            str(self.music.resolve()),
+            "Exact selected target must survive service/UI recreation.",
+        )
 
         queued = service.enqueue("101")
         self.assertTrue(queued["created"])
@@ -287,8 +293,9 @@ class DownloadV07Tests(unittest.TestCase):
         service.retry(task_id)
         second = service.run()["items"][0]
         self.assertEqual(second["status"], "completed")
-        files = list((self.music / "MusicArk").glob("*"))
+        files = [path for path in self.music.glob("*") if path.is_file()]
         self.assertEqual(len(files), 1)
+        self.assertIn("yandex_301", files[0].name)
 
     def test_recheck_skips_task_if_track_became_ineligible_before_run(self) -> None:
         self._seed_missing_wanted("401")
@@ -303,7 +310,7 @@ class DownloadV07Tests(unittest.TestCase):
                 )
         task = service.run_task(task_id)
         self.assertEqual(task.status, DownloadStatus.SKIPPED)
-        self.assertFalse((self.music / "MusicArk").exists())
+        self.assertFalse(any(self.music.glob("*yandex_401*")))
 
     def test_running_recovery_is_retryable_failure(self) -> None:
         task = DownloadTask(

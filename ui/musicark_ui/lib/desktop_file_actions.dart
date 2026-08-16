@@ -9,8 +9,9 @@ class SystemLocalFileActions implements LocalFileActions {
   const SystemLocalFileActions();
 
   File _requireFile(String path) {
-    final file = File(path.trim()).absolute;
-    if (path.trim().isEmpty || !file.existsSync()) {
+    final clean = path.trim();
+    final file = File(clean).absolute;
+    if (clean.isEmpty || !file.existsSync()) {
       throw FileSystemException('Музыкальный файл не найден.', path);
     }
     return file;
@@ -20,16 +21,22 @@ class SystemLocalFileActions implements LocalFileActions {
   Future<void> play(String path) async {
     final file = _requireFile(path);
     if (Platform.isWindows) {
+      // Do not append the file path after `-Command`: Windows PowerShell does not
+      // reliably expose that value through `$args` in this launch shape. Passing
+      // it through an environment variable also avoids quoting problems with
+      // spaces, Cyrillic and PowerShell metacharacters in real music paths.
       final result = await Process.run(
         'powershell.exe',
         [
           '-NoProfile',
           '-NonInteractive',
           '-Command',
-          r'Invoke-Item -LiteralPath $args[0]',
-          file.path,
+          r'Invoke-Item -LiteralPath $env:MUSICARK_OPEN_FILE',
         ],
         runInShell: false,
+        environment: {
+          'MUSICARK_OPEN_FILE': file.path,
+        },
       );
       if (result.exitCode != 0) {
         throw ProcessException(

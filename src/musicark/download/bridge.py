@@ -1,15 +1,18 @@
-"""JSON process bridge dedicated to the v0.7 download workflow."""
+"""JSON process bridge dedicated to the v0.7 user download workflow."""
 
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
+import sqlite3
 import sys
 from typing import Any
 
 from musicark.credentials import CredentialStoreError
+from musicark.download.models import DownloadStatus
 from musicark.providers.yandex_music_provider import (
     YandexAuthenticationError,
     YandexMusicError,
@@ -17,6 +20,10 @@ from musicark.providers.yandex_music_provider import (
 )
 
 from .service import DownloadService, DownloadServiceError
+
+
+_USER_TASK_TYPE = "provider_download"
+_USER_SOURCE_PROVIDER = "yandex_music"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -52,23 +59,136 @@ def _required(value: str | None, name: str) -> str:
     return clean
 
 
+def _is_user_item(item: dict[str, Any]) -> bool:
+    """Keep legacy/reference-cache tasks out of the v0.7 user queue surface."""
+    return (
+        str(item.get("provider") or "") == _USER_SOURCE_PROVIDER
+        and str(item.get("downloadProvider") or "") == "yandex_music_download"
+    )
+
+
+def _user_items(
+    service: DownloadService,
+    *,
+    status: str = "",
+    limit: int = 5000,
+) -> list[dict[str, Any]]:
+    # Ask for all rows and apply the v0.7 ownership discriminator here. Older
+    # reference-acquisition rows share the table/provider but not source_provider_id.
+    payload = service.tasks(status=status, limit=max(1, min(int(limit), 5000)))
+    raw = payload.get("items")
+    if not isinstance(raw, list):
+        return []
+    return [
+        MapItem
+        for value in raw
+        if isinstance(value, dict)
+        for MapItem in [dict(value)]
+        if _is_user_item(MapItem)
+    ]
+
+
+def _summary_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        status = str(item.get("status") or "")
+        counts[status] = counts.get(status, 0) + 1
+    return {
+        "queued": counts.get("queued", 0),
+        "running": counts.get("running", 0),
+        "completed": counts.get("completed", 0),
+        "failed": counts.get("failed", 0) + counts.get("needs_review", 0),
+        "cancelled": counts.get("cancelled", 0),
+        "skipped": counts.get("skipped", 0),
+        "total": sum(counts.values()),
+    }
+
+
+def _user_summary(service: DownloadService) -> dict[str, Any]:
+    items = _user_items(service, limit=5000)
+    return {"counts": _summary_counts(items), "settings": service.settings()}
+
+
+def _user_tasks(
+    service: DownloadService,
+    *,
+    status: str,
+    limit: int,
+) -> dict[str, Any]:
+    items = _user_items(service, status=status, limit=5000)
+    items = items[: max(1, min(int(limit), 5000))]
+    return {"count": len(items), "items": items}
+
+
+def _user_run(service: DownloadService) -> dict[str, Any]:
+    if _user_items(service, status="running", limit=1):
+        raise DownloadServiceError("A download worker is already running.", code="worker_busy")
+    queued = sorted(
+        _user_items(service, status="queued", limit=5000),
+        key=lambda item: str(item.get("createdAt") or ""),
+    )
+    results: list[dict[str, Any]] = []
+    for item in queued:
+        task_id = str(item.get("id") or "").strip()
+        if not task_id:
+            continue
+        task = service.run_task(task_id)
+        results.append(service._task_payload(task))  # noqa: SLF001 - same package bridge boundary.
+    return {"processed": len(results), "items": results}
+
+
+def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
+    # clear_completed on the historical repository predates v0.7 ownership and would
+    # also remove reference-cache history. Restrict the UI action explicitly.
+    try:
+        with sqlite3.connect(service._database_path) as conn:  # noqa: SLF001
+            cursor = conn.execute(
+                "DELETE FROM download_tasks WHERE status='completed' AND task_type=?",
+                (_USER_TASK_TYPE,),
+            )
+            removed = max(0, int(cursor.rowcount))
+    except sqlite3.Error as exc:
+        raise DownloadServiceError(
+            "Failed to clear completed user downloads.", code="storage_error"
+        ) from exc
+    return {"removed": removed}
+
+
+def _user_recover(service: DownloadService) -> dict[str, Any]:
+    # Recovery must not mutate legacy/reference rows either. New user downloads are
+    # identifiable by task_type even when their raw source-provider payload is damaged.
+    recovered = 0
+    for task in service._downloads.list_tasks(status="running", limit=5000):  # noqa: SLF001
+        if task.task_type != _USER_TASK_TYPE:
+            continue
+        service._downloads._cleanup_partial(task)  # noqa: SLF001
+        task.status = DownloadStatus.FAILED
+        task.error_code = "interrupted"
+        task.error_message = "Download was interrupted by application shutdown."
+        task.finished_at = datetime.now(UTC).isoformat()
+        task.cancel_requested = False
+        service._downloads.upsert_task(task)  # noqa: SLF001
+        recovered += 1
+    return {"recovered": recovered}
+
+
 def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, Any]:
     if args.command == "summary":
-        return service.summary()
+        return _user_summary(service)
     if args.command == "tasks":
-        return service.tasks(status=args.status, limit=args.limit)
+        return _user_tasks(service, status=args.status, limit=args.limit)
     if args.command == "enqueue":
         return service.enqueue(_required(args.external_id, "--external-id"))
     if args.command == "enqueue_wanted":
         return service.enqueue_wanted()
     if args.command == "run":
-        return service.run()
+        return _user_run(service)
     if args.command == "retry":
         return service.retry(_required(args.task_id, "--task-id"))
     if args.command == "cancel":
         return service.cancel(_required(args.task_id, "--task-id"))
     if args.command == "clear_completed":
-        return service.clear_completed()
+        return _user_clear_completed(service)
     if args.command == "settings":
         return service.settings()
     if args.command == "set_target":
@@ -77,7 +197,7 @@ def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, A
             raise DownloadServiceError("Download target path is missing.", code="invalid_request")
         return service.set_target(path)
     if args.command == "recover":
-        return service.recover_interrupted()
+        return _user_recover(service)
     raise DownloadServiceError("Unsupported download command.", code="invalid_request")
 
 

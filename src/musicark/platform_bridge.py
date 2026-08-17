@@ -262,7 +262,7 @@ def run_action(
     """Run state-changing action in Python core, returning JSON-safe result."""
     app = MusicArkApp(base_dir=base_dir)
     db_path = app.db_init()
-    meta = MetadataEditorService(db_path, base_dir)
+    meta = MetadataEditorService(base_dir=base_dir, database_path=db_path)
 
     pl = payload or {}
 

@@ -273,9 +273,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     try {
       final payload = await labels.batch(externalIds: ids);
       final raw = payload['provider'];
-      final received = raw is Map
-          ? raw.map((key, value) => MapEntry('$key', '$value'))
-          : <String, String>{};
+      final received = <String, String>{};
+      if (raw is Map) {
+        for (final entry in raw.entries) {
+          received['${entry.key}'] = '${entry.value}';
+        }
+      }
       if (!mounted) return;
       setState(() {
         final next = Map<String, String>.from(_contentLabels);
@@ -1101,7 +1104,7 @@ class _TrackTile extends StatelessWidget {
               key: Key('yandex-inline-content-label-menu-$id'),
               tooltip: 'Пометить версию трека',
               initialValue: contentLabel?.isNotEmpty == true ? contentLabel : null,
-              onSelected: onLabelChanged,
+              onSelected: onLabelChanged!,
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'original', child: Text('ОРИГИНАЛ')),
                 PopupMenuItem(value: 'censored', child: Text('ЦЕНЗУРА')),

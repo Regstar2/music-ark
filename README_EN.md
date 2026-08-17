@@ -2,9 +2,10 @@
 
 [Русская версия](README.md)
 
-**Current version: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**
+**Current code version: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**  
+**Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.8.2 adds a separate **explicit-write** workflow for metadata of existing local files.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers; v0.8.2 adds explicit editing of existing local MP3 files, app-level content labels, reviewed-variant acceptance and safe Yandex Library playback.
 
 ## Product loop
 
@@ -18,7 +19,7 @@ Matching + Variant + Coverage
 Missing / Wanted → Download / Controlled Sync
 ```
 
-For files with broken tags there is now a manual repair workflow:
+Files with broken tags use a separate manual workflow:
 
 ```text
 Local Library
@@ -37,9 +38,9 @@ Local Library
 
 ## Metadata and identity are separate
 
-**Apply Metadata** changes only selected non-empty metadata/artwork and runs normal Matching again. Even 100% similarity alone does not become a user-confirmed identity.
+**Apply Metadata** changes only selected non-empty fields, artwork and an explicitly selected filename for the local MP3. The write is followed by a single-file reindex, SHA-256 refresh and targeted Matching refresh. High similarity alone never becomes a user-confirmed identity.
 
-**Apply + Bind** is a separate explicit confirmation and persists:
+**Apply + Bind** performs the same write and additionally persists the explicit relation:
 
 ```text
 provider   = yandex_music
@@ -50,11 +51,11 @@ confidence = 1.0
 reason     = user_confirmed
 ```
 
-The bind also stores trusted ID3 TXXX provenance, allowing provider identity to be recovered after database deletion, file rename or relocation. Reserved provenance tags are read-only in the normal Advanced Tags editor.
+The bind also stores trusted ID3 TXXX provenance. Reserved provenance tags are read-only in the normal Advanced Tags editor.
 
 ## File mutation safety
 
-Normal Scan, Matching, Coverage and Sync **do not modify user audio files**. An existing file changes only after an explicit Metadata Editor action.
+Scan, Matching, Coverage and Sync **do not modify user audio files**. An existing file changes only after an explicit Metadata Editor action.
 
 The MP3 writer uses:
 
@@ -72,31 +73,29 @@ metadata read-back validation
 atomic os.replace()
 ```
 
-Before the atomic replace the original remains unchanged. The audio stream is never transcoded. Basic Save mutates only requested frames and preserves unknown/custom tags.
+Before the atomic replace the original remains unchanged. The audio stream is not transcoded. Unknown/custom ID3 frames are preserved unless the user explicitly edits them.
 
-## Artwork
+## Artwork and Yandex Library playback
 
-Local Library displays a thumbnail for each track with this priority:
+Local Library displays a thumbnail for each track. Priority is embedded artwork, then already-cached Yandex artwork for a confirmed identity, then a placeholder. Local Library rows never perform a per-track Yandex request.
 
-1. embedded artwork;
-2. already-cached Yandex artwork for a confirmed identity;
-3. placeholder.
+Yandex Library provides artwork and built-in playback. The backend prepares or reuses a private cache under `.musicark/playback/yandex` and passes only the local path to Flutter. The Yandex token, Authorization headers and protected/signed provider media URLs are never passed to Flutter. Playback-cache files are not indexed into Local Library and do not affect Matching or Coverage.
 
-Library rows never perform a per-track Yandex request and Flutter receives cache paths rather than large base64 payloads.
+The Yandex workspace keeps a minimum width of about `920 px`; narrower windows use horizontal scrolling. This is the current safeguard, not a responsive redesign.
 
-## Yandex metadata import
+## Content labels and Variant acceptance
 
-Search and full Track DTO lookup stay inside Python/backend through the existing Yandex provider/auth boundary. Flutter never receives the Yandex token, Authorization headers, cookies, signed URLs or direct media URLs.
+App-level **ORIGINAL / CENSORED** marks can be stored for a local track and a cached Yandex identity. They do not mutate Yandex, rewrite audio metadata, change Matching identity or increase confidence.
 
-Compare supports selective field/artwork import. Empty Yandex fields do not silently erase non-empty local values.
+For `ALTERED`, `DIFFERENT_VERSION` and `UNCERTAIN`, the user may accept the current recording and later undo that acceptance. The decision is stored separately from the analyzer result: the original Variant status does not become `SAME`. Acceptance remains valid only while the analysis evidence/fingerprint is unchanged.
 
 ## Formats
 
-The editor is format-adapter based. v0.8.2 provides the first full safe writer for **MP3/ID3**. Other audio formats remain read-only in the editor until transactional adapters are implemented.
+The editor uses format adapters. v0.8.2 provides the first full safe writer for **MP3/ID3**. Other audio formats remain read-only in Metadata Editor.
 
 ## Controlled Sync
 
-Sync remains a read-only planner/executor over existing layers and is not a bidirectional filesystem mirror. Normal Sync Apply still performs:
+Sync is not a bidirectional filesystem mirror. Normal Apply remains constrained to:
 
 ```text
 deleted local files = 0
@@ -109,6 +108,8 @@ Metadata Editor is a separate explicit-write workflow and is never called automa
 
 ## SQLite
 
+Forward-only schema:
+
 ```text
 1.3.0 — Local Library
 1.4.0 — Identity Matching
@@ -118,7 +119,11 @@ Metadata Editor is a separate explicit-write workflow and is never called automa
 1.8.0 — Controlled Sync
 1.8.1 — Rich Yandex download metadata/provenance
 1.8.2 — Local artwork cache / Metadata Editor support
+1.8.3 — app-level ORIGINAL/CENSORED labels
+1.8.4 — variant user acceptance
 ```
+
+Initialization is expected to remain idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -142,18 +147,18 @@ flutter run -d windows
 ## Roadmap
 
 ```text
-v0.1   — Yandex Likes MVP
-v0.2   — Persistent Library
-v0.3   — Yandex Library / Playlists
-v0.4   — Local Library
-v0.5.0 — Identity Matching
-v0.5.1 — Variant Detection
-v0.6   — Missing Tracks / Coverage
-v0.7   — Download + Local Playback
-v0.8.0 — Controlled Sync
-v0.8.1 — Rich Yandex download metadata/provenance
-v0.8.2 — Local Metadata Editor / Yandex Metadata Import
-next   — stabilization / TBD
+v0.1   — Yandex Likes MVP                              complete
+v0.2   — Persistent Library                            complete
+v0.3   — Yandex Library / Playlists                    complete
+v0.4   — Local Library                                 complete
+v0.5.0 — Identity Matching                             complete
+v0.5.1 — Variant Detection                             complete
+v0.6   — Missing Tracks / Coverage                     complete
+v0.7   — Download + Local Playback                     complete
+v0.8.0 — Controlled Sync                               complete
+v0.8.1 — Rich Yandex download metadata/provenance      complete
+v0.8.2 — Local Metadata Editor / Yandex Metadata Import current code baseline
+next   — stabilization / TBD                           TBD
 ```
 
-See `docs/versions/v0.8.2.md` and `docs/architecture/metadata-editor.md`.
+This describes the current code state and does not claim that a public GitHub Release exists. See `docs/versions/v0.8.2.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

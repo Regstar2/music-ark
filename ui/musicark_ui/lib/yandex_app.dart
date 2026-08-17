@@ -1,24 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'app_strings.dart';
+import 'audio_player.dart';
+import 'content_label_bridge.dart';
 import 'musicark_bridge.dart';
 
-void main() => runApp(const MusicArkDesktopApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+  runApp(const MusicArkDesktopApp());
+}
 
 class MusicArkDesktopApp extends StatelessWidget {
-  const MusicArkDesktopApp({super.key, this.bridge});
+  const MusicArkDesktopApp({super.key, this.bridge, this.contentLabelBridge});
 
   final MusicArkBridgeClient? bridge;
+  final ContentLabelBridgeClient? contentLabelBridge;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: AppStrings.appTitle,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-          useMaterial3: true,
-        ),
-        home: MusicArkHomePage(bridge: bridge ?? MusicArkBridge()),
-      );
+  Widget build(BuildContext context) {
+    final client = bridge ?? MusicArkBridge();
+    final labels = contentLabelBridge ??
+        (client is MusicArkBridge ? const ContentLabelBridge() : null);
+    return MaterialApp(
+      title: AppStrings.appTitle,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
+      ),
+      home: MusicArkHomePage(
+        bridge: client,
+        contentLabelBridge: labels,
+      ),
+    );
+  }
 }
 
 enum LibrarySort { original, title, artist }
@@ -28,9 +44,15 @@ enum PlaylistSort { original, title }
 enum _PageKind { liked, playlists, playlist }
 
 class MusicArkHomePage extends StatefulWidget {
-  const MusicArkHomePage({super.key, required this.bridge});
+  MusicArkHomePage({
+    super.key,
+    required this.bridge,
+    ContentLabelBridgeClient? contentLabelBridge,
+  }) : contentLabelBridge = contentLabelBridge ??
+            (bridge is MusicArkBridge ? const ContentLabelBridge() : null);
 
   final MusicArkBridgeClient bridge;
+  final ContentLabelBridgeClient? contentLabelBridge;
 
   @override
   State<MusicArkHomePage> createState() => _MusicArkHomePageState();
@@ -51,6 +73,8 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   List<Map<String, dynamic>> _playlists = const [];
   List<Map<String, dynamic>> _playlistTracks = const [];
   Map<String, dynamic>? _selectedPlaylist;
+  Map<String, String> _contentLabels = const {};
+  String? _playingTrackId;
   String _likedSource = 'none';
   String _playlistsSource = 'none';
   String _playlistSource = 'none';
@@ -79,6 +103,8 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final payload = await widget.bridge.bootstrap();
       if (!mounted) return;
       _applyLibraryPayload(payload);
+      await _loadContentLabels(_likedTracks);
+      if (!mounted) return;
       setState(() => _initializing = false);
       if (_hasStoredToken) await _refreshLibrary(showDiff: false);
     } on MusicArkBridgeException catch (error) {
@@ -112,6 +138,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final payload = await widget.bridge.login(token);
       if (!mounted) return;
       _applyLibraryPayload(payload);
+      await _loadContentLabels(_likedTracks);
       _tokenController.clear();
       _showDiff(_asMap(payload['liked'] ?? payload['library']));
     } on MusicArkBridgeException catch (error) {
@@ -134,6 +161,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final payload = await widget.bridge.libraryRefresh();
       if (!mounted) return;
       _applyLibraryPayload(payload);
+      await _loadContentLabels(_likedTracks);
       if (showDiff) {
         _showDiff(_asMap(payload['liked'] ?? payload['library']));
         _showDiff(_asMap(payload['playlists']));
@@ -151,6 +179,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final payload = await widget.bridge.likedRefresh();
       if (!mounted) return;
       _applyLibraryPayload(payload);
+      await _loadContentLabels(_likedTracks);
       _showDiff(_asMap(payload['liked'] ?? payload['library']));
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _setBridgeError(error));
@@ -179,6 +208,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final cached = await widget.bridge.playlist(externalId);
       if (!mounted || _selectedPlaylist?['externalId'] != externalId) return;
       _applyPlaylistPayload(cached);
+      await _loadContentLabels(_playlistTracks);
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _setBridgeError(error));
     }
@@ -199,6 +229,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       final payload = await widget.bridge.playlistRefresh(externalId);
       if (!mounted || _selectedPlaylist?['externalId'] != externalId) return;
       _applyPlaylistPayload(payload);
+      await _loadContentLabels(_playlistTracks);
       if (showDiff) _showDiff(_asMap(payload['collection']));
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _setBridgeError(error));
@@ -217,6 +248,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
         _page = _PageKind.liked;
         _selectedPlaylist = null;
         _playlistTracks = const [];
+        _contentLabels = const {};
         _searchController.clear();
         _tokenController.clear();
         _trackSort = LibrarySort.original;
@@ -228,6 +260,107 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       _endBusy();
     }
   }
+
+  Future<void> _loadContentLabels(List<Map<String, dynamic>> tracks) async {
+    final labels = widget.contentLabelBridge;
+    if (labels == null || tracks.isEmpty) return;
+    final ids = tracks
+        .map(_externalId)
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (ids.isEmpty) return;
+    try {
+      final payload = await labels.batch(externalIds: ids);
+      final raw = payload['provider'];
+      final received = raw is Map
+          ? raw.map((key, value) => MapEntry('$key', '$value'))
+          : <String, String>{};
+      if (!mounted) return;
+      setState(() {
+        final next = Map<String, String>.from(_contentLabels);
+        for (final id in ids) {
+          next.remove(id);
+        }
+        next.addAll(received);
+        _contentLabels = next;
+      });
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Не удалось загрузить пометки треков.';
+          _errorDetails = error.message;
+        });
+      }
+    }
+  }
+
+  Future<void> _setContentLabel(
+    Map<String, dynamic> track,
+    String label,
+  ) async {
+    final labels = widget.contentLabelBridge;
+    final id = _externalId(track);
+    if (labels == null || id.isEmpty) return;
+    try {
+      await labels.setProvider(id, label);
+      if (!mounted) return;
+      setState(() {
+        final next = Map<String, String>.from(_contentLabels);
+        if (label.isEmpty) {
+          next.remove(id);
+        } else {
+          next[id] = label;
+        }
+        _contentLabels = next;
+      });
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Не удалось изменить пометку трека.';
+          _errorDetails = error.message;
+        });
+      }
+    }
+  }
+
+  Future<void> _playYandexTrack(Map<String, dynamic> track) async {
+    final id = _externalId(track);
+    if (id.isEmpty || _playingTrackId != null) return;
+    setState(() {
+      _playingTrackId = id;
+      _errorMessage = null;
+      _errorDetails = null;
+    });
+    try {
+      final payload = await widget.bridge.yandexPlaybackPrepare(id);
+      final path = '${payload['path'] ?? ''}'.trim();
+      if (path.isEmpty) {
+        throw const MusicArkBridgeException(
+          'unexpected_error',
+          'Backend did not return a playback file.',
+        );
+      }
+      await MusicArkAudioPlayer.instance.open(
+        path,
+        title: '${_artistsText(track)} — ${_title(track)}',
+      );
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _setBridgeError(error));
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Не удалось воспроизвести трек.';
+          _errorDetails = error.toString();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _playingTrackId = null);
+    }
+  }
+
+  String _externalId(Map<String, dynamic> track) =>
+      '${track['external_id'] ?? track['externalId'] ?? ''}'.trim();
 
   void _beginBusy() {
     if (!mounted) return;
@@ -706,8 +839,22 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: visible.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) =>
-                      _TrackTile(track: visible[index]),
+                  itemBuilder: (context, index) {
+                    final track = visible[index];
+                    final id = _externalId(track);
+                    return _TrackTile(
+                      track: track,
+                      contentLabel: _contentLabels[id],
+                      labelEnabled: widget.contentLabelBridge != null,
+                      playbackBusy: _playingTrackId == id,
+                      onPlay: '${track['availability'] ?? ''}' == 'unavailable'
+                          ? null
+                          : () => _playYandexTrack(track),
+                      onLabelChanged: widget.contentLabelBridge == null
+                          ? null
+                          : (label) => _setContentLabel(track, label),
+                    );
+                  },
                 ),
         ),
       ],
@@ -897,12 +1044,25 @@ class _CollectionHeader extends StatelessWidget {
 }
 
 class _TrackTile extends StatelessWidget {
-  const _TrackTile({required this.track});
+  const _TrackTile({
+    required this.track,
+    required this.contentLabel,
+    required this.labelEnabled,
+    required this.playbackBusy,
+    required this.onPlay,
+    required this.onLabelChanged,
+  });
 
   final Map<String, dynamic> track;
+  final String? contentLabel;
+  final bool labelEnabled;
+  final bool playbackBusy;
+  final VoidCallback? onPlay;
+  final ValueChanged<String>? onLabelChanged;
 
   @override
   Widget build(BuildContext context) {
+    final id = '${track['external_id'] ?? track['externalId'] ?? ''}'.trim();
     final title = (track['title'] ?? '').toString().trim();
     final rawArtists = track['artists'];
     final artists = rawArtists is List
@@ -913,7 +1073,8 @@ class _TrackTile extends StatelessWidget {
     final availability = (track['availability'] ?? '').toString().trim();
 
     return ListTile(
-      leading: const Icon(Icons.music_note),
+      key: Key('yandex-track-$id'),
+      leading: _YandexArtwork(track: track, externalId: id, size: 48),
       title: Text(title.isEmpty ? AppStrings.unknownTitle : title),
       subtitle: Text(
         [
@@ -923,7 +1084,48 @@ class _TrackTile extends StatelessWidget {
           if (availability.isNotEmpty) availability,
         ].join(' · '),
       ),
-      dense: true,
+      trailing: Wrap(
+        spacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (contentLabel != null && contentLabel!.isNotEmpty)
+            Chip(
+              key: Key('yandex-inline-content-label-$id'),
+              visualDensity: VisualDensity.compact,
+              label: Text(
+                contentLabel == 'censored' ? 'ЦЕНЗУРА' : 'ОРИГИНАЛ',
+              ),
+            ),
+          if (labelEnabled && onLabelChanged != null)
+            PopupMenuButton<String>(
+              key: Key('yandex-inline-content-label-menu-$id'),
+              tooltip: 'Пометить версию трека',
+              initialValue: contentLabel?.isNotEmpty == true ? contentLabel : null,
+              onSelected: onLabelChanged,
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'original', child: Text('ОРИГИНАЛ')),
+                PopupMenuItem(value: 'censored', child: Text('ЦЕНЗУРА')),
+                PopupMenuDivider(),
+                PopupMenuItem(value: '', child: Text('Снять пометку')),
+              ],
+              icon: const Icon(Icons.sell_outlined),
+            ),
+          IconButton(
+            key: Key('yandex-play-$id'),
+            tooltip: availability == 'unavailable'
+                ? 'Трек недоступен в Яндекс Музыке'
+                : 'Воспроизвести',
+            onPressed: playbackBusy ? null : onPlay,
+            icon: playbackBusy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+          ),
+        ],
+      ),
+      dense: false,
     );
   }
 
@@ -931,6 +1133,46 @@ class _TrackTile extends StatelessWidget {
     final seconds = raw is int ? raw : int.tryParse('${raw ?? ''}');
     if (seconds == null || seconds < 0) return null;
     return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+}
+
+class _YandexArtwork extends StatelessWidget {
+  const _YandexArtwork({
+    required this.track,
+    required this.externalId,
+    required this.size,
+  });
+
+  final Map<String, dynamic> track;
+  final String externalId;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = '${track['artwork_url'] ?? track['artworkUrl'] ?? ''}'.trim();
+    Widget placeholder() => ColoredBox(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Icon(Icons.album_outlined, size: size * .58),
+        );
+    return ClipRRect(
+      key: Key('yandex-artwork-$externalId'),
+      borderRadius: BorderRadius.circular(5),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: url.isEmpty
+            ? placeholder()
+            : Image.network(
+                url,
+                fit: BoxFit.cover,
+                cacheWidth: (size * 2).round(),
+                cacheHeight: (size * 2).round(),
+                errorBuilder: (_, _, _) => placeholder(),
+                loadingBuilder: (context, child, progress) =>
+                    progress == null ? child : placeholder(),
+              ),
+      ),
+    );
   }
 }
 

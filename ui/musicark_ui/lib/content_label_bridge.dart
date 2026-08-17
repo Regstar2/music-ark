@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'musicark_bridge.dart';
+export 'musicark_bridge.dart';
 
 abstract interface class ContentLabelBridgeClient {
   Future<Map<String, dynamic>> batch({

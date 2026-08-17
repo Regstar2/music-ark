@@ -26,7 +26,7 @@ Finder _syncScrollable() => find.descendant(
     );
 
 Future<void> _settle(WidgetTester tester) async {
-  await tester.binding.setSurfaceSize(const Size(1400, 1000));
+  await tester.binding.setSurfaceSize(const Size(1400, 1200));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pump();
   await tester.pumpAndSettle();
@@ -119,14 +119,23 @@ void main() {
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
 
+    final decisionGroup = find.text('Нужно решить (1)');
     await tester.scrollUntilVisible(
-      find.text('Нужно решить (1)'),
+      decisionGroup,
       200,
       scrollable: _syncScrollable(),
     );
-    await tester.tap(find.text('Нужно решить (1)'));
+    await tester.ensureVisible(decisionGroup);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Скачать'));
+
+    final downloadAction = find.text('Скачать');
+    await tester.scrollUntilVisible(
+      downloadAction,
+      120,
+      scrollable: _syncScrollable(),
+    );
+    await tester.ensureVisible(downloadAction);
+    await tester.tap(downloadAction);
     await tester.pumpAndSettle();
 
     expect(bridge.lastActionId, '2');
@@ -145,15 +154,25 @@ void main() {
     );
     await _settle(tester);
 
+    final matchingGroup = find.text('Нужно сопоставить (2)');
     await tester.scrollUntilVisible(
-      find.text('Нужно сопоставить (2)'),
+      matchingGroup,
       200,
       scrollable: _syncScrollable(),
     );
-    await tester.tap(find.text('Нужно сопоставить (2)'));
+    await tester.ensureVisible(matchingGroup);
+    await tester.pumpAndSettle();
+    await tester.tap(matchingGroup);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Открыть сопоставление').first);
+    final openMatching = find.text('Открыть сопоставление').first;
+    await tester.scrollUntilVisible(
+      openMatching,
+      120,
+      scrollable: _syncScrollable(),
+    );
+    await tester.ensureVisible(openMatching);
+    await tester.tap(openMatching);
     expect(matchingOpens, 1);
   });
 

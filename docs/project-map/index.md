@@ -5,8 +5,9 @@
 ```text
 ui/musicark_ui/
   lib/main.dart                       top-level Yandex / Local / Matching / Missing / Downloads / Sync navigation
-  lib/yandex_app.dart                 Yandex Library UI
+  lib/yandex_app.dart                 Yandex Library UI + covers + built-in playback + inline content marks
   lib/yandex_content_labels.dart      cached Yandex ORIGINAL/CENSORED mark management
+  lib/audio_player.dart               application-wide media_kit player used by Local and Yandex playback
   lib/local_library_page.dart         Local Library UI + scan-on-activation + local content marks
   lib/metadata_editor_page.dart       explicit local metadata/artwork/filename editor
   lib/content_label_bridge.dart       app-level content mark subprocess bridge
@@ -18,7 +19,7 @@ ui/musicark_ui/
   lib/sync_bridge.dart                v0.8 subprocess bridge client
 
 src/musicark/
-  yandex_library.py                   cache-first Yandex orchestration
+  yandex_library.py                   cache-first Yandex orchestration + private playback preparation
   local_library/                      local scan / metadata / indexing
   metadata/                           explicit transactional MP3 metadata/artwork/filename writes
   content_labels/                     app-only ORIGINAL/CENSORED labels; no file/provider mutation
@@ -28,6 +29,7 @@ src/musicark/
     acceptance_bridge.py              JSON subprocess boundary for that user decision
   coverage/                           authoritative derived coverage + user triage
   download/
+    provider.py                       authorized Yandex acquisition reused by private playback cache
     service.py                        v0.7 production download application boundary
     bridge.py                         Downloads JSON process boundary
   sync/
@@ -37,6 +39,8 @@ src/musicark/
     bridge.py                         Sync JSON process boundary
     safe_execution.py                 legacy entry point delegating to SyncService
   storage/
+    liked_cache.py                    Liked snapshot including public provider artwork URL
+    playlist_cache.py                 playlist snapshots including public provider artwork URL
     sync_storage.py                   immutable plan snapshot/history + execution result persistence
     sync_migration.py                 schema 1.7.0 → 1.8.0
     metadata_editor_migration.py      schema 1.8.1 → 1.8.2 artwork/editor cache
@@ -49,13 +53,15 @@ src/musicark/
 
 v0.8 **does not** implement another matcher, Coverage engine, downloader or Local indexer. It reads the current state from those layers and coordinates only safe operations. `DownloadService.enqueue()` remains the only production acquisition boundary used by Sync Apply.
 
+Yandex tab playback is a separate user-initiated preview path. It reuses the authorized Yandex download provider only to create/reuse a file under `.musicark/playback/yandex`; that file is not inserted into Local Library, Matching or Coverage. Flutter receives the local playback path, never the protected provider media URL or credentials.
+
 The v0.8.2 Metadata Editor is a separate explicit-write boundary. Local Scan, Matching, Coverage, Sync, `[[content-labels]]` and `[[variant-acceptance]]` never rewrite user audio files. ORIGINAL/CENSORED marks never mutate Yandex provider data or alter Matching identity. Variant acceptance never changes the raw analyzer classification; it only resolves whether the currently analyzed local recording remains an actionable review blocker.
 
 Legacy sync planner assumptions such as `filename == yandex_<id>` and upload/replace/metadata candidates are historical compatibility only and are not production truth.
 
 ## Documentation entry points
 
-- `docs/versions/v0.8.2.md` — current Metadata Editor / Matching follow-up contract;
+- `docs/versions/v0.8.2.md` — current Metadata Editor / Yandex Library / Matching follow-up contract;
 - `docs/architecture/metadata-editor.md` — explicit local write boundary;
 - `docs/architecture/content-labels.md` — ORIGINAL/CENSORED app-level marks;
 - `docs/architecture/variant-acceptance.md` — user acceptance of reviewed recording versions;

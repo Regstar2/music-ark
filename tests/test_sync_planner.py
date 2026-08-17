@@ -134,10 +134,20 @@ class ControlledSyncTests(unittest.TestCase):
         statuses = ["same","not_checked","uncertain","altered","different_version"]
         pairs = []
         for i, variant in enumerate(statuses):
-            eid = str(i + 1); payload = self.member("liked", eid, pos=i); lid = self.local(f"v{i}.flac")
-            self.result(eid, payload, "matched", lid); pairs.append((eid, lid, variant))
+            eid = str(i + 1)
+            payload = self.member("liked", eid, pos=i)
+            lid = self.local(f"v{i}.flac")
+            pairs.append((eid, payload, lid, variant))
+        # Matching freshness uses the whole-library fingerprint for automatic rows.
+        # Persist all results only after the fixture's Local Library is complete so
+        # earlier rows are not made stale by later test setup.
+        for eid, payload, lid, _variant in pairs:
+            self.result(eid, payload, "matched", lid)
         with closing(sqlite3.connect(self.db)) as c, c:
-            c.executemany("INSERT INTO track_variant_results(provider_id,external_id,local_file_id,status) VALUES(?,?,?,?)", ((P,e,l,v) for e,l,v in pairs))
+            c.executemany(
+                "INSERT INTO track_variant_results(provider_id,external_id,local_file_id,status) VALUES(?,?,?,?)",
+                ((P, eid, lid, variant) for eid, _payload, lid, variant in pairs),
+            )
         plan = self.service().create_plan(scope_type="liked")
         self.assertEqual(plan["summary"]["variantIssues"], 3)
         self.assertEqual([x["type"] for x in plan["operations"]].count("review_variant"), 3)

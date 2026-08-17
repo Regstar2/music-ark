@@ -20,7 +20,14 @@ Widget _app(
   );
 }
 
+Finder _syncScrollable() => find.descendant(
+      of: find.byKey(const Key('sync-page')),
+      matching: find.byType(Scrollable),
+    );
+
 Future<void> _settle(WidgetTester tester) async {
+  await tester.binding.setSurfaceSize(const Size(1400, 1000));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pump();
   await tester.pumpAndSettle();
 }
@@ -115,7 +122,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('Нужно решить (1)'),
       200,
-      scrollable: find.byKey(const Key('sync-page')),
+      scrollable: _syncScrollable(),
     );
     await tester.tap(find.text('Нужно решить (1)'));
     await tester.pumpAndSettle();
@@ -141,7 +148,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('Нужно сопоставить (2)'),
       200,
-      scrollable: find.byKey(const Key('sync-page')),
+      scrollable: _syncScrollable(),
     );
     await tester.tap(find.text('Нужно сопоставить (2)'));
     await tester.pumpAndSettle();

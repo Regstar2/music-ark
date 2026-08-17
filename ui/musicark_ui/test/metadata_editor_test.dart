@@ -77,6 +77,10 @@ void main() {
     return bridge;
   }
 
+  Future<void> reveal(WidgetTester tester, Key key) async {
+    await tester.ensureVisible(find.byKey(key));
+    await tester.pump();
+  }
 
   testWidgets('shows artwork placeholder, basic fields, multiple artists and advanced tags', (tester) async {
     await openEditor(tester);
@@ -88,7 +92,7 @@ void main() {
     expect(find.byKey(const Key('metadata-remove-artwork')), findsOneWidget);
     expect(find.byKey(const Key('metadata-yandex-search')), findsOneWidget);
 
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-all-tags')), 500);
+    await reveal(tester, const Key('metadata-all-tags'));
     await tester.tap(find.byKey(const Key('metadata-all-tags')));
     await tester.pumpAndSettle();
     expect(find.text('TXXX:UNKNOWN_VENDOR_TAG'), findsOneWidget);
@@ -98,7 +102,7 @@ void main() {
   testWidgets('ordinary Save uses metadata update and does not bind identity', (tester) async {
     final bridge = await openEditor(tester);
     await tester.enterText(find.byKey(const Key('metadata-field-title')), 'Исправленное название');
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-save')), 600);
+    await reveal(tester, const Key('metadata-save'));
     await tester.tap(find.byKey(const Key('metadata-save')));
     await tester.pumpAndSettle();
     expect(bridge.updates, hasLength(1));
@@ -109,7 +113,7 @@ void main() {
 
   testWidgets('Yandex search opens compare and Apply Metadata stays non-exact', (tester) async {
     final bridge = await openEditor(tester);
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-yandex-search')), 600);
+    await reveal(tester, const Key('metadata-yandex-search'));
     await tester.tap(find.byKey(const Key('metadata-yandex-search')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('yandex-search-dialog')), findsOneWidget);
@@ -145,12 +149,12 @@ void main() {
   testWidgets('filename can be edited and suggested from current artist and title', (tester) async {
     final bridge = await openEditor(tester);
     await tester.enterText(find.byKey(const Key('metadata-field-title')), 'Новая песня');
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-suggest-filename')), 400);
+    await reveal(tester, const Key('metadata-suggest-filename'));
     await tester.tap(find.byKey(const Key('metadata-suggest-filename')));
     await tester.pump();
     final field = tester.widget<TextField>(find.byKey(const Key('metadata-field-fileName')));
     expect(field.controller!.text, 'Second Artist - Новая песня.mp3');
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-save')), 600);
+    await reveal(tester, const Key('metadata-save'));
     await tester.tap(find.byKey(const Key('metadata-save')));
     await tester.pumpAndSettle();
     expect((bridge.updates.single['changes'] as Map)['fileName'], 'Second Artist - Новая песня.mp3');
@@ -158,7 +162,7 @@ void main() {
 
   testWidgets('Apply + Bind explicitly requests exact user-confirmed identity', (tester) async {
     final bridge = await openEditor(tester);
-    await tester.scrollUntilVisible(find.byKey(const Key('metadata-yandex-search')), 600);
+    await reveal(tester, const Key('metadata-yandex-search'));
     await tester.tap(find.byKey(const Key('metadata-yandex-search')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('yandex-result-123456')));

@@ -2,9 +2,10 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**
+**Текущая версия кода: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**  
+**Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.8.2 добавляет отдельный **явный** контур редактирования metadata уже существующих локальных файлов.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями; v0.8.2 добавляет явное редактирование существующих локальных MP3, app-level метки контента, принятие варианта записи и безопасное воспроизведение из Yandex Library.
 
 ## Основной цикл
 
@@ -18,14 +19,14 @@ Matching + Variant + Coverage
 Missing / Wanted → Download / Controlled Sync
 ```
 
-Для файлов с плохими тегами появился дополнительный ручной workflow:
+Для файлов с плохими тегами используется отдельный ручной workflow:
 
 ```text
 Local Library
   → Редактировать метаданные
   → локальная правка
       или
-    поиск Yandex Track → Compare
+    Yandex Track search → Compare
   → Применить метаданные
       или
     Применить и связать
@@ -37,9 +38,9 @@ Local Library
 
 ## Metadata и Identity — разные сущности
 
-**«Применить метаданные»** меняет только выбранные непустые поля/обложку локального MP3, после чего запускает обычный Matching. Даже 100% similarity сама по себе не становится подтверждённой identity.
+**«Применить метаданные»** меняет только выбранные непустые поля, artwork и при явном выборе filename локального MP3. После записи выполняются single-file reindex, обновление SHA-256 и targeted Matching refresh. Даже высокая similarity сама по себе не становится подтверждённой identity.
 
-**«Применить и связать»** — отдельное явное подтверждение пользователя. Оно создаёт:
+**«Применить и связать»** выполняет ту же запись и дополнительно создаёт подтверждённую пользователем связь:
 
 ```text
 provider   = yandex_music
@@ -50,20 +51,13 @@ confidence = 1.0
 reason     = user_confirmed
 ```
 
-При таком bind MusicArk также пишет доверенный provenance в ID3 TXXX. Это позволяет восстановить provider identity после удаления БД, переименования или переноса файла. Зарезервированные provenance-теги нельзя редактировать через обычный раздел «Все теги».
+При таком bind MusicArk записывает доверенный provenance в ID3 TXXX. Зарезервированные provenance-теги нельзя редактировать через обычный раздел Advanced Tags.
 
 ## Безопасность изменения файлов
 
-Обычные:
+Scan, Matching, Coverage и Sync **не изменяют пользовательские аудиофайлы**. Существующий файл изменяется только после явного действия в Metadata Editor.
 
-- Scan;
-- Matching;
-- Coverage;
-- Sync;
-
-**не изменяют пользовательские аудиофайлы**.
-
-Существующий файл изменяется только после явного действия в Metadata Editor. Для MP3 используется pipeline:
+Для MP3 используется pipeline:
 
 ```text
 original
@@ -79,31 +73,29 @@ metadata read-back validation
 atomic os.replace()
 ```
 
-До atomic replace оригинал остаётся неизменным. Audio stream не транскодируется. Basic Save меняет только запрошенные frames; неизвестные/custom tags сохраняются.
+До atomic replace оригинал остаётся неизменным. Audio stream не транскодируется. Неизвестные/custom ID3 frames сохраняются, если пользователь явно не редактирует их.
 
-## Artwork
+## Artwork и Yandex Library playback
 
-Local Library показывает thumbnail каждого трека. Приоритет:
+Local Library показывает thumbnail каждого трека. Приоритет: embedded artwork, затем уже cached Yandex artwork для подтверждённой identity, затем placeholder. Список локальной библиотеки не делает Yandex request для каждой строки.
 
-1. embedded artwork;
-2. уже cached Yandex artwork для подтверждённой identity;
-3. placeholder.
+В Yandex Library доступны artwork и встроенное воспроизведение. Backend готовит или переиспользует приватный playback cache под `.musicark/playback/yandex` и передаёт Flutter только локальный путь. Yandex token, Authorization headers и protected/signed provider media URL во Flutter не передаются. Playback cache не индексируется в Local Library и не влияет на Matching или Coverage.
 
-Список библиотеки не делает Yandex request для каждой строки и не передаёт большие base64-картинки во Flutter: UI получает cache path и декодирует thumbnail лениво.
+Для Yandex workspace сохраняется минимальная ширина около `920 px`; более узкое окно использует horizontal scrolling. Это текущий safeguard, а не новый responsive redesign.
 
-## Yandex metadata import
+## Content labels и Variant acceptance
 
-Поиск и получение полного Track DTO выполняются только в Python/backend через существующую Yandex provider/auth границу. Flutter не получает Yandex token, Authorization header, cookies, signed/direct media URL.
+App-level метки **ОРИГИНАЛ / ЦЕНЗУРА** можно задавать для local track и cached Yandex identity. Они не меняют Yandex, не переписывают audio metadata, не меняют Matching identity и не повышают confidence.
 
-Compare позволяет выборочно импортировать доступные поля и artwork. Пустое поле Yandex не стирает локальное значение автоматически.
+Для `ALTERED`, `DIFFERENT_VERSION` и `UNCERTAIN` пользователь может выбрать **«Эта версия меня устраивает»** и позднее отменить принятие. Решение хранится отдельно от analyzer result: исходный Variant status не превращается в `SAME`. Принятие действительно только для того же analysis evidence/fingerprint.
 
 ## Форматы
 
-Архитектура использует format adapters. В v0.8.2 полноценная безопасная запись реализована для **MP3/ID3**. Другие аудиоформаты пока доступны редактору только для просмотра до появления их transactional adapters.
+Архитектура использует format adapters. В v0.8.2 полноценная безопасная запись реализована для **MP3/ID3**. Другие аудиоформаты остаются read-only в Metadata Editor.
 
 ## Controlled Sync
 
-Sync остаётся read-only planner/executor поверх существующих слоёв и не является двунаправленным filesystem mirror. Его стандартный Apply по-прежнему даёт:
+Sync не является двунаправленным filesystem mirror. Стандартный Apply остаётся безопасным:
 
 ```text
 deleted local files = 0
@@ -127,7 +119,11 @@ Forward-only schema:
 1.8.0 — Controlled Sync
 1.8.1 — Rich Yandex download metadata/provenance
 1.8.2 — Local artwork cache / Metadata Editor support
+1.8.3 — app-level ORIGINAL/CENSORED labels
+1.8.4 — variant user acceptance
 ```
+
+Инициализация должна оставаться idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -151,18 +147,18 @@ flutter run -d windows
 ## Roadmap
 
 ```text
-v0.1   — Yandex Likes MVP
-v0.2   — Persistent Library
-v0.3   — Yandex Library / Playlists
-v0.4   — Local Library
-v0.5.0 — Identity Matching
-v0.5.1 — Variant Detection
-v0.6   — Missing Tracks / Coverage
-v0.7   — Download + Local Playback
-v0.8.0 — Controlled Sync
-v0.8.1 — Rich Yandex download metadata/provenance
-v0.8.2 — Local Metadata Editor / Yandex Metadata Import
-next   — stabilization / TBD
+v0.1   — Yandex Likes MVP                              complete
+v0.2   — Persistent Library                            complete
+v0.3   — Yandex Library / Playlists                    complete
+v0.4   — Local Library                                 complete
+v0.5.0 — Identity Matching                             complete
+v0.5.1 — Variant Detection                             complete
+v0.6   — Missing Tracks / Coverage                     complete
+v0.7   — Download + Local Playback                     complete
+v0.8.0 — Controlled Sync                               complete
+v0.8.1 — Rich Yandex download metadata/provenance      complete
+v0.8.2 — Local Metadata Editor / Yandex Metadata Import current code baseline
+next   — stabilization / TBD                           TBD
 ```
 
-См. `docs/versions/v0.8.2.md` и `docs/architecture/metadata-editor.md`.
+Это состояние кода, а не заявление о опубликованном GitHub Release. См. `docs/versions/v0.8.2.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

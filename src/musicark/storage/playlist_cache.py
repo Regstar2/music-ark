@@ -46,6 +46,7 @@ def _track_payload(track: ProviderTrack) -> dict[str, Any]:
         "duration_seconds": track.duration_seconds,
         "explicit": track.explicit,
         "availability": track.availability,
+        "artwork_url": track.artwork_url,
     }
 
 

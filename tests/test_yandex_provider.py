@@ -34,7 +34,13 @@ class FakeYandexProvider(YandexMusicProvider):
                 "title": "Courtesy Call",
                 "duration_ms": 238000,
                 "artists": [{"name": "Thousand Foot Krutch"}],
-                "albums": [{"id": "a-1", "title": "The End Is Where We Begin"}],
+                "albums": [
+                    {
+                        "id": "a-1",
+                        "title": "The End Is Where We Begin",
+                        "cover_uri": "avatars.yandex.net/get-music-content/123/%%",
+                    }
+                ],
                 "available": True,
                 "content_warning": False,
             }
@@ -60,13 +66,23 @@ class YandexMapperTests(unittest.TestCase):
                 "title": "Song",
                 "duration_ms": 180000,
                 "artists": [{"name": "Artist"}],
-                "albums": [{"id": "1", "title": "Album"}],
+                "albums": [
+                    {
+                        "id": "1",
+                        "title": "Album",
+                        "cover_uri": "//avatars.yandex.net/get-music-content/42/%%",
+                    }
+                ],
                 "available": True,
             }
         )
         self.assertEqual(mapped.provider_id, "yandex_music")
         self.assertEqual(mapped.external_id, "11")
         self.assertEqual(mapped.duration_seconds, 180)
+        self.assertEqual(
+            mapped.artwork_url,
+            "https://avatars.yandex.net/get-music-content/42/200x200",
+        )
 
     def test_map_playlist_creates_universal_provider_playlist(self) -> None:
         mapped = map_yandex_playlist(

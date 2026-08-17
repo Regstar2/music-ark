@@ -69,6 +69,16 @@ def _strict_yandex_id_match(provider_id: str, external_id: str, path: str) -> bo
     return bool(pattern.fullmatch(name))
 
 
+def _trusted_embedded_identity(provider_id: str, external_id: str, local: dict[str, Any]) -> bool:
+    """Trust only provenance already validated by the Local Metadata Reader gate."""
+    return (
+        provider_id == "yandex_music"
+        and bool(external_id)
+        and str(local.get("source_provider_id") or "") == provider_id
+        and str(local.get("source_external_id") or "") == external_id
+    )
+
+
 class MatchScorer:
     """Score one already-bounded candidate pair; no storage or network access."""
 
@@ -77,6 +87,24 @@ class MatchScorer:
         provider_id = str(provider["provider_id"])
         external_id = str(provider["external_id"])
         path = str(local.get("path") or "")
+
+        if _trusted_embedded_identity(provider_id, external_id, local):
+            score = MatchScore(
+                title=1.0,
+                artists=1.0,
+                duration=1.0,
+                album=1.0,
+                filename=None,
+                exact_id=1.0,
+                final=1.0,
+            )
+            return ScoredCandidate(
+                local_file_id=int(local["id"]),
+                confidence=1.0,
+                method=MatchMethod.EXACT_ID,
+                breakdown=score.as_dict(),
+                local=local,
+            )
 
         if _strict_yandex_id_match(provider_id, external_id, path):
             score = MatchScore(

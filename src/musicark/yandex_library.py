@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 from musicark.core.config import load_config
 from musicark.credentials import CredentialStore, SystemCredentialStore
+from musicark.download.models import DownloadTask
+from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.matching.scope import MatchingScopeState
 from musicark.providers.yandex_music_provider import (
     YandexMusicProvider,
@@ -19,7 +21,7 @@ ProviderFactory = Callable[[str], YandexMusicProvider]
 
 
 class YandexLibraryService:
-    """Coordinate secure session, provider access, and cache-first Yandex collections."""
+    """Coordinate secure session, provider access, cache-first collections, and playback cache."""
 
     def __init__(
         self,
@@ -263,6 +265,41 @@ class YandexLibraryService:
             liked_diff=liked_diff,
             playlists_diff=playlists_diff,
         )
+
+    def playback_prepare(self, external_id: str) -> dict[str, Any]:
+        """Acquire an authorized Yandex track into MusicArk's private playback cache.
+
+        Flutter receives only the resulting local path. Provider download URLs and
+        credentials stay inside the backend process, and the cache file is not added
+        to Local Library or Matching.
+        """
+        identity = str(external_id).strip()
+        if not identity.isdigit():
+            raise ValueError("Yandex Track ID must be numeric.")
+        token = self._saved_token()
+        app_root = self._base_dir if self._base_dir is not None else self._database_path.parent.parent
+        playback_root = app_root / ".musicark" / "playback" / "yandex"
+        task = DownloadTask(
+            task_type="yandex_playback",
+            source_id=identity,
+            provider_id="yandex_music_download",
+            target_folder=str(playback_root),
+            raw_payload={
+                "track_id": identity,
+                "quality": "best",
+                "target_filename": f"yandex_{identity}.mp3",
+            },
+        )
+        local_audio = YandexMusicDownloadProvider(
+            base_dir=self._base_dir,
+            token=token,
+        ).execute(task)
+        return {
+            "providerId": "yandex_music",
+            "externalId": identity,
+            "path": local_audio.path,
+            "cached": True,
+        }
 
     def cached(self) -> dict[str, Any]:
         return self.bootstrap()

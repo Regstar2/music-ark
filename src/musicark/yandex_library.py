@@ -218,7 +218,7 @@ class YandexLibraryService:
         token = self._credentials.get_token()
         # A stale/deleted cached playlist can still be queried by legacy callers; only
         # an active playlist is allowed to become the current Matching scope.
-        if snapshot.metadata:
+        if snapshot.refreshed_at is not None:
             self._matching_scope.set_playlist(external_id)
         return {
             "session": self._session(token is not None, liked.account),

@@ -29,7 +29,7 @@ class PlatformBridgeTests(unittest.TestCase):
             self.assertIn("mvp_hints", snapshot)
             mh = snapshot["mvp_hints"]
             self.assertIn("schema_version", mh)
-            self.assertEqual(mh["schema_version"], "1.7.0")
+            self.assertEqual(mh["schema_version"], "1.8.4")
             self.assertIn("latest_sync_plan_id", mh)
 
     def test_sync_execute_safe_requires_confirm(self) -> None:

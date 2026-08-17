@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/local_library_page.dart';
@@ -122,9 +123,20 @@ void main() {
     expect(find.byKey(const Key('metadata-editor-page')), findsOneWidget);
     expect(find.byKey(const Key('metadata-field-title')), findsOneWidget);
 
-    // Unmount FileImage before removing the temporary file on Windows.
+    // FileImage may keep a Windows file handle alive after the widget is removed.
+    // Cleanup must therefore never await recursive filesystem deletion: doing so
+    // can stall the entire widget test for minutes. Clear Flutter's image caches,
+    // then perform best-effort synchronous cleanup and tolerate a transient lock.
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
-    if (await temp.exists()) await temp.delete(recursive: true);
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+    try {
+      if (image.existsSync()) image.deleteSync();
+      if (temp.existsSync()) temp.deleteSync();
+    } on FileSystemException {
+      // The OS temp directory can retain this tiny fixture until the decoder
+      // releases its handle; cleanup must not affect the test result.
+    }
   });
 }

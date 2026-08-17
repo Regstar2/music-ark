@@ -12,8 +12,9 @@
 | v0.7.0 | Download + Local Playback | complete |
 | v0.8.0 | Controlled Sync | complete |
 | v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | complete |
-| v0.8.2 | Local Metadata Editor / Yandex Metadata Import | current code baseline / mainline candidate |
-| next | stabilization / TBD | TBD |
+| v0.8.2 | Local Metadata Editor / Yandex Metadata Import | complete |
+| v0.9.0 | UI, Account & Settings | current / Draft validation |
+| v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
 
@@ -28,7 +29,10 @@ Version notes:
 - `docs/versions/v0.8.0.md`
 - `docs/versions/v0.8.1.md`
 - `docs/versions/v0.8.2.md`
+- `docs/versions/v0.9.0.md`
 
-Current package version is `0.8.2`; current schema target is `1.8.4`. v0.8.2 adds an explicit transactional editor for existing local MP3 metadata/artwork/filename, structured Yandex Track search/compare/import, app-level ORIGINAL/CENSORED marks, reviewed-variant acceptance, Yandex artwork/playback and the narrow-window safeguard. Ordinary Scan/Matching/Coverage/Sync still do not rewrite existing user audio files.
+Current package version is `0.9.0`; current schema target remains `1.8.4`. v0.9.0 adds the global application shell account control, persisted theme/locale preferences, Material 3 light/dark themes, Flutter RU/EN localization infrastructure, offline Help and diagnostic About information. It does not add a SQLite migration or new music/provider mutation behavior.
 
-This index describes source state and does not by itself indicate that v0.8.2 has been published as a GitHub Release.
+v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
+
+This index describes source state and does not by itself indicate that v0.9.0 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

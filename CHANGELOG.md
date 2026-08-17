@@ -2,11 +2,53 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.8.2 mainline candidate
+## Unreleased — v0.9.0 Draft candidate
 
-### v0.8.2 — Local Metadata Editor & Yandex Metadata Import
+### v0.9.0 — UI, Account & Settings
 
 #### Added
+
+- global account/profile control in the lower utility area of the application sidebar, driven by the existing Yandex session payloads;
+- cache-first Flutter account state with display-name initials and generic icon fallback without exposing provider credentials;
+- Settings with persisted `System / Light / Dark` theme preference and `System / Russian / English` locale preference;
+- centralized Material 3 light/dark themes based on `ColorScheme`;
+- standard Flutter `flutter_localizations` + `gen_l10n` + ARB localization infrastructure for Russian and English;
+- offline Help covering Yandex Music, Local Library, Matching, Missing, Downloads, Sync and Metadata Editor semantics;
+- About page with centralized app/backend/schema information, standard dependency license UI and privacy-safe diagnostic copy;
+- Flutter regression tests for account state/control, long names, settings persistence, locale fallback, theme/locale switching and utility-page shell lifetime.
+
+#### Changed
+
+- application version advanced to `0.9.0` while the SQLite schema remains `1.8.4`;
+- the global desktop shell now owns the primary product identity and utility navigation;
+- Settings, Help and About remain inside the application shell so Now Playing stays present;
+- Yandex workspace keeps the existing approximately `920 px` minimum-width horizontal-scroll safeguard;
+- Yandex page lifetime is preserved across theme/locale changes; logout is the explicit provider-state reset boundary.
+
+#### Localization
+
+- new shell/account/settings/help/about static strings are provided through generated RU/EN resources;
+- unsupported system locales deterministically fall back to Russian;
+- provider data, filenames, paths, technical IDs and backend internal codes remain untranslated;
+- complete v0.9.0 acceptance still requires migration/verification of legacy feature-page static strings that predate the localization layer.
+
+#### Safety / boundaries
+
+- login/logout continue to use the existing Yandex application/credential boundary; no second authentication implementation is introduced;
+- the pinned `yandex-music==3.0.0` account contract does not provide a verified public avatar URI used by MusicArk, so v0.9.0 does not invent an avatar field or URL template;
+- theme/locale preferences are stored separately from the MusicArk SQLite database and contain no tokens or library contents;
+- Matching, Variant, Coverage, Download, Controlled Sync and Metadata Editor semantics are unchanged;
+- ordinary Scan/Matching/Coverage/Sync remain non-mutating for existing user audio;
+- Yandex Upload, reverse Sync, release packaging, installer/signing and auto-update are not part of v0.9.0.
+
+#### Verification state
+
+- new automated tests are present in source, but Python/Flutter suites and Windows manual smoke must be recorded only after they are actually executed against the v0.9.0 branch;
+- the PR remains Draft while full localization/dark-mode/manual UI acceptance is incomplete.
+
+## v0.8.2 — Local Metadata Editor & Yandex Metadata Import
+
+### Added
 
 - explicit Metadata Editor for existing local MP3/ID3 files with structured fields, Advanced Tags, artwork replacement/removal and safe filename editing;
 - preservation of unknown/custom ID3 frames unless explicitly changed;
@@ -22,7 +64,7 @@ All notable project changes are recorded here. Entries describe the current code
 - schema migrations `1.8.2 → 1.8.3` for content labels and `1.8.3 → 1.8.4` for variant acceptance;
 - Python and Flutter regression coverage for metadata editing, content labels, variant acceptance, Yandex controls/playback and narrow layout.
 
-#### Safety / boundaries
+### Safety / boundaries
 
 - Scan, Matching, Coverage and Controlled Sync remain read-only for existing user audio files;
 - explicit Metadata Editor actions are the normal application path allowed to modify an existing indexed audio file;
@@ -32,13 +74,13 @@ All notable project changes are recorded here. Entries describe the current code
 - playback-cache files are not inserted into Local Library, Matching or Coverage;
 - writable metadata format remains MP3/ID3 only in this baseline.
 
-#### Verification state
+### Verification state
 
 - PR #13 recorded earlier partial Windows checks, stale Flutter harness failures and analyzer findings before later stabilization commits;
 - those historical results are not treated as verification of the current integration branch;
 - current integration-branch Python/Flutter/Windows checks must be recorded separately when actually run.
 
-### v0.8.1 — Rich Yandex download metadata / provenance
+## v0.8.1 — Rich Yandex download metadata / provenance
 
 - Yandex downloads write available standard metadata and trusted MusicArk/Yandex provenance into newly acquired MP3 files;
 - download materialization keeps the `.part → validate → metadata → atomic final` sequence;

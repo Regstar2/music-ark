@@ -1,11 +1,24 @@
 # MusicArk
 
-[Русская версия](README.md)
+[Русский](README.md) · **English**
 
-**Current code version: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**  
+**Current code version: 0.9.0 — UI, Account & Settings.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers; v0.8.2 adds explicit editing of existing local MP3 files, app-level content labels, reviewed-variant acceptance and safe Yandex Library playback.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers; v0.9.0 adds a unified application shell, global account state, settings, light/dark themes, RU/EN localization infrastructure, offline Help and diagnostic About information.
+
+## Desktop shell v0.9.0
+
+`Settings` and the account control live in the utility area at the bottom of the global left sidebar. Without a stored Yandex session the control shows `Sign in`; when authenticated it shows the account name and an initials fallback avatar. Sign-in reuses the existing Yandex workflow and logout uses the existing backend boundary. Account bootstrap remains cache-first and does not require a network request on every launch.
+
+UI settings apply without restart and are stored separately from the music SQLite database:
+
+- theme: `System` / `Light` / `Dark`;
+- language: `System` / `Russian` / `English`;
+- Help remains available offline;
+- About reports app/backend/schema versions, OS information and safe diagnostics without tokens or library contents.
+
+MusicArk uses standard Flutter `ThemeMode`, Material 3 `ColorScheme`, and `gen_l10n`/ARB resources. Theme/locale changes rebuild the application presentation without recreating the shell state that owns the current Yandex playlist and Now Playing lifecycle.
 
 ## Product loop
 
@@ -81,7 +94,7 @@ Local Library displays a thumbnail for each track. Priority is embedded artwork,
 
 Yandex Library provides artwork and built-in playback. The backend prepares or reuses a private cache under `.musicark/playback/yandex` and passes only the local path to Flutter. The Yandex token, Authorization headers and protected/signed provider media URLs are never passed to Flutter. Playback-cache files are not indexed into Local Library and do not affect Matching or Coverage.
 
-The Yandex workspace keeps a minimum width of about `920 px`; narrower windows use horizontal scrolling. This is the current safeguard, not a responsive redesign.
+The Yandex workspace keeps a minimum width of about `920 px`; narrower windows use horizontal scrolling. This remains a desktop safeguard rather than a mobile/responsive redesign.
 
 ## Content labels and Variant acceptance
 
@@ -91,7 +104,7 @@ For `ALTERED`, `DIFFERENT_VERSION` and `UNCERTAIN`, the user may accept the curr
 
 ## Formats
 
-The editor uses format adapters. v0.8.2 provides the first full safe writer for **MP3/ID3**. Other audio formats remain read-only in Metadata Editor.
+The editor uses format adapters. Full safe writing is implemented for **MP3/ID3**. Other audio formats remain read-only in Metadata Editor.
 
 ## Controlled Sync
 
@@ -123,7 +136,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-Initialization is expected to remain idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.0 does not bump the SQLite schema: theme/locale preferences use a separate UI-only typed store. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -147,18 +160,11 @@ flutter run -d windows
 ## Roadmap
 
 ```text
-v0.1   — Yandex Likes MVP                              complete
-v0.2   — Persistent Library                            complete
-v0.3   — Yandex Library / Playlists                    complete
-v0.4   — Local Library                                 complete
-v0.5.0 — Identity Matching                             complete
-v0.5.1 — Variant Detection                             complete
-v0.6   — Missing Tracks / Coverage                     complete
-v0.7   — Download + Local Playback                     complete
 v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
-v0.8.2 — Local Metadata Editor / Yandex Metadata Import current code baseline
-next   — stabilization / TBD                           TBD
+v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
+v0.9.0 — UI, Account & Settings                        current
+v0.10.x — Yandex Upload                                next
 ```
 
-This describes the current code state and does not claim that a public GitHub Release exists. See `docs/versions/v0.8.2.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.0. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.0.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

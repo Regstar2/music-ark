@@ -54,12 +54,7 @@ class PagingMatchingBridge extends FakeMatchingBridge {
         'score': <String, dynamic>{},
         'reason': 'no_candidates',
         'manual': false,
-        'provider': {
-          'title': 'Page Song $index',
-          'artists': ['Artist $index'],
-          'album_title': 'Album',
-          'duration_seconds': 200,
-        },
+        'provider': {'title': 'Page Song $index', 'artists': ['Artist $index'], 'album_title': 'Album', 'duration_seconds': 200},
         'local': null,
       },
     );
@@ -73,7 +68,19 @@ void main() {
   Future<void> desktop(WidgetTester tester, Widget widget) async {
     await tester.binding.setSurfaceSize(const Size(1600, 950));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MaterialApp(home: widget));
+    final safeWidget = widget is MatchingPage
+        ? MatchingPage(
+            bridge: widget.bridge,
+            contentLabelBridge: widget.contentLabelBridge is FakeContentLabelBridge
+                ? widget.contentLabelBridge
+                : FakeContentLabelBridge(),
+            variantAcceptanceBridge:
+                widget.variantAcceptanceBridge is FakeVariantAcceptanceBridge
+                    ? widget.variantAcceptanceBridge
+                    : FakeVariantAcceptanceBridge(),
+          )
+        : widget;
+    await tester.pumpWidget(MaterialApp(home: safeWidget));
     await tester.pumpAndSettle();
   }
 
@@ -159,14 +166,7 @@ void main() {
   testWidgets('matching detail can set Yandex and local content labels', (tester) async {
     final bridge = FakeMatchingBridge();
     final labels = FakeContentLabelBridge();
-    await desktop(
-      tester,
-      MatchingPage(
-        bridge: bridge,
-        contentLabelBridge: labels,
-        variantAcceptanceBridge: FakeVariantAcceptanceBridge(),
-      ),
-    );
+    await desktop(tester, MatchingPage(bridge: bridge, contentLabelBridge: labels, variantAcceptanceBridge: FakeVariantAcceptanceBridge()));
     await tester.tap(find.byKey(const Key('matching-row-201')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('matching-provider-label')));

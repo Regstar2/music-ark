@@ -70,7 +70,7 @@ void main() {
       documents: {2: localDocument()},
       searchItems: [yandexTrack()],
     );
-    await tester.binding.setSurfaceSize(const Size(1500, 1100));
+    await tester.binding.setSurfaceSize(const Size(1500, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(home: MetadataEditorPage(localFileId: 2, bridge: bridge)));
     await tester.pumpAndSettle();

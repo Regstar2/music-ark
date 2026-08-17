@@ -20,6 +20,7 @@ from musicark.metadata.formats.mp3 import Mp3MetadataAdapter
 from musicark.metadata.identity import ExplicitIdentityService
 from musicark.metadata.service import MetadataEditorError, MetadataEditorService
 from musicark.matching.candidates import CandidateGenerator
+from musicark.matching.indexer import LocalMatchIndex
 from musicark.matching.scoring import MatchScorer
 from musicark.provenance import (
     MUSICARK_EXTERNAL_ID, MUSICARK_METADATA_SCHEMA, MUSICARK_METADATA_SCHEMA_VERSION,
@@ -192,6 +193,10 @@ class MetadataTransactionTests(unittest.TestCase):
                         (json.dumps(payload, ensure_ascii=False),),
                     )
 
+            # CandidateGenerator is an internal matching primitive. Public Matching
+            # refreshes the normalized Local Library index before candidate generation,
+            # so this direct unit-level call must reproduce that precondition.
+            LocalMatchIndex(db_path).refresh()
             repo = MatchingStorageRepository(db_path)
             provider = repo.list_provider_track_candidates("yandex_music")[0]
             generator = CandidateGenerator(repo, database_path=db_path)

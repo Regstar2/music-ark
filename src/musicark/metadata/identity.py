@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from musicark.matching.fingerprints import provider_fingerprint
+from musicark.matching.fingerprints import local_file_fingerprint, provider_fingerprint
 from musicark.matching.models import Track
 from musicark.matching.normalize import normalize_artists, normalize_text
 from musicark.matching.policy import MATCHER_VERSION
@@ -74,17 +74,22 @@ class ExplicitIdentityService:
             raise ValueError("Yandex Track ID is required.")
         self.cache_provider_track(identity, provider_payload)
         track_id = self._matching.upsert_track(self._track(provider_payload))
-        local_fingerprint = self._matching.local_library_fingerprint()
         provider_fp = provider_fingerprint("yandex_music", identity, provider_payload)
 
         with closing(sqlite3.connect(self._database_path)) as conn:
             with conn:
                 local = conn.execute(
-                    "SELECT id FROM local_audio_files WHERE id=? AND availability='available'",
+                    """
+                    SELECT id, path, file_size, modified_ns, title, artists_json,
+                           album, duration_seconds, codec
+                    FROM local_audio_files
+                    WHERE id=? AND availability='available'
+                    """,
                     (file_id,),
                 ).fetchone()
                 if local is None:
                     raise ValueError(f"Local file {file_id} was not found.")
+                local_fp = local_file_fingerprint(tuple(local[1:]))
 
                 # One physical file cannot be user-confirmed as two different Yandex tracks.
                 previous = conn.execute(
@@ -106,11 +111,11 @@ class ExplicitIdentityService:
                         SET status='unmatched', local_file_id=NULL, confidence=0,
                             method='automatic', score_breakdown_json='{}',
                             reason='user_rebound_local_file', manual=0,
-                            local_fingerprint=?, updated_at=datetime('now')
+                            local_fingerprint='', updated_at=datetime('now')
                         WHERE provider_id='yandex_music' AND external_id=?
                           AND local_file_id=?
                         """,
-                        (local_fingerprint, old_external_id, file_id),
+                        (old_external_id, file_id),
                     )
 
                 conn.execute(
@@ -154,7 +159,7 @@ class ExplicitIdentityService:
                         local_fingerprint=excluded.local_fingerprint,
                         manual=1, updated_at=datetime('now')
                     """,
-                    (identity, file_id, MATCHER_VERSION, provider_fp, local_fingerprint),
+                    (identity, file_id, MATCHER_VERSION, provider_fp, local_fp),
                 )
                 conn.execute(
                     """

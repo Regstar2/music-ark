@@ -68,7 +68,6 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   bool _hasStoredToken = false;
   String? _errorMessage;
   String? _errorDetails;
-  Map<String, dynamic> _account = const {};
   List<Map<String, dynamic>> _likedTracks = const [];
   List<Map<String, dynamic>> _playlists = const [];
   List<Map<String, dynamic>> _playlistTracks = const [];
@@ -238,29 +237,6 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     }
   }
 
-  Future<void> _logout() async {
-    _beginBusy();
-    try {
-      final payload = await widget.bridge.logout();
-      if (!mounted) return;
-      _applyLibraryPayload(payload);
-      setState(() {
-        _page = _PageKind.liked;
-        _selectedPlaylist = null;
-        _playlistTracks = const [];
-        _contentLabels = const {};
-        _searchController.clear();
-        _tokenController.clear();
-        _trackSort = LibrarySort.original;
-        _playlistSort = PlaylistSort.original;
-      });
-    } on MusicArkBridgeException catch (error) {
-      if (mounted) setState(() => _setBridgeError(error));
-    } finally {
-      _endBusy();
-    }
-  }
-
   Future<void> _loadContentLabels(List<Map<String, dynamic>> tracks) async {
     final labels = widget.contentLabelBridge;
     if (labels == null || tracks.isEmpty) return;
@@ -297,7 +273,6 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       }
     }
   }
-
   Future<void> _setContentLabel(
     Map<String, dynamic> track,
     String label,
@@ -386,7 +361,6 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
     setState(() {
       _hasStoredToken = session['hasStoredToken'] == true;
-      _account = _asMap(session['account']);
       _likedTracks = _asListOfMaps(liked['tracks']);
       _playlists = playlistItems;
       _likedSource = (liked['source'] ?? 'none').toString();
@@ -545,7 +519,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('${AppStrings.appTitle} 0.3')),
+        appBar: AppBar(title: const Text(AppStrings.appTitle)),
         body: _initializing
             ? const Center(child: CircularProgressIndicator())
             : _hasStoredToken
@@ -642,93 +616,67 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
         ],
       );
 
-  Widget _buildSidebar() {
-    final displayName =
-        (_account['displayName'] ?? _account['providerUserId'] ?? '').toString();
-
-    return SizedBox(
-      key: const Key('library-sidebar'),
-      width: 280,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppStrings.yandexMusic,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                if (displayName.isNotEmpty)
-                  Text(
-                    displayName,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-              ],
+  Widget _buildSidebar() => SizedBox(
+        key: const Key('library-sidebar'),
+        width: 280,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+              child: Text(
+                AppStrings.yandexMusic,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
-          ),
-          ListTile(
-            key: const Key('nav-liked'),
-            leading: const Icon(Icons.favorite_outline),
-            selected: _page == _PageKind.liked,
-            title: const Text(AppStrings.likedTracks),
-            onTap: _showLiked,
-          ),
-          ListTile(
-            key: const Key('nav-playlists'),
-            leading: const Icon(Icons.queue_music),
-            selected: _page == _PageKind.playlists,
-            title: const Text(AppStrings.playlists),
-            trailing: Text('${_playlists.length}'),
-            onTap: _showPlaylists,
-          ),
-          if (_playlists.isNotEmpty) const Divider(),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _playlists.length,
-              itemBuilder: (context, index) {
-                final item = _playlists[index];
-                final id = (item['externalId'] ?? '').toString();
-                return ListTile(
-                  key: Key('nav-playlist-$id'),
-                  contentPadding: const EdgeInsets.only(left: 40, right: 12),
-                  dense: true,
-                  selected: _page == _PageKind.playlist &&
-                      _selectedPlaylist?['externalId'] == id,
-                  title: Text(
-                    (item['title'] ?? AppStrings.unknownPlaylist).toString(),
-                  ),
-                  onTap: () => _openPlaylist(item),
-                );
-              },
+            ListTile(
+              key: const Key('nav-liked'),
+              leading: const Icon(Icons.favorite_outline),
+              selected: _page == _PageKind.liked,
+              title: const Text(AppStrings.likedTracks),
+              onTap: _showLiked,
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FilledButton.tonalIcon(
-                  key: const Key('refresh-library'),
-                  onPressed: _busy ? null : _refreshLibrary,
-                  icon: const Icon(Icons.sync),
-                  label: const Text(AppStrings.refreshLibrary),
-                ),
-                const SizedBox(height: 6),
-                TextButton(
-                  key: const Key('logout-button'),
-                  onPressed: _busy ? null : _logout,
-                  child: const Text(AppStrings.logout),
-                ),
-              ],
+            ListTile(
+              key: const Key('nav-playlists'),
+              leading: const Icon(Icons.queue_music),
+              selected: _page == _PageKind.playlists,
+              title: const Text(AppStrings.playlists),
+              trailing: Text('${_playlists.length}'),
+              onTap: _showPlaylists,
             ),
-          ),
-        ],
-      ),
-    );
-  }
+            if (_playlists.isNotEmpty) const Divider(),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _playlists.length,
+                itemBuilder: (context, index) {
+                  final item = _playlists[index];
+                  final id = (item['externalId'] ?? '').toString();
+                  return ListTile(
+                    key: Key('nav-playlist-$id'),
+                    contentPadding: const EdgeInsets.only(left: 40, right: 12),
+                    dense: true,
+                    selected: _page == _PageKind.playlist &&
+                        _selectedPlaylist?['externalId'] == id,
+                    title: Text(
+                      (item['title'] ?? AppStrings.unknownPlaylist).toString(),
+                    ),
+                    onTap: () => _openPlaylist(item),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: FilledButton.tonalIcon(
+                key: const Key('refresh-library'),
+                onPressed: _busy ? null : _refreshLibrary,
+                icon: const Icon(Icons.sync),
+                label: const Text(AppStrings.refreshLibrary),
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _buildPage() => switch (_page) {
         _PageKind.liked => _buildTrackCollection(

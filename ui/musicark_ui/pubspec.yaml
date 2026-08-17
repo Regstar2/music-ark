@@ -1,8 +1,8 @@
 name: musicark_ui
-description: "MusicArk Yandex, local library, identity matching, coverage, controlled sync, authorized download, and explicit metadata editor desktop app."
+description: "MusicArk Yandex, local library, identity matching, coverage, controlled sync, authorized download, explicit metadata editor, and desktop settings app."
 publish_to: 'none'
 
-version: 0.8.2+1
+version: 0.9.0+1
 
 environment:
   sdk: ^3.11.5
@@ -10,6 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
   cupertino_icons: ^1.0.8
   file_selector: ^1.1.0
   media_kit: ^1.2.6
@@ -22,3 +25,4 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true

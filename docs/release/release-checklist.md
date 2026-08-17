@@ -1,130 +1,93 @@
-# Release Checklist — v0.8.2 integration baseline
+# Release Checklist — v0.9.0 UI, Account & Settings
 
-This checklist is the acceptance gate for the v0.8.2 mainline candidate. It does not imply a published release or tag.
+This checklist is the acceptance gate for the v0.9.0 Draft candidate. It does not imply a published release, installer, package, tag or GitHub Release.
 
 ## Version / schema / Git
 
-- [ ] Python package version is `0.8.2`.
-- [ ] Flutter version is `0.8.2+1` unless an intentional build-number-only change is documented.
-- [ ] SQLite forward migration reaches `1.8.4`.
-- [ ] existing databases are migrated in place; no `.musicark/musicark.db` reset is required.
-- [ ] repeated initialization is idempotent.
-- [ ] integration branch is based on current `main` and preserves v0.8.1 + v0.8.2 history/functionality.
-- [ ] final diff contains no unrelated generated/build files or secrets.
-- [ ] README.md, README_EN.md, CHANGELOG and version docs describe the same baseline.
+- [ ] Python package version is `0.9.0`.
+- [ ] Flutter version is `0.9.0+1` unless an intentional build-number-only change is documented.
+- [ ] SQLite schema target remains `1.8.4`; v0.9.0 does not add a music DB migration.
+- [ ] v0.9.0 branch is based on the accepted v0.8.2 `main` baseline.
+- [ ] Draft PR targets `main` from `agent/v0.9.0-ui-account-settings`.
+- [ ] final diff contains no secrets, user data, avatar fixture from a real account, unrelated build output or mass formatting.
+- [ ] README.md, README_EN.md, CHANGELOG and version docs describe the same version/scope.
 
-## Python automated checks
+## Global account / session
 
-From repository root:
+- [ ] logged-out state shows `Войти` / `Sign in` in the bottom sidebar account control.
+- [ ] sign-in routes to the existing Yandex Music login workflow.
+- [ ] cached signed-in startup shows cached account information without requiring network success.
+- [ ] login updates the global account control without restart.
+- [ ] account menu shows provider/account context, open-Yandex action and logout.
+- [ ] logout uses the existing backend credential/session boundary.
+- [ ] logout updates global shell and Yandex UI without restart.
+- [ ] no independent second credential store or authentication implementation exists.
+- [ ] account DTO visible to Flutter contains no token, cookie or Authorization data.
 
-- [ ] `python -m unittest tests.test_yandex_provider tests.test_yandex_library -v`.
-- [ ] `python -m unittest tests.test_metadata_editor_v082 -v`.
-- [ ] `python -m unittest tests.test_content_labels_v082 -v`.
-- [ ] `python -m unittest tests.test_variant_acceptance_v082 -v`.
-- [ ] `python -m unittest discover -s tests -p "test_*.py" -v`.
+## Avatar / profile fallback
 
-If module names change, record the actual equivalent commands rather than claiming the listed commands passed.
+- [ ] provider account contract was checked against the pinned dependency version.
+- [ ] no undocumented avatar field or Yandex URL template is invented.
+- [ ] available name produces one/two initials.
+- [ ] missing name produces a generic user icon.
+- [ ] long displayName uses ellipsis and does not overflow the sidebar.
+- [ ] avatar/profile decoration failure cannot become a login/session error.
 
-## Flutter automated checks
+## Settings persistence
 
-From `ui/musicark_ui`:
+- [ ] Settings appears in the lower utility area, separated from primary music destinations.
+- [ ] preference store contains only the required UI settings and a minimal schema marker.
+- [ ] theme preference survives restart.
+- [ ] locale preference survives restart.
+- [ ] preference persistence contains no credential or library data.
 
-- [ ] `flutter pub get`.
-- [ ] `flutter analyze` with no accepted analyzer errors/warnings hidden by rule removal.
-- [ ] `flutter test test/yandex_track_controls_test.dart`.
-- [ ] `flutter test test/yandex_narrow_layout_test.dart`.
-- [ ] `flutter test test/metadata_editor_test.dart`.
-- [ ] `flutter test test/matching_variant_page_test.dart`.
-- [ ] full `flutter test`.
+## Theme
 
-## Migration / persistence
+- [ ] System / Light / Dark are available.
+- [ ] switching applies without restart.
+- [ ] System follows platform brightness.
+- [ ] centralized Material 3 / ColorScheme theme definitions are used.
+- [ ] major feature pages are manually checked in Dark mode.
+- [ ] no unreadable hard-coded light/dark surfaces remain in active UI.
 
-- [ ] realistic `1.8.1 → 1.8.4` migration preserves Yandex credential/session.
-- [ ] cached Likes and playlists remain.
-- [ ] Local Library roots and indexed files remain.
-- [ ] Matching decisions/conflicts/manual links remain.
-- [ ] Variant results remain.
-- [ ] Coverage actions remain.
-- [ ] Download queue/history/settings remain.
-- [ ] Sync state/history remains.
-- [ ] restart does not re-run a destructive migration.
+## Localization
 
-## Metadata Editor
+- [ ] standard Flutter localization pipeline is configured with RU and EN resources.
+- [ ] System / Russian / English are available and persistent.
+- [ ] system `ru` resolves to Russian.
+- [ ] system `en` resolves to English.
+- [ ] unsupported system locale deterministically falls back to Russian.
+- [ ] switching locale applies without restart.
+- [ ] global navigation/account/settings/help/about are localized.
+- [ ] Yandex, Local Library, Matching, Missing, Downloads, Sync, Metadata Editor, dialogs/status/empty/error UI static strings are localized for acceptance.
+- [ ] provider data, filenames, paths, technical IDs and backend internal codes remain untranslated.
+- [ ] ORIGINAL/CENSORED presentation is localized without changing stored internal codes or DB schema.
 
-Using a copied test MP3:
+## Help / About
 
-- [ ] structured fields can be edited and read back.
-- [ ] unknown/custom ID3 frames survive unrelated edits.
-- [ ] artwork replacement/removal works.
-- [ ] filename changes remain same-directory and refresh the index.
-- [ ] filename collision never overwrites an existing file.
-- [ ] audio stream remains valid after metadata writes.
-- [ ] only the edited file is reindexed/rehashed.
+- [ ] Help works offline.
+- [ ] Help covers Yandex, Local Library, Matching, Missing, Downloads, Sync and Metadata Editor.
+- [ ] Help explicitly explains Matching != Variant.
+- [ ] Help explicitly explains Missing != Different Version.
+- [ ] Help states that Sync does not delete local-only files.
+- [ ] Help distinguishes Apply Metadata from Apply + Bind.
+- [ ] About shows factual MusicArk `0.9.0`, backend version and schema `1.8.4`.
+- [ ] no MusicArk license name is invented.
+- [ ] standard Flutter dependency license UI is used where applicable.
+- [ ] copied diagnostics contain no secrets, protected URLs or library contents.
+- [ ] stale visible version labels such as `MusicArk 0.3` / `MusicArk 0.8` are absent.
 
-## Apply Metadata / Apply + Bind
+## Shell / UI lifetime
 
-- [ ] Yandex search exposes separate title and artist inputs.
-- [ ] Compare supports selective non-empty metadata/artwork import.
-- [ ] Apply Metadata writes transactionally and refreshes Local/Matching state.
-- [ ] Apply Metadata alone does not create user-confirmed Exact identity from similarity.
-- [ ] Apply + Bind creates `exact_id`, confidence `1.0`, reason `user_confirmed`.
-- [ ] trusted provenance is added only when the explicit bind contract requires it.
-- [ ] reserved provenance tags are protected from normal Advanced Tags editing.
+- [ ] Yandex page state survives theme and locale changes.
+- [ ] open Yandex playlist/scope is not reset by Settings changes.
+- [ ] Now Playing remains alive while Settings, Help and About are open.
+- [ ] Settings/Help/About do not replace the playback engine.
+- [ ] Yandex workspace retains the approximately `920 px` narrow-window safeguard.
+- [ ] account control remains usable at narrow widths.
+- [ ] RU and EN long labels do not introduce render overflow.
 
-## Content labels
-
-- [ ] local ORIGINAL/CENSORED set/change/remove works.
-- [ ] cached Yandex ORIGINAL/CENSORED set/change/remove works.
-- [ ] Matching detail can manage both subjects independently.
-- [ ] labels do not mutate Yandex provider data.
-- [ ] labels do not automatically rewrite audio metadata.
-- [ ] labels do not alter Matching identity/confidence.
-
-## Variant acceptance
-
-For `ALTERED`, `DIFFERENT_VERSION`, `UNCERTAIN`:
-
-- [ ] **Эта версия меня устраивает** resolves the actionable blocker.
-- [ ] raw analyzer status remains unchanged.
-- [ ] **Отменить принятие** restores the blocker.
-- [ ] changed analysis evidence/fingerprint invalidates the old acceptance.
-
-## Yandex Library / playback
-
-- [ ] Yandex artwork renders when available.
-- [ ] old snapshots without artwork fail safely to placeholder until refresh.
-- [ ] first Yandex playback works.
-- [ ] repeated playback can reuse private cache.
-- [ ] unavailable-track state is handled.
-- [ ] playlist-track playback works.
-- [ ] Flutter receives only a local cache path, not token/auth/protected media URLs.
-- [ ] playback cache is absent from Local Library, Matching and Coverage.
-
-## Narrow-window safeguard
-
-- [ ] Yandex workspace keeps an approximately 920 px minimum width.
-- [ ] narrower outer windows scroll horizontally.
-- [ ] no `RenderFlex overflow`.
-- [ ] no `ListTile` trailing-width assertion/crash.
-- [ ] no unhandled render exception.
-
-## Controlled Sync / download regression
-
-- [ ] Covered creates no acquisition.
-- [ ] Missing+Wanted creates `ENQUEUE_DOWNLOAD` only.
-- [ ] Missing+Unreviewed remains a decision blocker.
-- [ ] Missing+Ignored creates no download.
-- [ ] Needs Review / Not Analyzed remain matching blockers.
-- [ ] unresolved Variant results remain review blockers.
-- [ ] a valid accepted current Variant is not an unresolved blocker.
-- [ ] `DIFFERENT_VERSION` never triggers automatic replacement.
-- [ ] Apply requires explicit confirmation.
-- [ ] Apply delegates to `DownloadService.enqueue()`.
-- [ ] Apply never drains unrelated queue entries.
-- [ ] active queued/running identity is not duplicated.
-- [ ] v0.8.1 rich Yandex metadata/provenance download path is preserved.
-
-## Safety invariants
+## v0.8.2 safety regression
 
 In ordinary Scan/Matching/Coverage/Sync scenarios:
 
@@ -133,23 +96,51 @@ modified existing user audio files = 0
 Yandex provider mutations = 0
 ```
 
-- [ ] existing user audio modification occurs only through an explicit Metadata Editor action.
-- [ ] destructive tests use temporary files/copies, never the user's only original.
-- [ ] no Yandex token, credentials, cookies, Authorization headers or protected/signed media URLs are committed/logged/persisted in unsafe locations.
-- [ ] no real `.musicark` DB, music collection, `.env`, build outputs or private configs are committed.
+- [ ] Metadata Editor remains the explicit ordinary write boundary.
+- [ ] Apply Metadata and Apply + Bind retain their existing separate semantics.
+- [ ] Matching semantics are unchanged.
+- [ ] Variant semantics are unchanged.
+- [ ] Coverage/Missing semantics are unchanged.
+- [ ] Download semantics are unchanged.
+- [ ] Controlled Sync semantics are unchanged.
+- [ ] no Yandex Upload, reverse Sync or `can_upload_tracks=true` is introduced.
 
-## Windows build / manual acceptance
+## Python automated checks
 
-- [ ] `flutter build windows` succeeds on Windows.
-- [ ] application is launched from the resulting Windows build or via the documented Windows run path.
-- [ ] every applicable scenario in `docs/testing/manual-test-plan.md` is completed.
+From repository root:
 
-If the environment is not Windows or the toolchain is unavailable, record these gates as **NOT VERIFIED**, not passed.
+- [ ] `python -m unittest discover -s tests -p "test_*.py" -v`.
+
+## Flutter automated checks
+
+From `ui/musicark_ui`:
+
+- [ ] `flutter pub get`.
+- [ ] `flutter analyze` with no accepted analyzer errors/warnings hidden by rule removal.
+- [ ] `flutter test test/account_session_test.dart`.
+- [ ] `flutter test test/account_control_test.dart`.
+- [ ] `flutter test test/app_settings_test.dart`.
+- [ ] `flutter test test/v0_9_shell_test.dart`.
+- [ ] full `flutter test`.
+
+## Windows manual acceptance
+
+- [ ] `flutter run -d windows` starts the development application.
+- [ ] cached profile / login / logout / login-again scenarios pass.
+- [ ] System / Light / Dark and persistence are manually checked.
+- [ ] Russian / English / System and persistence are manually checked.
+- [ ] Yandex / Local / Matching / Missing / Downloads / Sync / Metadata Editor / Settings / Help / About open without layout/render exceptions.
+- [ ] dark-mode scenarios from `docs/testing/manual-test-plan.md` are checked.
+- [ ] localization scenarios from `docs/testing/manual-test-plan.md` are checked.
+
+Release build, installer, MSIX, portable ZIP, signing and clean-machine packaging are **not** required by v0.9.0.
+
+If Windows/toolchain validation is unavailable, record the relevant gates as **NOT VERIFIED**, never as passed.
 
 ## CI / PR
 
-- [ ] Draft PR targets `main` from `agent/v0.8.2-mainline-integration`.
-- [ ] GitHub Actions result is recorded as PASS / FAIL / BLOCKED / NOT STARTED.
+- [ ] GitHub Actions result is recorded as PASS / FAIL / BLOCKED / NOT RUN.
 - [ ] infrastructure/billing blockers are described as infrastructure blockers, not code-test failures.
-- [ ] the PR remains Draft while required manual Windows acceptance is incomplete.
+- [ ] PR verification table contains only factual command/manual results.
+- [ ] the PR remains Draft while UI/localization/manual acceptance is incomplete.
 - [ ] the PR is not merged automatically.

@@ -73,10 +73,20 @@ class LocalFileIndexer:
             allow_removals=False,
         )
         with closing(sqlite3.connect(self._database_path)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE local_audio_files
+                    SET source_provider_id=?, source_external_id=?
+                    WHERE normalized_path=?
+                    """,
+                    (metadata.source_provider_id, metadata.source_external_id, normalized),
+                )
             row = conn.execute(
                 """
                 SELECT id, library_root_id, path, title, artists_json, album,
-                       duration_seconds, codec, file_size
+                       duration_seconds, codec, file_size, source_provider_id,
+                       source_external_id
                 FROM local_audio_files WHERE normalized_path=?
                 """,
                 (normalized,),
@@ -93,4 +103,6 @@ class LocalFileIndexer:
             "durationSeconds": row[6],
             "codec": row[7],
             "fileSize": int(row[8] or 0),
+            "sourceProviderId": row[9],
+            "sourceExternalId": row[10],
         }

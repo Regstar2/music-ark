@@ -192,6 +192,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                           ? DownloadPage(
                               key: ValueKey('downloads-${_activationRevision[4]}'),
                               bridge: widget.downloadBridge,
+                              coverageBridge: widget.coverageBridge,
                               active: _index == 4,
                             )
                           : const SizedBox.shrink(),

@@ -1,7 +1,8 @@
 """Read-only metadata extraction for local audio files.
 
-This module deliberately exposes no write operation. v0.4 must never modify
-user audio files.
+This module deliberately exposes no write operation. MusicArk never mutates
+user audio while scanning; v0.8.1 only recognizes provenance already embedded
+in files created by the download pipeline.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import re
 from typing import Any
 
 from musicark.core.errors import MusicArkError
+from musicark.provenance import trusted_yandex_origin
 from .models import LocalTrackMetadata
 
 
@@ -63,8 +65,26 @@ def _year(raw: str | None) -> int | None:
     return int(match.group(0)) if match else None
 
 
+def _provenance(path: Path) -> tuple[str | None, str | None]:
+    if path.suffix.casefold() != ".mp3":
+        return None, None
+    try:
+        from mutagen.id3 import ID3
+
+        tags = ID3(str(path))
+    except Exception:  # noqa: BLE001 - provenance is optional for normal user files.
+        return None, None
+    values: dict[str, str] = {}
+    for frame in tags.getall("TXXX"):
+        description = str(getattr(frame, "desc", ""))
+        text = getattr(frame, "text", ())
+        if description and text:
+            values[description] = str(text[0]).strip()
+    return trusted_yandex_origin(values)
+
+
 class LocalMetadataReader:
-    """Extract matching-relevant tags and technical properties with mutagen."""
+    """Extract matching-relevant tags, technical properties, and trusted origin."""
 
     def read(self, path: Path) -> LocalTrackMetadata:
         try:
@@ -86,6 +106,7 @@ class LocalMetadataReader:
         disc_number = _number(_first(tags, "discnumber"))
         year = _year(_first(tags, "date", "year"))
         genre = _first(tags, "genre")
+        source_provider_id, source_external_id = _provenance(path)
 
         duration = None
         bitrate = None
@@ -123,4 +144,6 @@ class LocalMetadataReader:
             codec=path.suffix.lower().lstrip("."),
             bitrate=bitrate,
             sample_rate=sample_rate,
+            source_provider_id=source_provider_id,
+            source_external_id=source_external_id,
         )

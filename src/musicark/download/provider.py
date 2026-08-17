@@ -7,11 +7,12 @@ import os
 from pathlib import Path
 import re
 import shutil
-from typing import Callable
+from typing import Any, Callable
 
 import requests
 
 from musicark.core.errors import MusicArkError
+from musicark.provenance import trusted_yandex_origin
 from musicark.providers.local_library import build_local_audio_file
 from musicark.providers.models import LocalAudioFile
 from musicark.providers.yandex_music_provider import (
@@ -20,6 +21,14 @@ from musicark.providers.yandex_music_provider import (
     YandexTokenMissingError,
 )
 
+from .metadata import (
+    Artwork,
+    AudioMetadataWriter,
+    MetadataWriteError,
+    YandexTrackMetadata,
+    metadata_from_yandex_track,
+    yandex_artwork_url,
+)
 from .models import DownloadTask
 
 
@@ -31,6 +40,7 @@ _WINDOWS_RESERVED = {
     *(f"LPT{i}" for i in range(1, 10)),
 }
 _INVALID_WINDOWS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAX_ARTWORK_BYTES = 5 * 1024 * 1024
 
 
 class DownloadProviderError(MusicArkError):
@@ -117,23 +127,21 @@ class LocalImportProvider(DownloadProvider):
 
 
 class YandexMusicDownloadProvider(DownloadProvider):
-    """Authorized Yandex Music track acquisition backend.
-
-    The caller should pass a token from ``SystemCredentialStore`` explicitly for
-    production flows. Environment/local.properties lookup is retained only for
-    compatibility with older tests/tools and variant reference acquisition.
-    """
+    """Authorized Yandex Music track acquisition backend."""
 
     def __init__(self, base_dir: Path | None = None, token: str | None = None) -> None:
         self._base_dir = base_dir
         self._token = token.strip() if token else None
+        self._metadata_writer = AudioMetadataWriter()
 
     @property
     def provider_id(self) -> str:
         return "yandex_music_download"
 
     def execute(self, task: DownloadTask) -> LocalAudioFile:
-        return self.execute_with_context(task)
+        # Preserve the v0.7 no-context contract for reference tools/tests. The
+        # production DownloadService always calls execute_with_context().
+        return self._execute_legacy(task)
 
     def execute_with_context(
         self,
@@ -142,35 +150,83 @@ class YandexMusicDownloadProvider(DownloadProvider):
         progress: ProgressCallback | None = None,
         cancelled: CancelCheck | None = None,
     ) -> LocalAudioFile:
-        track_id = self._extract_track_id(task)
-        if not track_id.isdigit():
-            raise DownloadProviderError(f"Invalid Yandex track id '{track_id}'.", code="invalid_track_id")
+        if progress is None and cancelled is None:
+            return self._execute_legacy(task)
+        return self._execute_rich(
+            task,
+            progress=progress,
+            cancelled=cancelled,
+        )
+
+    def _execute_legacy(self, task: DownloadTask) -> LocalAudioFile:
+        track_id = self._validated_track_id(task)
         quality = str(task.raw_payload.get("quality", "best")).lower() if task.raw_payload else "best"
         destination = self._destination(task, track_id)
         if destination.exists():
-            # The stable filename itself carries the exact provider identity. Reuse
-            # only a parseable complete audio file; never overwrite an unknown or
-            # corrupted file that happens to occupy the requested leaf name.
             if destination.is_file() and destination.stat().st_size > 0 and self._is_valid_existing_audio(destination):
+                return build_local_audio_file(destination)
+            destination = self._collision_safe_destination(destination)
+        direct_link = self._resolve_direct_link(track_id, quality=quality)
+        self._download_to_file(direct_link, destination)
+        return build_local_audio_file(destination)
+
+    def _execute_rich(
+        self,
+        task: DownloadTask,
+        *,
+        progress: ProgressCallback | None,
+        cancelled: CancelCheck | None,
+    ) -> LocalAudioFile:
+        track_id = self._validated_track_id(task)
+        quality = str(task.raw_payload.get("quality", "best")).lower() if task.raw_payload else "best"
+        destination = self._destination(task, track_id)
+        if destination.exists():
+            if (
+                destination.is_file()
+                and destination.stat().st_size > 0
+                and self._is_valid_existing_audio(destination)
+                and self._has_trusted_yandex_origin(destination, track_id)
+            ):
                 if progress is not None:
                     size = int(destination.stat().st_size)
                     progress(size, size)
                 return build_local_audio_file(destination)
             destination = self._collision_safe_destination(destination)
 
-        direct_link = self._resolve_direct_link(track_id, quality=quality)
-        # Keep the historical no-context call shape for execute()/legacy subclasses.
-        # v0.7 passes callbacks only when the new worker explicitly asks for them.
-        if progress is None and cancelled is None:
-            self._download_to_file(direct_link, destination)
-        else:
-            self._download_to_file(
+        track, direct_link = self._resolve_track_and_link(track_id, quality=quality)
+        metadata = metadata_from_yandex_track(track, fallback_external_id=track_id).with_fallback(
+            task.raw_payload or {}
+        )
+        temporary = destination.with_name(destination.name + ".part")
+        try:
+            self._download_to_part(
                 direct_link,
-                destination,
+                temporary,
                 progress=progress,
                 cancelled=cancelled,
             )
-        return build_local_audio_file(destination)
+            self._metadata_writer.validate_audio(temporary)
+            artwork = self._fetch_artwork(metadata)
+            self._metadata_writer.write_mp3(temporary, metadata, artwork=artwork)
+            self._metadata_writer.validate_audio(temporary)
+            temporary.replace(destination)
+            return build_local_audio_file(destination)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if isinstance(exc, DownloadProviderError):
+                raise
+            if isinstance(exc, MetadataWriteError):
+                raise DownloadProviderError(str(exc), code="metadata_write") from exc
+            raise
+
+    def _validated_track_id(self, task: DownloadTask) -> str:
+        track_id = self._extract_track_id(task)
+        if not track_id.isdigit():
+            raise DownloadProviderError(f"Invalid Yandex track id '{track_id}'.", code="invalid_track_id")
+        return track_id
 
     def _destination(self, task: DownloadTask, track_id: str) -> Path:
         target_folder = Path(task.target_folder).expanduser().resolve(strict=False)
@@ -194,7 +250,24 @@ class YandexMusicDownloadProvider(DownloadProvider):
 
             audio = MutagenFile(str(path), easy=True)
             return audio is not None and getattr(audio, "info", None) is not None
-        except Exception:  # noqa: BLE001 - a suspicious existing file must not be reused.
+        except Exception:  # noqa: BLE001
+            return False
+
+    @staticmethod
+    def _has_trusted_yandex_origin(path: Path, track_id: str) -> bool:
+        try:
+            from mutagen.id3 import ID3
+
+            tags = ID3(str(path))
+            values: dict[str, str] = {}
+            for frame in tags.getall("TXXX"):
+                description = str(getattr(frame, "desc", ""))
+                text = getattr(frame, "text", ())
+                if description and text:
+                    values[description] = str(text[0]).strip()
+            provider_id, external_id = trusted_yandex_origin(values)
+            return provider_id == "yandex_music" and external_id == track_id
+        except Exception:  # noqa: BLE001
             return False
 
     @staticmethod
@@ -248,7 +321,22 @@ class YandexMusicDownloadProvider(DownloadProvider):
         except Exception as exc:  # noqa: BLE001
             raise YandexAuthenticationError("Failed to initialize Yandex client for download.") from exc
 
-    def _resolve_direct_link(self, track_id: str, quality: str = "best") -> str:
+    @staticmethod
+    def _select_download_info(infos: list[Any], quality: str) -> Any:
+        mp3_infos = [item for item in infos if str(getattr(item, "codec", "")).lower() == "mp3"]
+        candidates = mp3_infos or list(infos)
+        selected = candidates[0]
+        if quality == "best":
+            selected = max(candidates, key=lambda item: getattr(item, "bitrate_in_kbps", 0))
+        elif quality.isdigit():
+            target = int(quality)
+            selected = min(
+                candidates,
+                key=lambda item: abs(getattr(item, "bitrate_in_kbps", 0) - target),
+            )
+        return selected
+
+    def _resolve_track_and_link(self, track_id: str, quality: str = "best") -> tuple[Any, str]:
         client = self._build_client()
         try:
             tracks = client.tracks([track_id]) or []
@@ -260,19 +348,7 @@ class YandexMusicDownloadProvider(DownloadProvider):
                 raise DownloadProviderError(
                     f"Track '{track_id}' has no download info.", code="no_download_info"
                 )
-
-            mp3_infos = [item for item in infos if str(getattr(item, "codec", "")).lower() == "mp3"]
-            candidates = mp3_infos or list(infos)
-            selected = candidates[0]
-            if quality == "best":
-                selected = max(candidates, key=lambda item: getattr(item, "bitrate_in_kbps", 0))
-            elif quality.isdigit():
-                target = int(quality)
-                selected = min(
-                    candidates,
-                    key=lambda item: abs(getattr(item, "bitrate_in_kbps", 0) - target),
-                )
-
+            selected = self._select_download_info(list(infos), quality)
             get_direct_link = getattr(selected, "get_direct_link", None)
             if not callable(get_direct_link):
                 raise DownloadProviderError(
@@ -284,7 +360,7 @@ class YandexMusicDownloadProvider(DownloadProvider):
                 raise DownloadProviderError(
                     f"Track '{track_id}' has no direct link.", code="no_download_info"
                 )
-            return str(link)
+            return track, str(link)
         except (DownloadProviderError, YandexAuthenticationError, YandexTokenMissingError):
             raise
         except Exception as exc:  # noqa: BLE001
@@ -293,15 +369,44 @@ class YandexMusicDownloadProvider(DownloadProvider):
                 code="provider_request",
             ) from exc
 
-    def _download_to_file(
+    def _resolve_direct_link(self, track_id: str, quality: str = "best") -> str:
+        _track, link = self._resolve_track_and_link(track_id, quality=quality)
+        return link
+
+    def _fetch_artwork(self, metadata: YandexTrackMetadata) -> Artwork | None:
+        url = yandex_artwork_url(metadata)
+        if not url:
+            return None
+        try:
+            response = requests.get(url, timeout=20, stream=True)
+            response.raise_for_status()
+            mime = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if not mime.startswith("image/"):
+                return None
+            chunks: list[bytes] = []
+            size = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > _MAX_ARTWORK_BYTES:
+                    return None
+                chunks.append(chunk)
+            data = b"".join(chunks)
+            if not data:
+                return None
+            return Artwork(data=data, mime=mime)
+        except requests.RequestException:
+            return None
+
+    def _download_to_part(
         self,
         direct_link: str,
-        destination: Path,
+        temporary: Path,
         *,
         progress: ProgressCallback | None = None,
         cancelled: CancelCheck | None = None,
     ) -> None:
-        temporary = destination.with_name(destination.name + ".part")
         try:
             temporary.unlink(missing_ok=True)
             if cancelled is not None and cancelled():
@@ -328,9 +433,8 @@ class YandexMusicDownloadProvider(DownloadProvider):
                         progress(downloaded, total)
             if not temporary.is_file() or temporary.stat().st_size <= 0:
                 raise DownloadProviderError(
-                    f"Downloaded track is empty: '{destination.name}'.", code="invalid_audio"
+                    f"Downloaded track is empty: '{temporary.name}'.", code="invalid_audio"
                 )
-            temporary.replace(destination)
         except Exception as exc:  # noqa: BLE001
             try:
                 temporary.unlink(missing_ok=True)
@@ -345,3 +449,29 @@ class YandexMusicDownloadProvider(DownloadProvider):
             if isinstance(exc, OSError):
                 raise DownloadProviderError("Cannot write the downloaded audio file.", code="disk_file_error") from exc
             raise DownloadProviderError("Failed to download track.", code="provider_error") from exc
+
+    def _download_to_file(
+        self,
+        direct_link: str,
+        destination: Path,
+        *,
+        progress: ProgressCallback | None = None,
+        cancelled: CancelCheck | None = None,
+    ) -> None:
+        temporary = destination.with_name(destination.name + ".part")
+        self._download_to_part(
+            direct_link,
+            temporary,
+            progress=progress,
+            cancelled=cancelled,
+        )
+        try:
+            temporary.replace(destination)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if isinstance(exc, OSError):
+                raise DownloadProviderError("Cannot write the downloaded audio file.", code="disk_file_error") from exc
+            raise

@@ -3,6 +3,7 @@ part of 'coverage_page.dart';
 extension _CoveragePageView on _CoveragePageState {
   Widget _buildView(BuildContext context) {
     final summary = _summary ?? const <String, dynamic>{};
+    final allSelected = _status == 'missing' && _total > 0 && _selected.length >= _total;
     return Column(
       key: const Key('coverage-page'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -152,6 +153,7 @@ extension _CoveragePageView on _CoveragePageState {
                         _updateView(() {
                           _sort = value;
                           _offset = 0;
+                          _selected.clear();
                         });
                         _reloadTracks(refreshSummary: false);
                       },
@@ -178,6 +180,7 @@ extension _CoveragePageView on _CoveragePageState {
                         _updateView(() {
                           _userAction = value ?? '';
                           _offset = 0;
+                          _selected.clear();
                         });
                         _reloadTracks(refreshSummary: false);
                       },
@@ -207,6 +210,7 @@ extension _CoveragePageView on _CoveragePageState {
                           _updateView(() {
                             _variantStatus = value ?? '';
                             _offset = 0;
+                            _selected.clear();
                           });
                           _reloadTracks(refreshSummary: false);
                         },
@@ -217,6 +221,29 @@ extension _CoveragePageView on _CoveragePageState {
             },
           ),
         ),
+        if (_status == 'missing' && _total > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('coverage-select-all'),
+                  onPressed: _loading
+                      ? null
+                      : allSelected
+                          ? _clearSelection
+                          : _selectAllFiltered,
+                  icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+                  label: Text(allSelected ? 'Снять выделение' : 'Выбрать всё'),
+                ),
+                if (_selected.isNotEmpty)
+                  Text('${_selected.length} из $_total выбрано'),
+              ],
+            ),
+          ),
         if (_selected.isNotEmpty)
           _BulkBar(
             count: _selected.length,

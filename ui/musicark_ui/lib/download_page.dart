@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'coverage_bridge.dart';
 import 'desktop_file_actions.dart';
 import 'download_bridge.dart';
 import 'folder_picker.dart';
@@ -10,12 +11,14 @@ class DownloadPage extends StatefulWidget {
   const DownloadPage({
     super.key,
     required this.bridge,
+    this.coverageBridge,
     this.active = true,
     this.folderPicker = const SystemLocalFolderPicker(),
     this.fileActions = const SystemLocalFileActions(),
   });
 
   final DownloadBridgeClient bridge;
+  final CoverageBridgeClient? coverageBridge;
   final bool active;
   final LocalFolderPicker folderPicker;
   final LocalFileActions fileActions;
@@ -34,14 +37,19 @@ class _DownloadPageState extends State<DownloadPage> {
   };
 
   String _filter = '';
+  bool _wantedTab = false;
   bool _loading = true;
+  bool _wantedLoading = false;
   bool _workerActive = false;
   bool _stopWorker = false;
   String? _error;
   Map<String, dynamic> _summary = const {};
   Map<String, dynamic> _settings = const {};
   List<Map<String, dynamic>> _items = const [];
+  List<Map<String, dynamic>> _wantedItems = const [];
+  int _wantedTotal = 0;
   final Set<String> _visiblePaths = {};
+  final Set<String> _wantedRunning = {};
   Timer? _pollTimer;
 
   @override
@@ -54,8 +62,6 @@ class _DownloadPageState extends State<DownloadPage> {
   void didUpdateWidget(covariant DownloadPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active && !widget.active) {
-      // IndexedStack keeps this State alive off-screen. Never let a queue worker
-      // silently drain old tasks after the user leaves Downloads.
       _stopWorker = true;
       _pollTimer?.cancel();
       _pollTimer = null;
@@ -108,6 +114,68 @@ class _DownloadPageState extends State<DownloadPage> {
     }
   }
 
+  Future<void> _loadWanted({bool showSpinner = false}) async {
+    final bridge = widget.coverageBridge;
+    if (bridge == null) {
+      if (mounted) {
+        setState(() {
+          _wantedItems = const [];
+          _wantedTotal = 0;
+          _wantedLoading = false;
+        });
+      }
+      return;
+    }
+    if (showSpinner && mounted) setState(() => _wantedLoading = true);
+    try {
+      final payload = await bridge.coverageTracks(
+        limit: 1000,
+        offset: 0,
+        status: 'missing',
+        userAction: 'wanted',
+        sort: 'artist',
+      );
+      if (!mounted) return;
+      final rawItems = payload['items'];
+      setState(() {
+        _wantedItems = rawItems is List
+            ? rawItems.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+            : <Map<String, dynamic>>[];
+        _wantedTotal = int.tryParse('${payload['count'] ?? _wantedItems.length}') ?? _wantedItems.length;
+        _wantedLoading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _wantedLoading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _refreshCurrent({bool showSpinner = false}) async {
+    if (_wantedTab) {
+      await _loadWanted(showSpinner: showSpinner);
+    } else {
+      await _load(showSpinner: showSpinner);
+    }
+  }
+
+  void _selectTab(bool wanted) {
+    if (_wantedTab == wanted) return;
+    setState(() {
+      _wantedTab = wanted;
+      _error = null;
+      if (wanted) _wantedLoading = true;
+    });
+    if (wanted) {
+      _loadWanted();
+    } else {
+      _load();
+    }
+  }
+
   Future<bool> _ensureTarget() async {
     if (_settings['targetConfigured'] == true) return true;
     return _chooseTarget();
@@ -119,6 +187,7 @@ class _DownloadPageState extends State<DownloadPage> {
     try {
       await widget.bridge.setTarget(path);
       await _load();
+      if (_wantedTab) await _loadWanted();
       return true;
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -145,8 +214,6 @@ class _DownloadPageState extends State<DownloadPage> {
     if (_workerActive || !widget.active) return;
     if (!await _ensureTarget()) return;
     try {
-      // Snapshot existing queue first. "Download all Wanted" may enqueue thousands
-      // of new tasks, but it must never auto-run unrelated leftovers from old tests.
       final before = (await _queuedTaskIds()).toSet();
       final result = await widget.bridge.enqueueWanted();
       final created = (result['created'] as num?)?.toInt() ?? 0;
@@ -169,8 +236,32 @@ class _DownloadPageState extends State<DownloadPage> {
       } else {
         await _load();
       }
+      if (_wantedTab) await _loadWanted();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _enqueueSingleWanted(String externalId) async {
+    if (_workerActive || _wantedRunning.contains(externalId) || !widget.active) return;
+    if (!await _ensureTarget()) return;
+    setState(() {
+      _wantedRunning.add(externalId);
+      _error = null;
+    });
+    try {
+      final queued = await widget.bridge.enqueue(externalId);
+      final rawTask = queued['task'];
+      final task = rawTask is Map ? Map<String, dynamic>.from(rawTask) : const <String, dynamic>{};
+      final taskId = (task['id'] ?? '').toString();
+      if ((task['status'] ?? '').toString() == 'queued' && taskId.isNotEmpty) {
+        await _runQueue(skipTargetCheck: true, taskIds: [taskId]);
+      }
+      await _loadWanted();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _wantedRunning.remove(externalId));
     }
   }
 
@@ -199,9 +290,6 @@ class _DownloadPageState extends State<DownloadPage> {
       if (widget.active && !_stopWorker) _load();
     });
     try {
-      // Run one persisted task at a time. Unlike bridge.runQueue(), this gives the
-      // UI a cancellation boundary between tracks and prevents an off-screen page
-      // from draining thousands of stale queued tasks.
       for (final taskId in ids) {
         if (_stopWorker || !widget.active) break;
         try {
@@ -224,6 +312,7 @@ class _DownloadPageState extends State<DownloadPage> {
       _pollTimer = null;
       if (mounted) setState(() => _workerActive = false);
       await _load();
+      if (_wantedTab) await _loadWanted();
     }
   }
 
@@ -231,7 +320,6 @@ class _DownloadPageState extends State<DownloadPage> {
     if (_workerActive || !widget.active) return;
     try {
       await widget.bridge.retry(taskId);
-      // Retry means this task only. It must not wake unrelated queued work.
       await _runQueue(taskIds: [taskId]);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -315,6 +403,7 @@ class _DownloadPageState extends State<DownloadPage> {
 
   @override
   Widget build(BuildContext context) {
+    final busy = _wantedTab ? _wantedLoading : _loading;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Загрузки'),
@@ -322,57 +411,152 @@ class _DownloadPageState extends State<DownloadPage> {
           IconButton(
             key: const Key('downloads-refresh'),
             tooltip: 'Обновить',
-            onPressed: () => _load(showSpinner: true),
+            onPressed: () => _refreshCurrent(showSpinner: true),
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
-      body: _loading
+      body: busy
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: _refreshCurrent,
               child: ListView(
                 key: const Key('downloads-page'),
                 padding: const EdgeInsets.all(20),
                 children: [
-                  _summaryCard(),
+                  _tabs(),
                   const SizedBox(height: 12),
-                  _targetCard(),
-                  const SizedBox(height: 12),
-                  _actions(),
-                  const SizedBox(height: 12),
-                  _filterBar(),
-                  if (_error != null) ...[
-                    const SizedBox(height: 12),
-                    MaterialBanner(
-                      key: const Key('downloads-error'),
-                      content: Text(_error!),
-                      actions: [
-                        TextButton(
-                          onPressed: () => setState(() => _error = null),
-                          child: const Text('Скрыть'),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  if (_items.isEmpty)
-                    Card(
-                      key: const Key('downloads-empty'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          _filter.isEmpty
-                              ? 'Активных загрузок нет.'
-                              : 'Для выбранного фильтра загрузок нет.',
-                        ),
-                      ),
-                    )
-                  else
-                    ..._items.map(_taskCard),
+                  if (_wantedTab) ..._wantedContent() else ..._downloadsContent(),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _tabs() {
+    return SegmentedButton<String>(
+      key: const Key('downloads-tabs'),
+      segments: const [
+        ButtonSegment(value: 'tasks', label: Text('Загрузки'), icon: Icon(Icons.download_outlined)),
+        ButtonSegment(value: 'wanted', label: Text('Нужные'), icon: Icon(Icons.bookmark_outline)),
+      ],
+      selected: {_wantedTab ? 'wanted' : 'tasks'},
+      onSelectionChanged: (value) {
+        if (value.isEmpty) return;
+        _selectTab(value.first == 'wanted');
+      },
+    );
+  }
+
+  List<Widget> _downloadsContent() => [
+        _summaryCard(),
+        const SizedBox(height: 12),
+        _targetCard(),
+        const SizedBox(height: 12),
+        _actions(),
+        const SizedBox(height: 12),
+        _filterBar(),
+        if (_error != null) ..._errorWidgets(),
+        const SizedBox(height: 12),
+        if (_items.isEmpty)
+          Card(
+            key: const Key('downloads-empty'),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                _filter.isEmpty
+                    ? 'Активных загрузок нет.'
+                    : 'Для выбранного фильтра загрузок нет.',
+              ),
+            ),
+          )
+        else
+          ..._items.map(_taskCard),
+      ];
+
+  List<Widget> _wantedContent() => [
+        _targetCard(),
+        const SizedBox(height: 12),
+        Card(
+          key: const Key('downloads-wanted-summary'),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('Нужные треки: $_wantedTotal'),
+                FilledButton.icon(
+                  key: const Key('downloads-wanted-download-all'),
+                  onPressed: _workerActive || _wantedTotal == 0 ? null : _enqueueWanted,
+                  icon: const Icon(Icons.download_for_offline_outlined),
+                  label: const Text('Скачать все'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_error != null) ..._errorWidgets(),
+        const SizedBox(height: 12),
+        if (_wantedItems.isEmpty)
+          const Card(
+            key: Key('downloads-wanted-empty'),
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('Треков со статусом «Нужен» сейчас нет.'),
+            ),
+          )
+        else
+          ..._wantedItems.map(_wantedCard),
+        if (_wantedItems.length < _wantedTotal)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Показаны первые ${_wantedItems.length} из $_wantedTotal треков.'),
+          ),
+      ];
+
+  List<Widget> _errorWidgets() => [
+        const SizedBox(height: 12),
+        MaterialBanner(
+          key: const Key('downloads-error'),
+          content: Text(_error!),
+          actions: [
+            TextButton(
+              onPressed: () => setState(() => _error = null),
+              child: const Text('Скрыть'),
+            ),
+          ],
+        ),
+      ];
+
+  Widget _wantedCard(Map<String, dynamic> item) {
+    final id = (item['externalId'] ?? '').toString();
+    final provider = item['provider'] is Map
+        ? Map<String, dynamic>.from(item['provider'] as Map)
+        : const <String, dynamic>{};
+    final artists = provider['artists'] is List
+        ? (provider['artists'] as List).map((e) => e.toString()).where((e) => e.isNotEmpty).join(', ')
+        : '';
+    final title = (provider['title'] ?? id).toString();
+    final album = (provider['album_title'] ?? provider['album'] ?? '').toString();
+    final running = _wantedRunning.contains(id);
+    return Card(
+      key: ValueKey('downloads-wanted-$id'),
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: const Icon(Icons.bookmark),
+        title: Text(artists.isEmpty ? title : '$artists — $title'),
+        subtitle: album.isEmpty ? Text('Yandex ID $id') : Text('$album • Yandex ID $id'),
+        trailing: FilledButton.icon(
+          key: ValueKey('downloads-wanted-download-$id'),
+          onPressed: _workerActive || running ? null : () => _enqueueSingleWanted(id),
+          icon: running
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.download, size: 18),
+          label: Text(running ? 'Загрузка…' : 'Скачать'),
+        ),
+      ),
     );
   }
 

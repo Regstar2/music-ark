@@ -78,9 +78,20 @@ void main() {
   }
 
   Future<void> reveal(WidgetTester tester, Key key) async {
-    await tester.ensureVisible(find.byKey(key));
-    await tester.pump();
+    final target = find.byKey(key);
+    await tester.dragUntilVisible(
+      target,
+      find.byType(SingleChildScrollView),
+      const Offset(0, -300),
+    );
+    await tester.ensureVisible(target);
+    await tester.pumpAndSettle();
   }
+
+  Finder successTextContaining(String text) => find.descendant(
+        of: find.byKey(const Key('metadata-success')),
+        matching: find.textContaining(text),
+      );
 
   testWidgets('shows artwork placeholder, basic fields, multiple artists and advanced tags', (tester) async {
     await openEditor(tester);
@@ -143,7 +154,7 @@ void main() {
     expect(bridge.applies, hasLength(1));
     expect(bridge.applies.single['bindIdentity'], isFalse);
     expect(find.byKey(const Key('metadata-success')), findsOneWidget);
-    expect(find.textContaining('Применены поля:'), findsOneWidget);
+    expect(successTextContaining('Применены поля:'), findsOneWidget);
   });
 
   testWidgets('filename can be edited and suggested from current artist and title', (tester) async {
@@ -173,6 +184,6 @@ void main() {
     expect(bridge.applies.single['bindIdentity'], isTrue);
     expect(bridge.applies.single['externalId'], '123456');
     expect(find.byKey(const Key('metadata-success')), findsOneWidget);
-    expect(find.textContaining('Exact-связь'), findsOneWidget);
+    expect(successTextContaining('Exact-связь'), findsOneWidget);
   });
 }

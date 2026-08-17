@@ -85,11 +85,18 @@ Map<String, dynamic> document(int id, {String? artworkPath}) => {
 
 void main() {
   testWidgets('Local Library shows cached artwork, placeholder and Edit Metadata action', (tester) async {
-    final temp = await Directory.systemTemp.createTemp('musicark-artwork-test-');
-    final image = File('${temp.path}${Platform.pathSeparator}cover.png');
-    await image.writeAsBytes(base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==',
-    ));
+    late Directory temp;
+    late File image;
+    await tester.runAsync(() async {
+      temp = await Directory.systemTemp.createTemp('musicark-artwork-test-');
+      image = File('${temp.path}${Platform.pathSeparator}cover.png');
+      await image.writeAsBytes(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==',
+        ),
+        flush: true,
+      );
+    });
 
     final metadata = FakeMetadataBridge(
       documents: {

@@ -29,7 +29,7 @@ class DatabaseTests(unittest.TestCase):
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
 
-            self.assertEqual(version, "1.8.0")
+            self.assertEqual(version, "1.8.4")
             self.assertIn("app_metadata", tables)
             self.assertIn("audit_log", tables)
             self.assertIn("providers", tables)
@@ -48,6 +48,9 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("provider_track_actions", tables)
             self.assertIn("sync_plans", tables)
             self.assertIn("sync_operations", tables)
+            self.assertIn("local_track_content_labels", tables)
+            self.assertIn("provider_track_content_labels", tables)
+            self.assertIn("variant_user_acceptance", tables)
 
     def test_audit_log_insert_persists_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

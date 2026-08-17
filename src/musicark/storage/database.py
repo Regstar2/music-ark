@@ -14,6 +14,7 @@ from musicark.storage.metadata_migration import migrate_metadata_v081
 from musicark.storage.metadata_editor_migration import migrate_metadata_editor_v082
 from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
 from musicark.storage.sync_migration import migrate_sync_v08
+from musicark.storage.variant_acceptance_migration import migrate_variant_acceptance_v084
 
 
 SCHEMA_STATEMENTS = (
@@ -194,13 +195,12 @@ def initialize_database(database_path: Path) -> None:
                     conn.execute(statement)
                 ensure_schema_version_seed(conn)
                 migrate_schema(conn)
-                # v0.6+ migrations are sequential and deliberately isolated from the
-                # historical chain so no modern state can be skipped.
                 migrate_coverage_v06(conn)
                 migrate_download_v07(conn)
                 migrate_sync_v08(conn)
                 migrate_metadata_v081(conn)
                 migrate_metadata_editor_v082(conn)
                 migrate_content_labels_v083(conn)
+                migrate_variant_acceptance_v084(conn)
     except sqlite3.Error as exc:
         raise StorageError(f"Failed to initialize SQLite DB at '{database_path}'.") from exc

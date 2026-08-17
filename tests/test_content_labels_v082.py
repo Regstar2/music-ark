@@ -31,7 +31,7 @@ class ContentLabelTests(unittest.TestCase):
                 self.local_id = int(cursor.lastrowid)
         self.service = ContentLabelService(database_path=self.db)
 
-    def test_schema_is_forward_migrated_to_1_8_3(self) -> None:
+    def test_content_label_tables_survive_current_forward_schema(self) -> None:
         with closing(sqlite3.connect(self.db)) as conn:
             version = conn.execute(
                 "SELECT value FROM app_metadata WHERE key='schema_version'"
@@ -42,7 +42,7 @@ class ContentLabelTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
-        self.assertEqual(version, "1.8.3")
+        self.assertGreaterEqual(tuple(map(int, version.split('.'))), (1, 8, 3))
         self.assertIn("local_track_content_labels", tables)
         self.assertIn("provider_track_content_labels", tables)
 

@@ -1,12 +1,23 @@
 import 'package:flutter/material.dart';
 
 import 'app_strings.dart';
+import 'content_label_bridge.dart';
 import 'matching_bridge.dart';
+import 'variant_acceptance_bridge.dart';
 
 class MatchingPage extends StatefulWidget {
-  const MatchingPage({super.key, required this.bridge});
+  MatchingPage({
+    super.key,
+    required this.bridge,
+    ContentLabelBridgeClient? contentLabelBridge,
+    VariantAcceptanceBridgeClient? variantAcceptanceBridge,
+  })  : contentLabelBridge = contentLabelBridge ?? const ContentLabelBridge(),
+        variantAcceptanceBridge =
+            variantAcceptanceBridge ?? const VariantAcceptanceBridge();
 
   final MatchingBridgeClient bridge;
+  final ContentLabelBridgeClient contentLabelBridge;
+  final VariantAcceptanceBridgeClient variantAcceptanceBridge;
 
   @override
   State<MatchingPage> createState() => _MatchingPageState();
@@ -58,7 +69,7 @@ class _MatchingPageState extends State<MatchingPage> {
         _total = _asInt(results['count']);
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = _errorText(error));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -76,12 +87,12 @@ class _MatchingPageState extends State<MatchingPage> {
       setState(() {
         _message = 'Обработано: ${_asInt(result['total'])}; '
             'совпало: ${_asInt(result['matched'])}; '
-            'проверить: ${_asInt(result['conflicts'])}; '
+            'требует проверки: ${_asInt(result['conflicts'])}; '
             'не найдено: ${_asInt(result['unmatched'])}';
       });
       await _reload();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = _errorText(error));
     } finally {
       if (mounted) setState(() => _running = false);
     }
@@ -98,14 +109,14 @@ class _MatchingPageState extends State<MatchingPage> {
       if (!mounted) return;
       setState(() {
         _variantMessage = 'Проверено версий: ${_asInt(result['processed'])}; '
-            'SAME: ${_asInt(result['same'])}; '
-            'ALTERED: ${_asInt(result['altered'])}; '
-            'DIFFERENT: ${_asInt(result['differentVersion'])}; '
-            'UNCERTAIN: ${_asInt(result['uncertain'])}';
+            'та же версия: ${_asInt(result['same'])}; '
+            'изменённая запись: ${_asInt(result['altered'])}; '
+            'другая версия: ${_asInt(result['differentVersion'])}; '
+            'неопределённо: ${_asInt(result['uncertain'])}';
       });
       await _reload();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = _errorText(error));
     } finally {
       if (mounted) setState(() => _runningVariants = false);
     }
@@ -124,14 +135,11 @@ class _MatchingPageState extends State<MatchingPage> {
       );
       if (!mounted) return;
       setState(() {
-        _items = [
-          ..._items,
-          ..._ensureVariantRows(_mapItems(result['items'])),
-        ];
+        _items = [..._items, ..._ensureVariantRows(_mapItems(result['items']))];
         _total = _asInt(result['count']);
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = _errorText(error));
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -157,9 +165,11 @@ class _MatchingPageState extends State<MatchingPage> {
       if (!mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (context) => _MatchingDetailDialog(
+        builder: (dialogContext) => _MatchingDetailDialog(
           detail: detail,
           variantCapabilities: _variantCapabilities,
+          contentLabelBridge: widget.contentLabelBridge,
+          variantAcceptanceBridge: widget.variantAcceptanceBridge,
           onVerifyVariant: '${detail['status'] ?? ''}' == 'matched'
               ? () async {
                   final result = await widget.bridge.variantRun(externalId);
@@ -170,18 +180,18 @@ class _MatchingPageState extends State<MatchingPage> {
               : null,
           onAccept: (localFileId) async {
             await widget.bridge.matchingAccept(externalId, localFileId);
-            if (context.mounted) Navigator.of(context).pop();
+            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
             await _reload();
           },
           onReject: (localFileId) async {
             await widget.bridge.matchingReject(externalId, localFileId);
-            if (context.mounted) Navigator.of(context).pop();
+            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
             await _reload();
           },
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error = _errorText(error));
     }
   }
 
@@ -267,7 +277,7 @@ class _MatchingPageState extends State<MatchingPage> {
                   child: TextField(
                     key: const Key('matching-search'),
                     decoration: const InputDecoration(
-                      labelText: 'Поиск по Yandex / Local / пути',
+                      labelText: 'Поиск по Яндекс Музыке, локальному треку или пути',
                       prefixIcon: Icon(Icons.search),
                       border: OutlineInputBorder(),
                     ),
@@ -325,7 +335,9 @@ class _MatchingPageState extends State<MatchingPage> {
     if (_items.isEmpty) {
       return const Center(
         key: Key('matching-empty'),
-        child: Text('Результатов пока нет. Запустите сопоставление после загрузки Yandex и Local Library.'),
+        child: Text(
+          'Результатов пока нет. Запустите сопоставление после загрузки Яндекс Музыки и локальной библиотеки.',
+        ),
       );
     }
     return Column(
@@ -360,25 +372,23 @@ class _SummaryCard extends StatelessWidget {
   final Map<String, dynamic> summary;
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
-      key: const Key('matching-summary'),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Wrap(
-          spacing: 24,
-          runSpacing: 8,
-          children: [
-            Text('Yandex tracks: ${_asInt(summary['yandexTracks'])}'),
-            Text('Local tracks: ${_asInt(summary['localTracks'])}'),
-            Text('Matched: ${_asInt(summary['matched'])}'),
-            Text('Conflicts: ${_asInt(summary['conflicts'])}'),
-            Text('Unmatched: ${_asInt(summary['unmatched'])}'),
-          ],
+  Widget build(BuildContext context) => Card(
+        key: const Key('matching-summary'),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Wrap(
+            spacing: 24,
+            runSpacing: 8,
+            children: [
+              Text('Треков Яндекс Музыки: ${_asInt(summary['yandexTracks'])}'),
+              Text('Локальных треков: ${_asInt(summary['localTracks'])}'),
+              Text('Совпало: ${_asInt(summary['matched'])}'),
+              Text('Требует проверки: ${_asInt(summary['conflicts'])}'),
+              Text('Не найдено: ${_asInt(summary['unmatched'])}'),
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 class _FilterChip extends StatelessWidget {
@@ -393,13 +403,11 @@ class _FilterChip extends StatelessWidget {
   final VoidCallback onSelected;
 
   @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
-    );
-  }
+  Widget build(BuildContext context) => ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => onSelected(),
+      );
 }
 
 class _ResultTile extends StatelessWidget {
@@ -412,14 +420,9 @@ class _ResultTile extends StatelessWidget {
     final provider = _asMap(row['provider']);
     final local = row['local'] is Map ? _asMap(row['local']) : const <String, dynamic>{};
     final status = '${row['status'] ?? ''}';
-    final confidence = ((_asDouble(row['confidence']) * 100).round());
+    final confidence = (_asDouble(row['confidence']) * 100).round();
     final artists = _artistText(provider['artists']);
     final localArtists = _artistText(local['artists']);
-    final statusLabel = switch (status) {
-      'matched' => 'MATCHED',
-      'conflict' => 'CONFLICT',
-      _ => 'UNMATCHED',
-    };
     final variant = row['variant'] is Map ? _asMap(row['variant']) : const <String, dynamic>{};
     return ListTile(
       key: Key('matching-row-${row['externalId']}'),
@@ -429,20 +432,20 @@ class _ResultTile extends StatelessWidget {
       subtitle: Text(
         local.isEmpty
             ? '${provider['album_title'] ?? ''}\nЛокальное совпадение не найдено'
-            : '${provider['album_title'] ?? ''}\n↓ $confidence%\n$localArtists — ${local['title'] ?? ''}\n${local['path'] ?? ''}',
+            : '${provider['album_title'] ?? ''}\nУверенность: $confidence%\n$localArtists — ${local['title'] ?? ''}\n${local['path'] ?? ''}',
       ),
       isThreeLine: true,
       trailing: SizedBox(
-        width: 100,
+        width: 150,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            _CompactBadge(label: statusLabel),
+            _CompactBadge(label: _matchingStatusLabel(status)),
             if (status == 'matched') ...[
               const SizedBox(height: 2),
               SizedBox(
-                width: 100,
+                width: 150,
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerRight,
@@ -491,21 +494,24 @@ class _VariantBadge extends StatelessWidget {
   final String status;
 
   @override
-  Widget build(BuildContext context) {
-    return _CompactBadge(label: _variantLabel(status));
-  }
+  Widget build(BuildContext context) => _CompactBadge(label: _variantLabel(status));
 }
 
 class _MatchingDetailDialog extends StatefulWidget {
   const _MatchingDetailDialog({
     required this.detail,
     required this.variantCapabilities,
+    required this.contentLabelBridge,
+    required this.variantAcceptanceBridge,
     required this.onAccept,
     required this.onReject,
     this.onVerifyVariant,
   });
+
   final Map<String, dynamic> detail;
   final Map<String, dynamic> variantCapabilities;
+  final ContentLabelBridgeClient contentLabelBridge;
+  final VariantAcceptanceBridgeClient variantAcceptanceBridge;
   final Future<Map<String, dynamic>> Function()? onVerifyVariant;
   final Future<void> Function(int localFileId) onAccept;
   final Future<void> Function(int localFileId) onReject;
@@ -516,13 +522,64 @@ class _MatchingDetailDialog extends StatefulWidget {
 
 class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
   bool _busy = false;
+  bool _labelsBusy = false;
+  bool _variantAccepted = false;
+  String _providerLabel = '';
+  String _localLabel = '';
   String? _variantError;
+  String? _labelError;
   late Map<String, dynamic> _detail;
+
+  String get _externalId => '${_detail['externalId'] ?? ''}';
+  int? get _localFileId {
+    final local = _detail['local'];
+    if (local is Map) {
+      final id = int.tryParse('${local['id'] ?? _detail['localFileId'] ?? ''}');
+      if (id != null && id > 0) return id;
+    }
+    final id = int.tryParse('${_detail['localFileId'] ?? ''}');
+    return id != null && id > 0 ? id : null;
+  }
 
   @override
   void initState() {
     super.initState();
     _detail = Map<String, dynamic>.from(widget.detail);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadUserState());
+  }
+
+  Future<void> _loadUserState() async {
+    final localId = _localFileId;
+    if (_externalId.isEmpty) return;
+    setState(() {
+      _labelsBusy = true;
+      _labelError = null;
+    });
+    try {
+      final labels = await widget.contentLabelBridge.batch(
+        localFileIds: localId == null ? const [] : [localId],
+        externalIds: [_externalId],
+      );
+      final provider = _asMap(labels['provider']);
+      final local = _asMap(labels['local']);
+      var accepted = false;
+      if (localId != null && '${_detail['status'] ?? ''}' == 'matched') {
+        try {
+          final decision = await widget.variantAcceptanceBridge.get(_externalId, localId);
+          accepted = decision['accepted'] == true;
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() {
+        _providerLabel = '${provider[_externalId] ?? ''}';
+        _localLabel = localId == null ? '' : '${local['$localId'] ?? ''}';
+        _variantAccepted = accepted;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _labelError = _errorText(error));
+    } finally {
+      if (mounted) setState(() => _labelsBusy = false);
+    }
   }
 
   Future<void> _perform(Future<void> Function() action) async {
@@ -544,9 +601,65 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
     try {
       final variant = await callback();
       if (!mounted) return;
-      setState(() => _detail['variant'] = variant);
+      setState(() {
+        _detail['variant'] = variant;
+        _variantAccepted = false;
+      });
+      await _loadUserState();
     } catch (error) {
-      if (mounted) setState(() => _variantError = error.toString());
+      if (mounted) setState(() => _variantError = _errorText(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _setProviderLabel(String label) async {
+    setState(() {
+      _labelsBusy = true;
+      _labelError = null;
+    });
+    try {
+      await widget.contentLabelBridge.setProvider(_externalId, label);
+      if (mounted) setState(() => _providerLabel = label);
+    } catch (error) {
+      if (mounted) setState(() => _labelError = _errorText(error));
+    } finally {
+      if (mounted) setState(() => _labelsBusy = false);
+    }
+  }
+
+  Future<void> _setLocalLabel(String label) async {
+    final localId = _localFileId;
+    if (localId == null) return;
+    setState(() {
+      _labelsBusy = true;
+      _labelError = null;
+    });
+    try {
+      await widget.contentLabelBridge.setLocal(localId, label);
+      if (mounted) setState(() => _localLabel = label);
+    } catch (error) {
+      if (mounted) setState(() => _labelError = _errorText(error));
+    } finally {
+      if (mounted) setState(() => _labelsBusy = false);
+    }
+  }
+
+  Future<void> _toggleVariantAcceptance() async {
+    final localId = _localFileId;
+    if (localId == null) return;
+    setState(() {
+      _busy = true;
+      _variantError = null;
+    });
+    try {
+      final result = _variantAccepted
+          ? await widget.variantAcceptanceBridge.reset(_externalId, localId)
+          : await widget.variantAcceptanceBridge.accept(_externalId, localId);
+      if (!mounted) return;
+      setState(() => _variantAccepted = result['accepted'] == true);
+    } catch (error) {
+      if (mounted) setState(() => _variantError = _errorText(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -563,42 +676,105 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
     final variant = _detail['variant'] is Map
         ? _asMap(_detail['variant'])
         : const <String, dynamic>{};
+    final variantStatus = '${variant['variantStatus'] ?? 'not_checked'}';
+    final reviewableVariant = const {
+      'altered',
+      'different_version',
+      'uncertain',
+    }.contains(variantStatus);
+
     return AlertDialog(
       key: const Key('matching-detail'),
       title: Text('${_artistText(provider['artists'])} — ${provider['title'] ?? ''}'),
       content: SizedBox(
-        width: 760,
+        width: 980,
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Identity', style: TextStyle(fontWeight: FontWeight.bold)),
-              Text('Status: ${identityStatus.toUpperCase()}'),
-              Text('Title: ${provider['title'] ?? '—'}'),
-              Text('Artist: ${_artistText(provider['artists'])}'),
-              Text('Yandex album: ${provider['album_title'] ?? '—'}'),
-              Text('Yandex duration: ${provider['duration_seconds'] ?? '—'} s'),
-              Text('Confidence: ${(_asDouble(_detail['confidence']) * 100).round()}%'),
-              if (local.isNotEmpty) ...[
-                const Divider(),
-                Text('Local: ${_artistText(local['artists'])} — ${local['title'] ?? ''}'),
-                Text('Album: ${local['album'] ?? '—'}'),
-                Text('Duration: ${local['durationSeconds'] ?? '—'} s'),
-                Text('Path: ${local['path'] ?? '—'}'),
+              Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                children: [
+                  Text(
+                    'Статус сопоставления: ${_matchingStatusLabel(identityStatus)}',
+                    key: const Key('matching-detail-status'),
+                  ),
+                  Text(
+                    'Уверенность: ${(_asDouble(_detail['confidence']) * 100).round()}%',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _TrackComparisonTable(
+                provider: provider,
+                local: local,
+                providerLabel: _providerLabel,
+                localLabel: _localLabel,
+                labelsBusy: _labelsBusy,
+                onProviderLabelChanged: _setProviderLabel,
+                onLocalLabelChanged: local.isEmpty ? null : _setLocalLabel,
+              ),
+              if (_labelError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _labelError!,
+                  key: const Key('matching-label-error'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
               ],
               if (identityStatus == 'matched') ...[
-                const Divider(),
-                const Text('Variant verification', style: TextStyle(fontWeight: FontWeight.bold)),
-                _VariantDetail(variant: variant),
+                const Divider(height: 28),
+                Text(
+                  'Проверка версии',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
-                if ('${widget.variantCapabilities['unavailableMessage'] ?? ''}'.trim().isNotEmpty)
-                  Text(
-                    '${widget.variantCapabilities['unavailableMessage']}',
-                    key: const Key('variant-detail-unavailable'),
+                _VariantDetail(variant: variant),
+                const SizedBox(height: 10),
+                if (reviewableVariant)
+                  Card(
+                    key: const Key('variant-user-decision'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _variantAccepted
+                                  ? 'Эта локальная версия принята. Она больше не требует проверки в покрытии и синхронизации.'
+                                  : 'Анализ нашёл отличия. Если эта локальная версия вас устраивает, её можно принять без изменения результата анализа.',
+                              key: const Key('variant-acceptance-status'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _variantAccepted
+                              ? OutlinedButton(
+                                  key: const Key('variant-reset-acceptance'),
+                                  onPressed: _busy ? null : _toggleVariantAcceptance,
+                                  child: const Text('Отменить принятие'),
+                                )
+                              : FilledButton(
+                                  key: const Key('variant-accept-current'),
+                                  onPressed: _busy ? null : _toggleVariantAcceptance,
+                                  child: const Text('Эта версия меня устраивает'),
+                                ),
+                        ],
+                      ),
+                    ),
                   ),
+                if ('${widget.variantCapabilities['unavailableMessage'] ?? ''}'.trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${widget.variantCapabilities['unavailableMessage']}',
+                      key: const Key('variant-detail-unavailable'),
+                    ),
+                  ),
+                const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
+                  child: FilledButton.tonalIcon(
                     key: const Key('variant-verify'),
                     onPressed: _busy ? null : _verifyVariant,
                     icon: _busy
@@ -607,19 +783,22 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.graphic_eq),
-                    label: Text(_busy ? 'Проверка…' : 'Проверить версию'),
+                    label: Text(_busy ? 'Проверка…' : 'Проверить версию заново'),
                   ),
                 ),
                 if (_variantError != null)
-                  Text(
-                    _variantError!,
-                    key: const Key('variant-detail-error'),
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _variantError!,
+                      key: const Key('variant-detail-error'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
                   ),
               ],
               if (candidates.isNotEmpty) ...[
-                const Divider(),
-                const Text('Кандидаты', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Divider(height: 28),
+                Text('Кандидаты', style: Theme.of(context).textTheme.titleMedium),
                 for (final candidate in candidates)
                   _CandidateCard(
                     candidate: candidate,
@@ -637,10 +816,133 @@ class _MatchingDetailDialogState extends State<_MatchingDetailDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: _busy ? null : () => Navigator.of(context).pop(), child: const Text('Закрыть')),
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          child: const Text('Закрыть'),
+        ),
       ],
     );
   }
+}
+
+class _TrackComparisonTable extends StatelessWidget {
+  const _TrackComparisonTable({
+    required this.provider,
+    required this.local,
+    required this.providerLabel,
+    required this.localLabel,
+    required this.labelsBusy,
+    required this.onProviderLabelChanged,
+    required this.onLocalLabelChanged,
+  });
+
+  final Map<String, dynamic> provider;
+  final Map<String, dynamic> local;
+  final String providerLabel;
+  final String localLabel;
+  final bool labelsBusy;
+  final ValueChanged<String> onProviderLabelChanged;
+  final ValueChanged<String>? onLocalLabelChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <TableRow>[
+      _tableRow(
+        context,
+        'Параметр',
+        const Text('Яндекс Музыка', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('Локальный файл', style: TextStyle(fontWeight: FontWeight.bold)),
+        header: true,
+      ),
+      _tableRow(context, 'Название', Text('${provider['title'] ?? '—'}'), Text('${local['title'] ?? '—'}')),
+      _tableRow(context, 'Исполнитель', Text(_artistText(provider['artists'])), Text(local.isEmpty ? '—' : _artistText(local['artists']))),
+      _tableRow(context, 'Альбом', Text('${provider['album_title'] ?? provider['album'] ?? '—'}'), Text('${local['album'] ?? '—'}')),
+      _tableRow(context, 'Длительность', Text(_duration(provider['duration_seconds'])), Text(_duration(local['durationSeconds']))),
+      _tableRow(
+        context,
+        'Ярлык',
+        _LabelSelector(
+          key: const Key('matching-provider-label'),
+          value: providerLabel,
+          enabled: !labelsBusy,
+          onChanged: onProviderLabelChanged,
+        ),
+        local.isEmpty
+            ? const Text('—')
+            : _LabelSelector(
+                key: const Key('matching-local-label'),
+                value: localLabel,
+                enabled: !labelsBusy,
+                onChanged: onLocalLabelChanged!,
+              ),
+      ),
+      _tableRow(context, 'Идентификатор', const Text('Трек Яндекс Музыки'), Text(local.isEmpty ? '—' : '#${local['id'] ?? '—'}')),
+      _tableRow(context, 'Расположение', const Text('—'), SelectableText('${local['path'] ?? '—'}')),
+    ];
+    return Table(
+      key: const Key('matching-track-comparison-table'),
+      border: TableBorder.all(color: Theme.of(context).dividerColor),
+      columnWidths: const {
+        0: FlexColumnWidth(1.05),
+        1: FlexColumnWidth(2.2),
+        2: FlexColumnWidth(2.2),
+      },
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      children: rows,
+    );
+  }
+
+  static TableRow _tableRow(
+    BuildContext context,
+    String label,
+    Widget provider,
+    Widget local, {
+    bool header = false,
+  }) {
+    Widget cell(Widget child) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          child: child,
+        );
+    return TableRow(
+      decoration: header
+          ? BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest)
+          : null,
+      children: [
+        cell(Text(label, style: header ? const TextStyle(fontWeight: FontWeight.bold) : null)),
+        cell(provider),
+        cell(local),
+      ],
+    );
+  }
+}
+
+class _LabelSelector extends StatelessWidget {
+  const _LabelSelector({
+    super.key,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String value;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => DropdownButton<String>(
+        value: const {'', 'original', 'censored'}.contains(value) ? value : '',
+        isExpanded: true,
+        items: const [
+          DropdownMenuItem(value: '', child: Text('Без ярлыка')),
+          DropdownMenuItem(value: 'original', child: Text('ОРИГИНАЛ')),
+          DropdownMenuItem(value: 'censored', child: Text('ЦЕНЗУРА')),
+        ],
+        onChanged: enabled
+            ? (next) {
+                if (next != null) onChanged(next);
+              }
+            : null,
+      );
 }
 
 class _VariantDetail extends StatelessWidget {
@@ -659,21 +961,21 @@ class _VariantDetail extends StatelessWidget {
       key: const Key('variant-detail'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Status: ${_variantLabel(status)}', key: const Key('variant-detail-status')),
+        Text('Результат: ${_variantLabel(status)}', key: const Key('variant-detail-status')),
         Text(
           similarity == null
-              ? 'Audio similarity: —'
-              : 'Audio similarity: ${(_asDouble(similarity) * 100).round()}%',
+              ? 'Сходство аудио: —'
+              : 'Сходство аудио: ${(_asDouble(similarity) * 100).round()}%',
         ),
         if (reasons.isNotEmpty) ...[
           const SizedBox(height: 6),
-          const Text('Signals:'),
+          const Text('Признаки:'),
           for (final reason in reasons)
             Text('• ${AppStrings.variantReason(reason.toString())}'),
         ],
         if (segments.isNotEmpty) ...[
           const SizedBox(height: 6),
-          const Text('Altered regions:'),
+          const Text('Изменённые участки:'),
           for (var index = 0; index < segments.length; index++)
             Text(
               '${_formatSeconds(_asDouble(segments[index]['startSeconds']))}–'
@@ -682,7 +984,6 @@ class _VariantDetail extends StatelessWidget {
               key: Key('variant-altered-region-$index'),
             ),
         ],
-        Text('Reference: ${variant['referencePath'] ?? '—'}'),
       ],
     );
   }
@@ -714,8 +1015,8 @@ class _CandidateCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('#${candidate['rank']} · $confidence% · ${_artistText(local['artists'])} — ${local['title'] ?? ''}'),
-                  Text('${local['album'] ?? '—'} · ${local['durationSeconds'] ?? '—'} s'),
+                  Text('Кандидат ${candidate['rank']} · уверенность $confidence% · ${_artistText(local['artists'])} — ${local['title'] ?? ''}'),
+                  Text('${local['album'] ?? '—'} · ${_duration(local['durationSeconds'])}'),
                   Text('${local['path'] ?? ''}'),
                 ],
               ),
@@ -778,21 +1079,45 @@ double _asDouble(dynamic value) {
 }
 
 String _artistText(dynamic value) {
-  if (value is List && value.isNotEmpty) return value.join(', ');
-  return 'Unknown Artist';
+  if (value is List && value.isNotEmpty) {
+    final result = value.map((item) => '$item'.trim()).where((item) => item.isNotEmpty).join(', ');
+    if (result.isNotEmpty) return result;
+  }
+  final text = '$value'.trim();
+  if (value is! List && text.isNotEmpty && text != 'null') return text;
+  return 'Неизвестный исполнитель';
 }
 
+String _matchingStatusLabel(String status) => switch (status) {
+      'matched' => 'Совпало',
+      'conflict' => 'Требует проверки',
+      'unmatched' => 'Не найдено',
+      _ => 'Не определено',
+    };
+
 String _variantLabel(String status) => switch (status) {
-  'same' => 'SAME',
-  'altered' => 'ALTERED',
-  'different_version' => 'DIFFERENT VERSION',
-  'uncertain' => 'UNCERTAIN',
-  _ => 'NOT CHECKED',
-};
+      'same' => 'Та же версия',
+      'altered' => 'Изменённая запись',
+      'different_version' => 'Другая версия',
+      'uncertain' => 'Неопределённо',
+      _ => 'Не проверено',
+    };
+
+String _duration(dynamic value) {
+  final seconds = double.tryParse('$value');
+  if (seconds == null || seconds < 0) return '—';
+  return '${seconds.toStringAsFixed(seconds == seconds.roundToDouble() ? 0 : 3)} с';
+}
 
 String _formatSeconds(double seconds) {
   final safe = seconds.isFinite && seconds >= 0 ? seconds.round() : 0;
   final minutes = safe ~/ 60;
   final remainder = safe % 60;
   return '$minutes:${remainder.toString().padLeft(2, '0')}';
+}
+
+String _errorText(Object error) {
+  if (error is MatchingBridgeException) return error.message;
+  if (error is MusicArkBridgeException) return error.message;
+  return error.toString();
 }

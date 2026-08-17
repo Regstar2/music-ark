@@ -85,7 +85,6 @@ Map<String, dynamic> document(int id, {String? artworkPath}) => {
 void main() {
   testWidgets('Local Library shows cached artwork, placeholder and Edit Metadata action', (tester) async {
     final temp = await Directory.systemTemp.createTemp('musicark-artwork-test-');
-    addTearDown(() => temp.delete(recursive: true));
     final image = File('${temp.path}${Platform.pathSeparator}cover.png');
     await image.writeAsBytes(base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgAAAAAgAB4iG8MwAAAABJRU5ErkJggg==',
@@ -107,7 +106,10 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    // FileImage completes on the host event loop. Finite pumps are enough for the
+    // fake bridge state and avoid waiting indefinitely on image-cache settlement.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(Image), findsOneWidget);
     expect(find.byIcon(Icons.album_outlined), findsOneWidget);
@@ -115,8 +117,14 @@ void main() {
     expect(find.byKey(const Key('local-edit-12')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('local-edit-11')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const Key('metadata-editor-page')), findsOneWidget);
     expect(find.byKey(const Key('metadata-field-title')), findsOneWidget);
+
+    // Unmount FileImage before removing the temporary file on Windows.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    if (await temp.exists()) await temp.delete(recursive: true);
   });
 }

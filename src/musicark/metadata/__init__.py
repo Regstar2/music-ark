@@ -1,5 +1,5 @@
-"""Metadata engine — read/write audio tags for local files (v0.10)."""
+"""Explicit local metadata editing and Yandex metadata import (v0.8.2)."""
 
-from musicark.metadata.service import MetadataEditorService
+from musicark.metadata.service import MetadataEditorError, MetadataEditorService
 
-__all__ = ["MetadataEditorService"]
+__all__ = ["MetadataEditorError", "MetadataEditorService"]

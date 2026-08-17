@@ -2,74 +2,110 @@
 
 [Русская версия](README.md)
 
-**Current version: 0.8.0 — Controlled Sync.**
+**Current version: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**
 
-MusicArk is a Windows desktop application that connects a cache-first Yandex Music library with a local music collection. v0.5 establishes identity, v0.5.1 independently verifies recording variants, v0.6 derives Coverage/Missing, v0.7 provides production Download + Local Playback, and v0.8 coordinates those existing layers through a safe dry-run Sync Plan.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.8.2 adds a separate **explicit-write** workflow for metadata of existing local files.
 
 ## Product loop
 
 ```text
 Yandex Library = desired state
         ↓
-all / liked / Yandex Playlist
+Local Library = actual files (normal Scan is read-only)
         ↓
-Coverage + Matching + Variant + Local Library = actual state
+Matching + Variant + Coverage
         ↓
-Controlled Sync Planner (read only)
-        ↓
-Preview / blockers / explicit confirmation
-        ↓
-execution-time revalidation
-        ↓
-DownloadService.enqueue() for current Missing + Wanted
-        ↓
-Downloads → normal v0.7 transfer/index/link/coverage
+Missing / Wanted → Download / Controlled Sync
 ```
 
-Controlled Sync is not a bidirectional filesystem mirror.
-
-## Policy
-
-Provider identity is `(provider_id, external_id)`. One identity present in Liked and several playlists is planned once; duplicate playlist occurrences do not create duplicate downloads.
+For files with broken tags there is now a manual repair workflow:
 
 ```text
-covered                      → no acquisition
-missing + wanted             → ENQUEUE_DOWNLOAD
-missing + unreviewed         → USER_DECISION_REQUIRED
-missing + ignored            → summary / no download
-needs_review                 → REVIEW_IDENTITY
-not_analyzed                 → matching review blocker
-covered + uncertain/altered/
-different_version            → REVIEW_VARIANT
+Local Library
+  → Edit Metadata
+  → local edit
+      or
+    Yandex Track search → Compare
+  → Apply Metadata
+      or
+    Apply + Bind
+  → transactional MP3 write
+  → single-file reindex + SHA-256
+  → targeted Matching refresh
+  → Coverage/UI refresh
 ```
 
-`DIFFERENT_VERSION` never becomes Missing and never causes automatic replacement. v0.7 direct single-track Download remains a separate explicit user intent and does not loosen bulk Sync policy.
+## Metadata and identity are separate
 
-## Safety and staleness
+**Apply Metadata** changes only selected non-empty metadata/artwork and runs normal Matching again. Even 100% similarity alone does not become a user-confirmed identity.
 
-Each plan is an immutable snapshot containing planner version, scope, exact target, input fingerprint, summary and operations. Relevant active Yandex membership, Matching/Local state, triage or target changes make a plan stale. Playback state is deliberately excluded.
-
-Apply requires confirmation and rechecks every actionable identity immediately before enqueue. It then delegates to production `DownloadService.enqueue()`. Sync never calls `runQueue()`, never starts unrelated queued work and does not implement its own HTTP download path.
-
-Normal v0.8 Apply performs zero local delete/move/rename/tag mutations and zero Yandex mutations. Local-only/Outside selected scope is informational only.
-
-## Existing layers
-
-Yandex Library, Local Library, Identity Matching, Variant, Coverage, Download and embedded Local Playback remain separate authoritative layers. Sync coordinates them rather than reimplementing them.
-
-## UI
+**Apply + Bind** is a separate explicit confirmation and persists:
 
 ```text
-MusicArk
-├── Yandex Music
-├── Local Library
-├── Matching
-├── Missing Tracks
-├── Downloads
-└── Sync
+provider   = yandex_music
+external   = <Yandex Track ID>
+local file = <Local File ID>
+method     = exact_id
+confidence = 1.0
+reason     = user_confirmed
 ```
 
-The Sync page shows scope, target, Current/Projected coverage, download candidates, undecided Missing, matching/identity blockers, Variant review, Local-only/Outside scope, stale/legacy state, explicit confirmation, Apply results and persisted plan history.
+The bind also stores trusted ID3 TXXX provenance, allowing provider identity to be recovered after database deletion, file rename or relocation. Reserved provenance tags are read-only in the normal Advanced Tags editor.
+
+## File mutation safety
+
+Normal Scan, Matching, Coverage and Sync **do not modify user audio files**. An existing file changes only after an explicit Metadata Editor action.
+
+The MP3 writer uses:
+
+```text
+original
+  ↓
+same-directory temporary copy
+  ↓
+ID3/artwork write
+  ↓
+MPEG audio validation
+  ↓
+metadata read-back validation
+  ↓
+atomic os.replace()
+```
+
+Before the atomic replace the original remains unchanged. The audio stream is never transcoded. Basic Save mutates only requested frames and preserves unknown/custom tags.
+
+## Artwork
+
+Local Library displays a thumbnail for each track with this priority:
+
+1. embedded artwork;
+2. already-cached Yandex artwork for a confirmed identity;
+3. placeholder.
+
+Library rows never perform a per-track Yandex request and Flutter receives cache paths rather than large base64 payloads.
+
+## Yandex metadata import
+
+Search and full Track DTO lookup stay inside Python/backend through the existing Yandex provider/auth boundary. Flutter never receives the Yandex token, Authorization headers, cookies, signed URLs or direct media URLs.
+
+Compare supports selective field/artwork import. Empty Yandex fields do not silently erase non-empty local values.
+
+## Formats
+
+The editor is format-adapter based. v0.8.2 provides the first full safe writer for **MP3/ID3**. Other audio formats remain read-only in the editor until transactional adapters are implemented.
+
+## Controlled Sync
+
+Sync remains a read-only planner/executor over existing layers and is not a bidirectional filesystem mirror. Normal Sync Apply still performs:
+
+```text
+deleted local files = 0
+renamed/moved local files = 0
+modified existing local files/tags = 0
+Yandex mutations = 0
+```
+
+Metadata Editor is a separate explicit-write workflow and is never called automatically by Scan/Matching/Coverage/Sync.
 
 ## SQLite
 
@@ -79,16 +115,15 @@ The Sync page shows scope, target, Current/Projected coverage, download candidat
 1.5.0 — Variant Detection
 1.6.0 — Coverage actions
 1.7.0 — Download queue/settings
-1.8.0 — Controlled Sync snapshots/results
+1.8.0 — Controlled Sync
+1.8.1 — Rich Yandex download metadata/provenance
+1.8.2 — Local artwork cache / Metadata Editor support
 ```
-
-The `1.7.0 → 1.8.0` forward migration extends existing `sync_plans` / `sync_operations` in place and preserves legacy rows. Legacy upload/replace/metadata plans remain viewable but cannot execute through the v0.8 executor.
-
-Yandex tokens, auth headers, cookies and temporary direct URLs are never persisted in sync metadata.
 
 ## Windows development run
 
 ```powershell
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e .
@@ -115,8 +150,10 @@ v0.5.0 — Identity Matching
 v0.5.1 — Variant Detection
 v0.6   — Missing Tracks / Coverage
 v0.7   — Download + Local Playback
-v0.8   — Controlled Sync
-next   — TBD / stabilization
+v0.8.0 — Controlled Sync
+v0.8.1 — Rich Yandex download metadata/provenance
+v0.8.2 — Local Metadata Editor / Yandex Metadata Import
+next   — stabilization / TBD
 ```
 
-See `docs/versions/v0.8.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md`, and `docs/release/release-checklist.md`.
+See `docs/versions/v0.8.2.md` and `docs/architecture/metadata-editor.md`.

@@ -11,7 +11,8 @@
 | v0.6.0 | Missing Tracks / Library Coverage | complete |
 | v0.7.0 | Download + Local Playback | complete |
 | v0.8.0 | Controlled Sync | complete baseline |
-| v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | current development |
+| v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | complete baseline for v0.8.2 |
+| v0.8.2 | Local Metadata Editor / Yandex Metadata Import | current development (`v8.2.0` branch) |
 | next | stabilization / TBD | TBD |
 
 Version notes:
@@ -26,5 +27,6 @@ Version notes:
 - `docs/versions/v0.7.0.md`
 - `docs/versions/v0.8.0.md`
 - `docs/versions/v0.8.1.md`
+- `docs/versions/v0.8.2.md`
 
-v0.8.1 does not add a broader Sync executor. It hardens the existing v0.7 Download → Local indexing → exact identity path so MusicArk-created Yandex MP3 files carry durable standard metadata and trusted embedded provider provenance across rescans and a fresh Local Library index.
+v0.8.2 adds an explicit transactional editor for existing local MP3 metadata and artwork, Yandex Track search/compare/import, and a separate user-confirmed exact identity action. Ordinary Scan/Matching/Coverage/Sync remain read-only with respect to user audio files.

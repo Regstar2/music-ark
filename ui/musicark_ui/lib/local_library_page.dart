@@ -1,27 +1,34 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'desktop_file_actions.dart';
 import 'folder_picker.dart';
+import 'metadata_bridge.dart';
+import 'metadata_editor_page.dart';
 import 'musicark_bridge.dart';
 
 class LocalLibraryPage extends StatefulWidget {
-  const LocalLibraryPage({
+  LocalLibraryPage({
     super.key,
     required this.bridge,
     LocalFolderPicker? folderPicker,
     this.fileActions = const SystemLocalFileActions(),
-  }) : folderPicker = folderPicker ?? const SystemLocalFolderPicker();
+    MetadataBridgeClient? metadataBridge,
+  })  : folderPicker = folderPicker ?? const SystemLocalFolderPicker(),
+        metadataBridge = metadataBridge ?? (bridge is MusicArkBridge ? const MetadataBridge() : null);
 
   final MusicArkBridgeClient bridge;
   final LocalFolderPicker folderPicker;
   final LocalFileActions fileActions;
+  final MetadataBridgeClient? metadataBridge;
 
   @override
   State<LocalLibraryPage> createState() => _LocalLibraryPageState();
 }
 
 class _LocalLibraryPageState extends State<LocalLibraryPage> {
-  static const _pageSize = 1000;
+  static const _pageSize = 500;
   final _search = TextEditingController();
   List<Map<String, dynamic>> _roots = const [];
   List<Map<String, dynamic>> _tracks = const [];
@@ -47,6 +54,25 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(growable: false)
       : <Map<String, dynamic>>[];
 
+  Future<List<Map<String, dynamic>>> _withArtwork(List<Map<String, dynamic>> tracks) async {
+    final metadata = widget.metadataBridge;
+    if (metadata == null || tracks.isEmpty) return tracks;
+    final ids = tracks.map((track) => int.tryParse('${track['id']}')).whereType<int>().toList();
+    try {
+      final payload = await metadata.artworkBatch(ids);
+      final raw = payload['items'];
+      final items = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      return tracks.map((track) {
+        final copy = Map<String, dynamic>.from(track);
+        final artwork = items['${track['id']}'];
+        if (artwork is Map) copy['artwork'] = Map<String, dynamic>.from(artwork);
+        return copy;
+      }).toList(growable: false);
+    } on MusicArkBridgeException {
+      return tracks;
+    }
+  }
+
   Future<void> _reload({bool preserveStatus = false}) async {
     setState(() {
       _busy = true;
@@ -61,10 +87,11 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         search: _search.text.trim(),
         sort: _sort,
       );
+      final tracks = await _withArtwork(_maps(tracksPayload['items']));
       if (!mounted) return;
       setState(() {
         _roots = _maps(rootsPayload['items']);
-        _tracks = _maps(tracksPayload['items']);
+        _tracks = tracks;
         _total = int.tryParse('${tracksPayload['count'] ?? 0}') ?? 0;
       });
     } on MusicArkBridgeException catch (e) {
@@ -84,9 +111,10 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         search: _search.text.trim(),
         sort: _sort,
       );
+      final items = await _withArtwork(_maps(payload['items']));
       if (!mounted) return;
       setState(() {
-        _tracks = [..._tracks, ..._maps(payload['items'])];
+        _tracks = [..._tracks, ...items];
         _total = int.tryParse('${payload['count'] ?? _total}') ?? _total;
       });
     } on MusicArkBridgeException catch (e) {
@@ -184,9 +212,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
     final seconds = double.tryParse('$raw');
     if (seconds == null || seconds <= 0) return '—';
     final whole = seconds.round();
-    final minutes = whole ~/ 60;
-    final remainder = whole % 60;
-    return '$minutes:${remainder.toString().padLeft(2, '0')}';
+    return '${whole ~/ 60}:${(whole % 60).toString().padLeft(2, '0')}';
   }
 
   Future<void> _play(Map<String, dynamic> track) async {
@@ -207,44 +233,94 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
     }
   }
 
-  void _showDetails(Map<String, dynamic> track) {
+  Future<void> _edit(Map<String, dynamic> track) async {
+    final metadata = widget.metadataBridge;
+    final id = int.tryParse('${track['id']}');
+    if (metadata == null || id == null) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => MetadataEditorPage(localFileId: id, bridge: metadata)),
+    );
+    if (mounted) await _reload(preserveStatus: true);
+  }
+
+  Future<void> _showDetails(Map<String, dynamic> track) async {
     final path = (track['path'] ?? '').toString();
-    showDialog<void>(
+    Map<String, dynamic>? document;
+    final id = int.tryParse('${track['id']}');
+    if (widget.metadataBridge != null && id != null) {
+      try {
+        final payload = await widget.metadataBridge!.getMetadata(id);
+        document = Map<String, dynamic>.from(payload['metadata'] as Map? ?? const {});
+      } on MusicArkBridgeException {
+        document = null;
+      }
+    }
+    if (!mounted) return;
+    final fields = Map<String, dynamic>.from(document?['fields'] as Map? ?? const {});
+    final identity = Map<String, dynamic>.from(document?['identity'] as Map? ?? const {});
+    final artwork = Map<String, dynamic>.from(document?['artwork'] as Map? ?? track['artwork'] as Map? ?? const {});
+    final albumArtists = fields['albumArtists'] is List ? (fields['albumArtists'] as List).join(', ') : '—';
+    final genres = fields['genres'] is List ? (fields['genres'] as List).join(', ') : (track['genre'] ?? '—').toString();
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text((track['title'] ?? track['fileName'] ?? 'Track').toString()),
         content: SizedBox(
-          width: 620,
+          width: 720,
           child: SingleChildScrollView(
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SelectableText(
-                  'Исполнитель: ${_artists(track)}\n'
-                  'Альбом: ${track['album'] ?? '—'}\n'
-                  'Длительность: ${_duration(track['durationSeconds'])}\n'
-                  'Формат: ${track['codec'] ?? track['extension'] ?? '—'}\n'
-                  'Битрейт: ${track['bitrate'] ?? '—'}\n'
-                  'Sample rate: ${track['sampleRate'] ?? '—'}',
-                ),
-                if (path.isNotEmpty)
-                  ExpansionTile(
-                    key: Key('local-detail-path-${track['id']}'),
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: const EdgeInsets.only(bottom: 8),
-                    title: const Text('Показать путь'),
+                _LocalArtwork(artwork: artwork, size: 150),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: SelectableText(path),
+                      SelectableText(
+                        'Title: ${fields['title'] ?? track['title'] ?? '—'}\n'
+                        'Artists: ${fields['artists'] is List ? (fields['artists'] as List).join(', ') : _artists(track)}\n'
+                        'Album: ${fields['album'] ?? track['album'] ?? '—'}\n'
+                        'Album Artist: $albumArtists\n'
+                        'Track: ${fields['trackNumber'] ?? track['trackNumber'] ?? '—'} / ${fields['totalTracks'] ?? '—'}\n'
+                        'Disc: ${fields['discNumber'] ?? track['discNumber'] ?? '—'} / ${fields['totalDiscs'] ?? '—'}\n'
+                        'Date: ${fields['releaseDate'] ?? fields['year'] ?? track['year'] ?? '—'}\n'
+                        'Genre: $genres\n'
+                        'ISRC: ${fields['isrc'] ?? '—'}\n'
+                        'Publisher: ${fields['publisher'] ?? '—'}\n'
+                        'Copyright: ${fields['copyright'] ?? '—'}\n'
+                        'Duration: ${_duration(track['durationSeconds'])}\n'
+                        'Format: ${track['codec'] ?? track['extension'] ?? '—'}\n'
+                        'Bitrate: ${track['bitrate'] ?? '—'}\n'
+                        'Sample rate: ${track['sampleRate'] ?? '—'}\n\n'
+                        '${identity['status'] == 'exact' ? 'Yandex identity: Exact\nTrack ID: ${identity['externalId']}' : 'Yandex identity: не установлена'}',
                       ),
+                      if (path.isNotEmpty)
+                        ExpansionTile(
+                          key: Key('local-detail-path-${track['id']}'),
+                          tilePadding: EdgeInsets.zero,
+                          childrenPadding: const EdgeInsets.only(bottom: 8),
+                          title: const Text('Показать путь'),
+                          children: [Align(alignment: Alignment.centerLeft, child: SelectableText(path))],
+                        ),
                     ],
                   ),
+                ),
               ],
             ),
           ),
         ),
         actions: [
+          if (widget.metadataBridge != null)
+            TextButton.icon(
+              key: Key('local-detail-edit-${track['id']}'),
+              onPressed: () {
+                Navigator.pop(context);
+                _edit(track);
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Редактировать метаданные'),
+            ),
           if (path.isNotEmpty)
             TextButton.icon(
               key: Key('local-detail-play-${track['id']}'),
@@ -312,10 +388,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                           prefixIcon: const Icon(Icons.search),
                           hintText: 'Поиск: название, исполнитель, альбом, файл',
                           border: const OutlineInputBorder(),
-                          suffixIcon: IconButton(
-                            onPressed: () { _search.clear(); _reload(); },
-                            icon: const Icon(Icons.clear),
-                          ),
+                          suffixIcon: IconButton(onPressed: () { _search.clear(); _reload(); }, icon: const Icon(Icons.clear)),
                         ),
                       ),
                     ),
@@ -390,30 +463,28 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                       }
                       final track = _tracks[index];
                       final path = (track['path'] ?? '').toString();
+                      final artwork = Map<String, dynamic>.from(track['artwork'] as Map? ?? const {});
                       return ListTile(
                         key: Key('local-track-${track['id']}'),
-                        leading: const Icon(Icons.audiotrack),
+                        leading: _LocalArtwork(artwork: artwork, size: 48),
                         title: Text((track['title'] ?? track['fileName'] ?? 'Unknown').toString()),
-                        subtitle: Text('${_artists(track)} • ${track['album'] ?? '—'} • ${track['codec'] ?? track['extension'] ?? '—'}'),
+                        subtitle: Text('${_artists(track)} • ${track['album'] ?? '—'} • ${track['year'] ?? '—'} • ${track['codec'] ?? track['extension'] ?? '—'}'),
                         trailing: Wrap(
                           spacing: 2,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Text(_duration(track['durationSeconds'])),
-                            if (path.isNotEmpty)
+                            if (widget.metadataBridge != null)
                               IconButton(
-                                key: Key('local-play-${track['id']}'),
-                                tooltip: 'Воспроизвести',
-                                onPressed: () => _play(track),
-                                icon: const Icon(Icons.play_arrow),
+                                key: Key('local-edit-${track['id']}'),
+                                tooltip: 'Редактировать метаданные',
+                                onPressed: () => _edit(track),
+                                icon: const Icon(Icons.edit_outlined),
                               ),
                             if (path.isNotEmpty)
-                              IconButton(
-                                key: Key('local-reveal-${track['id']}'),
-                                tooltip: 'Открыть расположение файла',
-                                onPressed: () => _reveal(track),
-                                icon: const Icon(Icons.folder_open_outlined),
-                              ),
+                              IconButton(key: Key('local-play-${track['id']}'), tooltip: 'Воспроизвести', onPressed: () => _play(track), icon: const Icon(Icons.play_arrow)),
+                            if (path.isNotEmpty)
+                              IconButton(key: Key('local-reveal-${track['id']}'), tooltip: 'Открыть расположение файла', onPressed: () => _reveal(track), icon: const Icon(Icons.folder_open_outlined)),
                           ],
                         ),
                         onTap: () => _showDetails(track),
@@ -422,6 +493,31 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LocalArtwork extends StatelessWidget {
+  const _LocalArtwork({required this.artwork, required this.size});
+  final Map<String, dynamic> artwork;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = '${artwork['cachePath'] ?? ''}';
+    final file = path.isEmpty ? null : File(path);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(5),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: file != null && file.existsSync()
+            ? Image.file(file, fit: BoxFit.cover, cacheWidth: size.round(), cacheHeight: size.round())
+            : ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Icon(Icons.album_outlined, size: size * .6),
+              ),
       ),
     );
   }

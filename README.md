@@ -2,66 +2,108 @@
 
 [English version](README_EN.md)
 
-**Текущая версия: 0.8.0 — Controlled Sync.**
+**Текущая версия: 0.8.2 — Local Metadata Editor & Yandex Metadata Import.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. v0.5 устанавливает identity, v0.5.1 отдельно проверяет вариант записи, v0.6 выводит Coverage/Missing, v0.7 добавляет production Download + Local Playback, а v0.8 координирует эти готовые слои через безопасный dry-run Sync Plan.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.8.2 добавляет отдельный **явный** контур редактирования metadata уже существующих локальных файлов.
 
 ## Основной цикл
 
 ```text
 Yandex Library = desired state
         ↓
-all / liked / Yandex Playlist
+Local Library = actual files (обычный Scan только читает)
         ↓
-Coverage + Matching + Variant + Local Library = actual state
+Matching + Variant + Coverage
         ↓
-Controlled Sync Planner (read only)
-        ↓
-Preview / blockers / explicit confirmation
-        ↓
-execution-time revalidation
-        ↓
-DownloadService.enqueue() for current Missing + Wanted
-        ↓
-Downloads → normal v0.7 transfer/index/link/coverage
+Missing / Wanted → Download / Controlled Sync
 ```
 
-Sync не является двунаправленным filesystem mirror.
-
-## Authoritative policy
-
-Provider identity — `(provider_id, external_id)`. Одна identity в Liked и нескольких playlists считается один раз. Playlist duplicate occurrences не создают duplicate downloads.
+Для файлов с плохими тегами появился дополнительный ручной workflow:
 
 ```text
-covered                      → no acquisition
-missing + wanted             → ENQUEUE_DOWNLOAD
-missing + unreviewed         → USER_DECISION_REQUIRED
-missing + ignored            → summary / no download
-needs_review                 → REVIEW_IDENTITY
-not_analyzed                 → matching review blocker
-covered + uncertain/altered/
-different_version            → REVIEW_VARIANT
+Local Library
+  → Редактировать метаданные
+  → локальная правка
+      или
+    поиск Yandex Track → Compare
+  → Применить метаданные
+      или
+    Применить и связать
+  → transactional MP3 write
+  → single-file reindex + SHA-256
+  → targeted Matching refresh
+  → Coverage/UI refresh
 ```
 
-`DIFFERENT_VERSION` не превращается в Missing и не запускает replacement. Прямой v0.7 **Скачать** для одного Missing остаётся отдельным explicit user intent и не меняет консервативную bulk Sync policy.
+## Metadata и Identity — разные сущности
 
-## Controlled Sync safety
+**«Применить метаданные»** меняет только выбранные непустые поля/обложку локального MP3, после чего запускает обычный Matching. Даже 100% similarity сама по себе не становится подтверждённой identity.
 
-Каждый план — immutable snapshot с `planner_version`, scope, exact download target, input fingerprint, summary и операциями. Relevant изменение active Yandex membership, matching/local state, wanted/ignored triage или download target делает план `stale`. Playback state fingerprint не меняет.
-
-Apply требует подтверждения и перед каждой actionable operation повторно проверяет:
+**«Применить и связать»** — отдельное явное подтверждение пользователя. Оно создаёт:
 
 ```text
-track still active/current?
-coverage still missing?
-action still wanted?
-accepted local link still absent?
-active user task already exists?
+provider   = yandex_music
+external   = <Yandex Track ID>
+local file = <Local File ID>
+method     = exact_id
+confidence = 1.0
+reason     = user_confirmed
 ```
 
-Затем вызывается production `DownloadService.enqueue()`. Sync **не вызывает `runQueue()`**, не запускает unrelated queued tasks и не содержит собственную HTTP download implementation.
+При таком bind MusicArk также пишет доверенный provenance в ID3 TXXX. Это позволяет восстановить provider identity после удаления БД, переименования или переноса файла. Зарезервированные provenance-теги нельзя редактировать через обычный раздел «Все теги».
 
-Стандартный v0.8 Apply всегда даёт:
+## Безопасность изменения файлов
+
+Обычные:
+
+- Scan;
+- Matching;
+- Coverage;
+- Sync;
+
+**не изменяют пользовательские аудиофайлы**.
+
+Существующий файл изменяется только после явного действия в Metadata Editor. Для MP3 используется pipeline:
+
+```text
+original
+  ↓
+same-directory temporary copy
+  ↓
+ID3/artwork write
+  ↓
+MPEG audio validation
+  ↓
+metadata read-back validation
+  ↓
+atomic os.replace()
+```
+
+До atomic replace оригинал остаётся неизменным. Audio stream не транскодируется. Basic Save меняет только запрошенные frames; неизвестные/custom tags сохраняются.
+
+## Artwork
+
+Local Library показывает thumbnail каждого трека. Приоритет:
+
+1. embedded artwork;
+2. уже cached Yandex artwork для подтверждённой identity;
+3. placeholder.
+
+Список библиотеки не делает Yandex request для каждой строки и не передаёт большие base64-картинки во Flutter: UI получает cache path и декодирует thumbnail лениво.
+
+## Yandex metadata import
+
+Поиск и получение полного Track DTO выполняются только в Python/backend через существующую Yandex provider/auth границу. Flutter не получает Yandex token, Authorization header, cookies, signed/direct media URL.
+
+Compare позволяет выборочно импортировать доступные поля и artwork. Пустое поле Yandex не стирает локальное значение автоматически.
+
+## Форматы
+
+Архитектура использует format adapters. В v0.8.2 полноценная безопасная запись реализована для **MP3/ID3**. Другие аудиоформаты пока доступны редактору только для просмотра до появления их transactional adapters.
+
+## Controlled Sync
+
+Sync остаётся read-only planner/executor поверх существующих слоёв и не является двунаправленным filesystem mirror. Его стандартный Apply по-прежнему даёт:
 
 ```text
 deleted local files = 0
@@ -70,31 +112,7 @@ modified existing local files/tags = 0
 Yandex mutations = 0
 ```
 
-Local-only / Outside selected scope — только informational category.
-
-## Existing layers remain independent
-
-- **Yandex Library** — secure token via OS credential store, active cached Liked/playlists, offline cache.
-- **Local Library** — multiple roots, incremental read-only indexing, structured metadata.
-- **Identity Matching** — `MATCHED / CONFLICT / UNMATCHED` with manual precedence and fingerprints.
-- **Variant** — `SAME / ALTERED / DIFFERENT_VERSION / UNCERTAIN / NOT_CHECKED`, independent from identity/Coverage.
-- **Coverage** — derived `covered / missing / needs_review / not_analyzed` plus `wanted / ignored / unreviewed` triage.
-- **Download** — v0.7 persistent user queue, exact target, secure provider acquisition, atomic `.part`, normal Local indexing, exact identity link, Coverage rebase.
-- **Local Playback** — embedded player remains unchanged by v0.8.
-
-## UI
-
-```text
-MusicArk
-├── Яндекс Музыка
-├── Локальная библиотека
-├── Сопоставление
-├── Недостающие
-├── Загрузки
-└── Синхронизация
-```
-
-«Синхронизация» показывает scope, target, Current/Projected coverage, download candidates, undecided Missing, identity/matching blockers, Variant issues, Local-only/Outside scope, stale/legacy state, confirmation, Apply result и историю Sync Plan.
+Metadata Editor — отдельный explicit-write workflow и не вызывается Scan/Matching/Coverage/Sync автоматически.
 
 ## SQLite
 
@@ -106,16 +124,15 @@ Forward-only schema:
 1.5.0 — Variant Detection
 1.6.0 — Coverage actions
 1.7.0 — Download queue/settings
-1.8.0 — Controlled Sync plan snapshots/results
+1.8.0 — Controlled Sync
+1.8.1 — Rich Yandex download metadata/provenance
+1.8.2 — Local artwork cache / Metadata Editor support
 ```
-
-`1.7.0 → 1.8.0` расширяет существующие `sync_plans` / `sync_operations`, не создаёт parallel v2 tables и сохраняет legacy rows. Новый executor legacy upload/replace/metadata plans не выполняет.
-
-Secrets (`Yandex token`, auth headers, cookies, temporary direct URLs) не хранятся в sync/download metadata.
 
 ## Запуск для разработки на Windows
 
 ```powershell
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e .
@@ -142,8 +159,10 @@ v0.5.0 — Identity Matching
 v0.5.1 — Variant Detection
 v0.6   — Missing Tracks / Coverage
 v0.7   — Download + Local Playback
-v0.8   — Controlled Sync
-next   — TBD / stabilization
+v0.8.0 — Controlled Sync
+v0.8.1 — Rich Yandex download metadata/provenance
+v0.8.2 — Local Metadata Editor / Yandex Metadata Import
+next   — stabilization / TBD
 ```
 
-См. `docs/versions/v0.8.0.md`, `docs/architecture/architecture.md`, `docs/testing/manual-test-plan.md` и `docs/release/release-checklist.md`.
+См. `docs/versions/v0.8.2.md` и `docs/architecture/metadata-editor.md`.

@@ -273,13 +273,24 @@ def run_action(
             lid = int(pl["local_file_id"])
         except (TypeError, ValueError) as exc:
             raise ValueError("payload.local_file_id must be integer.") from exc
-        return meta.fetch_structured_tags(lid)
+        return meta.get(lid)
 
     if name == "metadata_update":
-        return meta.update_tags(dict(pl))
+        if "local_file_id" not in pl:
+            raise ValueError("metadata_update requires payload.local_file_id.")
+        try:
+            lid = int(pl["local_file_id"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("payload.local_file_id must be integer.") from exc
+        changes = pl.get("changes")
+        if not isinstance(changes, dict):
+            raise ValueError("metadata_update requires payload.changes object.")
+        return meta.update(lid, dict(changes), confirm=pl.get("confirm") is True)
 
     if name == "metadata_bulk_update":
-        return meta.bulk_update_tags(pl)
+        raise ValueError(
+            "metadata_bulk_update is not supported in v0.8.2; metadata writes must target one explicit local file."
+        )
 
     if name == "yandex_auth_check":
         return YandexMusicProvider(base_dir=base_dir).auth_check()

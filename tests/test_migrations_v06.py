@@ -94,7 +94,7 @@ class CoverageMigrationV06Tests(unittest.TestCase):
                 version = conn.execute(
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
-                self.assertEqual(version, "1.8.0")
+                self.assertEqual(version, "1.8.4")
                 self.assertEqual(
                     conn.execute(
                         "SELECT COUNT(*) FROM provider_collection_items"
@@ -164,6 +164,15 @@ class CoverageMigrationV06Tests(unittest.TestCase):
                     }
                     <= sync_plan_columns
                 )
+                current_tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                self.assertIn("local_track_content_labels", current_tables)
+                self.assertIn("provider_track_content_labels", current_tables)
+                self.assertIn("variant_user_acceptance", current_tables)
 
 
 if __name__ == "__main__":

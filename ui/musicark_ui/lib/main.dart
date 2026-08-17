@@ -13,6 +13,7 @@ import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
+import 'yandex_content_labels.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -108,6 +109,31 @@ class _MusicArkShellState extends State<_MusicArkShell> {
     });
   }
 
+  Widget _buildYandexSection() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The Yandex page still contains its own fixed-width 280 px sidebar and
+        // desktop track controls. Letting the outer shell squeeze that nested
+        // layout to phone-like widths makes ListTile.trailing consume the whole
+        // row and can trigger a render exception. Until the Yandex page gets a
+        // dedicated compact layout, keep a safe desktop workspace and scroll it
+        // horizontally on unusually narrow windows instead of crashing.
+        const minimumWorkspaceWidth = 920.0;
+        final workspaceWidth = constraints.maxWidth < minimumWorkspaceWidth
+            ? minimumWorkspaceWidth
+            : constraints.maxWidth;
+        return SingleChildScrollView(
+          key: const Key('yandex-horizontal-viewport'),
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: workspaceWidth,
+            child: yandex.MusicArkHomePage(bridge: widget.bridge),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -165,7 +191,18 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                     children: [
                       // Keep the Yandex page stateful: recreating it would lose the
                       // currently opened playlist and could change matching scope.
-                      yandex.MusicArkHomePage(bridge: widget.bridge),
+                      Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: YandexContentLabelsButton(bridge: widget.bridge),
+                            ),
+                          ),
+                          Expanded(child: _buildYandexSection()),
+                        ],
+                      ),
                       _localLibraryOpened
                           ? LocalLibraryPage(
                               key: ValueKey('local-${_activationRevision[1]}'),

@@ -37,6 +37,7 @@ class ProviderTrack:
     duration_seconds: int | None = None
     explicit: bool | None = None
     availability: str | None = None
+    artwork_url: str | None = None
     source_type: str = "provider"
     raw_payload_ref: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict)

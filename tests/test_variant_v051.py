@@ -447,7 +447,7 @@ class VariantServiceTests(unittest.TestCase):
             download_settings = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='download_settings'"
             ).fetchone()
-        self.assertEqual("1.7.0", version)
+        self.assertEqual("1.8.4", version)
         self.assertEqual(1, provider_count)
         self.assertGreaterEqual(local_count, 1)
         self.assertEqual(("matched", 1), matching)

@@ -8,6 +8,7 @@ import sqlite3
 from typing import Any
 
 from musicark.core.errors import StorageError
+from musicark.storage.local_library_storage import normalize_local_path
 
 
 _SCOPE_KEY = "matching_current_collection"
@@ -356,17 +357,14 @@ class MatchingScopeState:
         if not clean:
             return ""
 
-        def key(value: str) -> str:
-            return value.replace("\\", "/").rstrip("/").casefold()
-
-        candidate = key(clean)
+        candidate = normalize_local_path(clean)
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 rows = conn.execute(
-                    "SELECT path FROM local_library_roots WHERE enabled=1"
+                    "SELECT normalized_path FROM local_library_roots WHERE enabled=1"
                 ).fetchall()
         except sqlite3.Error as exc:
             raise StorageError("Failed to inspect Local Library roots.") from exc
-        if any(key(str(row[0] or "")) == candidate for row in rows):
+        if any(str(row[0] or "") == candidate for row in rows):
             return ""
         return clean

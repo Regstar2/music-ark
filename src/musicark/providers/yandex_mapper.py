@@ -5,6 +5,25 @@ from __future__ import annotations
 from .models import ProviderPlaylist, ProviderTrack, TrackSource
 
 
+def _artwork_url(raw_track: dict, album: dict, *, size: str = "200x200") -> str | None:
+    value = (
+        raw_track.get("cover_uri")
+        or raw_track.get("og_image")
+        or album.get("cover_uri")
+        or album.get("og_image")
+    )
+    if value is None:
+        return None
+    url = str(value).strip().replace("%%", size)
+    if not url:
+        return None
+    if url.startswith("//"):
+        return f"https:{url}"
+    if "://" not in url:
+        return f"https://{url.lstrip('/')}"
+    return url
+
+
 def map_yandex_track(raw_track: dict) -> ProviderTrack:
     """Map normalized Yandex track payload into ProviderTrack."""
     track_id = str(raw_track.get("id", ""))
@@ -31,6 +50,7 @@ def map_yandex_track(raw_track: dict) -> ProviderTrack:
         duration_seconds=duration_seconds,
         explicit=bool(raw_track.get("content_warning")) if raw_track.get("content_warning") is not None else None,
         availability=availability,
+        artwork_url=_artwork_url(raw_track, album),
         source_type="yandex_music",
         raw_payload_ref=f"track:{track_id}" if track_id else None,
         raw_data=raw_track,
@@ -43,7 +63,6 @@ def map_yandex_playlist(raw_playlist: dict) -> ProviderPlaylist:
     owner = raw_playlist.get("owner") if isinstance(raw_playlist.get("owner"), dict) else {}
     track_refs = raw_playlist.get("track_refs") or []
     if not track_refs and isinstance(raw_playlist.get("tracks"), list):
-        # Scanner may pass raw playlist track records.
         track_refs = [
             str(item.get("id"))
             for item in raw_playlist["tracks"]

@@ -125,11 +125,9 @@ def coverage_base_cte() -> str:
             laf.duration_seconds AS local_duration_seconds,
             CASE
                 WHEN mr.provider_id IS NULL THEN 'not_analyzed'
-
                 WHEN mr.manual=1 AND mr.status='matched' THEN
                     CASE
-                        WHEN COALESCE(mr.reason, '') LIKE 'manual_match_stale:%'
-                            THEN 'needs_review'
+                        WHEN COALESCE(mr.reason, '') LIKE 'manual_match_stale:%' THEN 'needs_review'
                         WHEN COALESCE(mr.provider_fingerprint, '') <> ''
                          AND COALESCE(mr.local_fingerprint, '') <> ''
                          AND (
@@ -140,35 +138,26 @@ def coverage_base_cte() -> str:
                                 laf.path, laf.file_size, laf.modified_ns, laf.title,
                                 laf.artists_json, laf.album, laf.duration_seconds, laf.codec
                             )
-                         )
-                            THEN 'needs_review'
+                         ) THEN 'needs_review'
                         WHEN mr.local_file_id IS NULL
                           OR laf.id IS NULL
                           OR COALESCE(laf.availability, 'missing') <> 'available'
-                          OR tl.id IS NULL
-                            THEN 'needs_review'
+                          OR tl.id IS NULL THEN 'needs_review'
                         ELSE 'covered'
                     END
-
                 WHEN COALESCE(mr.manual, 0)=0
                  AND (
                     COALESCE(mr.matcher_version, 0) <> ctx.matcher_version
                     OR COALESCE(mr.provider_fingerprint, '') <>
-                       musicark_provider_fingerprint(
-                           s.provider_id, s.external_id, s.payload_json
-                       )
-                    OR COALESCE(mr.local_fingerprint, '') <>
-                       ctx.local_library_fingerprint
-                 )
-                    THEN 'not_analyzed'
-
+                       musicark_provider_fingerprint(s.provider_id, s.external_id, s.payload_json)
+                    OR COALESCE(mr.local_fingerprint, '') <> ctx.local_library_fingerprint
+                 ) THEN 'not_analyzed'
                 WHEN mr.status='matched' THEN
                     CASE
                         WHEN mr.local_file_id IS NOT NULL
                          AND laf.id IS NOT NULL
                          AND COALESCE(laf.availability, 'missing')='available'
-                         AND tl.id IS NOT NULL
-                            THEN 'covered'
+                         AND tl.id IS NOT NULL THEN 'covered'
                         ELSE 'needs_review'
                     END
                 WHEN mr.status='conflict' THEN 'needs_review'
@@ -176,19 +165,25 @@ def coverage_base_cte() -> str:
                 ELSE 'not_analyzed'
             END AS coverage_status,
             CASE
-                WHEN tvr.status IN (
-                    'same', 'altered', 'different_version', 'uncertain', 'not_checked'
-                ) THEN tvr.status
+                WHEN tvr.status IN ('altered', 'different_version', 'uncertain')
+                 AND vua.provider_id IS NOT NULL
+                 AND vua.variant_status=tvr.status
+                 AND COALESCE(vua.provider_variant_fingerprint, '')=COALESCE(tvr.provider_variant_fingerprint, '')
+                 AND COALESCE(vua.local_audio_fingerprint, '')=COALESCE(tvr.local_audio_fingerprint, '')
+                 AND COALESCE(vua.reference_audio_fingerprint, '')=COALESCE(tvr.reference_audio_fingerprint, '')
+                 AND COALESCE(vua.analyzer_version, 0)=COALESCE(tvr.analyzer_version, 0)
+                 AND COALESCE(vua.analysis_updated_at, '')=COALESCE(tvr.updated_at, '')
+                    THEN 'same'
+                WHEN tvr.status IN ('same', 'altered', 'different_version', 'uncertain', 'not_checked')
+                    THEN tvr.status
                 ELSE 'not_checked'
             END AS variant_status,
             COALESCE(pta.action, 'unreviewed') AS user_action
         FROM scoped s
         JOIN ctx
         LEFT JOIN matching_results mr
-          ON mr.provider_id=s.provider_id
-         AND mr.external_id=s.external_id
-        LEFT JOIN local_audio_files laf
-          ON laf.id=mr.local_file_id
+          ON mr.provider_id=s.provider_id AND mr.external_id=s.external_id
+        LEFT JOIN local_audio_files laf ON laf.id=mr.local_file_id
         LEFT JOIN track_links tl
           ON tl.source_provider_id=s.provider_id
          AND tl.source_external_id=s.external_id
@@ -197,8 +192,11 @@ def coverage_base_cte() -> str:
           ON tvr.provider_id=s.provider_id
          AND tvr.external_id=s.external_id
          AND tvr.local_file_id=mr.local_file_id
+        LEFT JOIN variant_user_acceptance vua
+          ON vua.provider_id=s.provider_id
+         AND vua.external_id=s.external_id
+         AND vua.local_file_id=mr.local_file_id
         LEFT JOIN provider_track_actions pta
-          ON pta.provider_id=s.provider_id
-         AND pta.external_id=s.external_id
+          ON pta.provider_id=s.provider_id AND pta.external_id=s.external_id
     )
     """

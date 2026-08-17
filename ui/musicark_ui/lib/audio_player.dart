@@ -67,7 +67,7 @@ class MusicArkAudioPlayer extends ChangeNotifier {
     ]);
   }
 
-  Future<void> open(String rawPath) async {
+  Future<void> open(String rawPath, {String? title}) async {
     final path = rawPath.trim();
     if (path.isEmpty) {
       throw FileSystemException('Музыкальный файл не указан.', path);
@@ -79,9 +79,12 @@ class MusicArkAudioPlayer extends ChangeNotifier {
 
     _ensurePlayer();
     _path = file.path;
-    _title = file.uri.pathSegments.isEmpty
-        ? file.path
-        : Uri.decodeComponent(file.uri.pathSegments.last);
+    final displayTitle = title?.trim() ?? '';
+    _title = displayTitle.isNotEmpty
+        ? displayTitle
+        : (file.uri.pathSegments.isEmpty
+            ? file.path
+            : Uri.decodeComponent(file.uri.pathSegments.last));
     _position = Duration.zero;
     _duration = Duration.zero;
     _error = null;

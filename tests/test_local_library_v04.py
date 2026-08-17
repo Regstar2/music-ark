@@ -238,7 +238,7 @@ class LocalLibraryV04Tests(unittest.TestCase):
                 roots = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_library_roots'").fetchone()
                 download_settings = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='download_settings'").fetchone()
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(local_audio_files)")}
-            self.assertEqual(version, "1.7.0")
+            self.assertEqual(version, "1.8.4")
             self.assertEqual(liked[0], 1)
             self.assertIn("Keep me", item[0])
             self.assertIsNotNone(roots)

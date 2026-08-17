@@ -11,6 +11,7 @@ abstract interface class MusicArkBridgeClient {
   Future<Map<String, dynamic>> playlist(String externalId);
   Future<Map<String, dynamic>> playlistRefresh(String externalId);
   Future<Map<String, dynamic>> libraryRefresh();
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId);
   Future<Map<String, dynamic>> logout();
 
   Future<Map<String, dynamic>> localRoots();
@@ -44,6 +45,9 @@ class MusicArkBridge implements MusicArkBridgeClient {
   @override
   Future<Map<String, dynamic>> libraryRefresh() => _runBridge('library_refresh');
   @override
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) =>
+      _runBridge('yandex_playback_prepare', externalId: externalId);
+  @override
   Future<Map<String, dynamic>> logout() => _runBridge('logout');
 
   @override
@@ -66,6 +70,7 @@ class MusicArkBridge implements MusicArkBridgeClient {
     String command, {
     String? token,
     String? playlistId,
+    String? externalId,
     String? localRootPath,
     int? rootId,
     int? trackId,
@@ -96,6 +101,7 @@ class MusicArkBridge implements MusicArkBridgeClient {
       ...python.prefixArgs,
       '-m', 'musicark.mvp_bridge', '--base-dir', repoRoot, command,
       if (playlistId != null) ...['--playlist-id', playlistId],
+      if (externalId != null && externalId.isNotEmpty) ...['--external-id', externalId],
       if (rootId != null) ...['--root-id', '$rootId'],
       if (trackId != null) ...['--track-id', '$trackId'],
       if (limit != null) ...['--limit', '$limit'],
@@ -223,6 +229,7 @@ class FakeMusicArkBridge implements MusicArkBridgeClient {
   int libraryRefreshCalls = 0;
   int likedRefreshCalls = 0;
   int playlistRefreshCalls = 0;
+  int yandexPlaybackPrepareCalls = 0;
   int localScanCalls = 0;
   final List<Map<String, dynamic>> _localRoots = [];
 
@@ -302,6 +309,16 @@ class FakeMusicArkBridge implements MusicArkBridgeClient {
     libraryRefreshCalls++;
     if (failLibraryRefresh) throw const MusicArkBridgeException('yandex_request_failed', 'offline');
     return _libraryState(signedIn: true, source: 'network');
+  }
+  @override
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) async {
+    yandexPlaybackPrepareCalls++;
+    return {
+      'providerId': 'yandex_music',
+      'externalId': externalId,
+      'path': r'C:\MusicArk\.musicark\playback\yandex\yandex_$externalId.mp3',
+      'cached': true,
+    };
   }
   @override
   Future<Map<String, dynamic>> logout() async => _libraryState(signedIn: false, source: 'none');

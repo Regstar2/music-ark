@@ -170,11 +170,32 @@ class CandidateGenerator:
         hyphen = f"yandex-{external_id}"
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
-                rows = conn.execute(
-                    f"""
+                trusted_rows = conn.execute(
+                    """
                     SELECT id, path, title, artists_json, album, duration_seconds, codec,
                            metadata_json, normalized_title, normalized_artists_text,
-                           duration_bucket, modified_ns, updated_at
+                           duration_bucket, modified_ns, updated_at,
+                           source_provider_id, source_external_id
+                    FROM local_audio_files
+                    WHERE source_provider_id='yandex_music' AND source_external_id=?
+                      AND (
+                        (NOT EXISTS (SELECT 1 FROM local_library_roots WHERE enabled=1)
+                         AND availability IN ('available', 'legacy'))
+                        OR
+                        (availability='available'
+                         AND library_root_id IN (SELECT id FROM local_library_roots WHERE enabled=1))
+                      )
+                    ORDER BY id
+                    LIMIT 4
+                    """,
+                    (external_id,),
+                ).fetchall()
+                filename_rows = conn.execute(
+                    """
+                    SELECT id, path, title, artists_json, album, duration_seconds, codec,
+                           metadata_json, normalized_title, normalized_artists_text,
+                           duration_bucket, modified_ns, updated_at,
+                           source_provider_id, source_external_id
                     FROM local_audio_files
                     WHERE (
                         (NOT EXISTS (SELECT 1 FROM local_library_roots WHERE enabled=1)
@@ -205,7 +226,15 @@ class CandidateGenerator:
                 ).fetchall()
         except sqlite3.Error as exc:
             raise StorageError("Failed to query exact-id Local Library candidates.") from exc
-        return [self._row(row) for row in rows]
+
+        result: dict[int, dict[str, Any]] = {}
+        for row in [*trusted_rows, *filename_rows]:
+            item = self._row(row)
+            if len(row) > 14:
+                item["source_provider_id"] = row[13]
+                item["source_external_id"] = row[14]
+            result.setdefault(int(item["id"]), item)
+        return list(result.values())
 
     @staticmethod
     def _row(row: tuple[Any, ...]) -> dict[str, Any]:

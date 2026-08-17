@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "bootstrap", "login", "refresh", "liked_refresh", "playlists", "playlist",
-            "playlist_refresh", "library_refresh", "cached", "logout",
+            "playlist_refresh", "library_refresh", "yandex_playback_prepare", "cached", "logout",
             "local_roots", "local_root_add", "local_root_remove", "local_scan",
             "local_tracks", "local_track", "local_stats",
             "matching_summary", "matching_run", "matching_results", "matching_result",
@@ -317,6 +317,10 @@ def main() -> int:
                 payload = playlist_refresh(_required_playlist_id(args.playlist_id), service)
             elif args.command == "library_refresh":
                 payload = library_refresh(service)
+            elif args.command == "yandex_playback_prepare":
+                payload = service.playback_prepare(
+                    _required_text(args.external_id, "--external-id")
+                )
             elif args.command == "cached":
                 payload = cached(service)
             else:

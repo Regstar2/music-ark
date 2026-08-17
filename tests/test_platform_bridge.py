@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from musicark.core.errors import MetadataEditorError
+from musicark.metadata.service import MetadataEditorError
 from musicark.platform_bridge import build_snapshot, run_action, update_settings
 from musicark.storage.database import initialize_database
 
@@ -29,7 +29,7 @@ class PlatformBridgeTests(unittest.TestCase):
             self.assertIn("mvp_hints", snapshot)
             mh = snapshot["mvp_hints"]
             self.assertIn("schema_version", mh)
-            self.assertEqual(mh["schema_version"], "1.7.0")
+            self.assertEqual(mh["schema_version"], "1.8.4")
             self.assertIn("latest_sync_plan_id", mh)
 
     def test_sync_execute_safe_requires_confirm(self) -> None:

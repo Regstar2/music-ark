@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import unittest
+from unittest.mock import patch
 
 from musicark.download import bridge
 
@@ -60,7 +61,11 @@ class DownloadBridgeRunOneTests(unittest.TestCase):
     def test_run_one_executes_only_selected_task(self) -> None:
         service = _Service()
 
-        result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]
+        # History pruning has its own SQLite-backed coverage. This unit test only
+        # verifies that the bridge executes the selected task and does not drain
+        # unrelated queued work, so keep storage outside this fake-service fixture.
+        with patch.object(bridge, "_prune_user_completed_history", return_value=0):
+            result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]
 
         self.assertEqual(service.run_calls, ["selected"])
         self.assertEqual(result["task"]["id"], "selected")

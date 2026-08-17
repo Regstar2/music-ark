@@ -6,6 +6,7 @@ import 'account_session.dart';
 import 'app_localizations_ext.dart';
 import 'app_settings.dart';
 import 'audio_player.dart';
+import 'content_label_bridge.dart';
 import 'coverage_bridge.dart';
 import 'coverage_page.dart';
 import 'download_bridge.dart';
@@ -14,6 +15,7 @@ import 'help_page.dart';
 import 'local_library_page.dart';
 import 'matching_bridge.dart';
 import 'matching_page.dart';
+import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
 import 'settings_page.dart';
 import 'sync_bridge.dart';
@@ -31,6 +33,8 @@ class MusicArkShell extends StatefulWidget {
     required this.syncBridge,
     required this.settings,
     required this.accountSession,
+    this.metadataBridge = const MetadataBridge(),
+    this.contentLabelBridge = const ContentLabelBridge(),
   });
 
   final MusicArkBridgeClient bridge;
@@ -40,6 +44,13 @@ class MusicArkShell extends StatefulWidget {
   final SyncBridgeClient syncBridge;
   final AppSettingsController settings;
   final AccountSessionController accountSession;
+
+  // These feature bridges are explicit shell dependencies. Do not infer their
+  // availability from the concrete type of [bridge]: v0.9.0 wraps the Yandex
+  // bridge to observe session payloads, and concrete-type checks would silently
+  // disable Metadata Editor and ORIGINAL/CENSORED controls.
+  final MetadataBridgeClient? metadataBridge;
+  final ContentLabelBridgeClient? contentLabelBridge;
 
   @override
   State<MusicArkShell> createState() => _MusicArkShellState();
@@ -133,6 +144,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
               child: yandex.MusicArkHomePage(
                 key: ValueKey('yandex-${widget.accountSession.logoutRevision}'),
                 bridge: widget.bridge,
+                contentLabelBridge: widget.contentLabelBridge,
               ),
             ),
           ),
@@ -232,13 +244,17 @@ class _MusicArkShellState extends State<MusicArkShell> {
                       // MaterialApp, but this State remains and preserves playlist scope.
                       Column(
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: YandexContentLabelsButton(bridge: widget.bridge),
+                          if (widget.contentLabelBridge != null)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: YandexContentLabelsButton(
+                                  bridge: widget.bridge,
+                                  labelBridge: widget.contentLabelBridge,
+                                ),
+                              ),
                             ),
-                          ),
                           Expanded(child: _buildYandexSection()),
                         ],
                       ),
@@ -246,6 +262,8 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           ? LocalLibraryPage(
                               key: ValueKey('local-${_activationRevision[1]}'),
                               bridge: widget.bridge,
+                              metadataBridge: widget.metadataBridge,
+                              contentLabelBridge: widget.contentLabelBridge,
                             )
                           : const SizedBox.shrink(),
                       _matchingOpened

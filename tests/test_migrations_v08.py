@@ -1,4 +1,4 @@
-"""Schema 1.7.0 -> 1.8.0 migration preservation tests."""
+"""Schema 1.7.0 -> current migration preservation tests."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class SyncMigrationV08Tests(unittest.TestCase):
                 action = conn.execute(
                     "SELECT action FROM provider_track_actions WHERE external_id='keep'"
                 ).fetchone()[0]
-            self.assertEqual(version, "1.8.0")
+            self.assertEqual(version, "1.8.4")
             self.assertEqual(plan, (0, "legacy", "planned", '{"old":1}'))
             self.assertEqual(op, ("upload_candidate", 1, "informational"))
             self.assertEqual(action, "wanted")

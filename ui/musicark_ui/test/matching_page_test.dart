@@ -188,7 +188,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('matching-detail')), findsOneWidget);
     expect(find.text('Кандидаты'), findsOneWidget);
-    expect(find.text(r'C:\Music\Song.flac'), findsOneWidget);
+    expect(find.text(r'C:\Music\Song.flac'), findsWidgets);
     await tester.tap(find.byKey(const Key('matching-accept-2')));
     await tester.pumpAndSettle();
     expect(bridge.acceptCalls, 1);

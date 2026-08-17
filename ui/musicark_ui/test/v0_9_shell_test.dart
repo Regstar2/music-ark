@@ -80,7 +80,7 @@ void main() {
     await tester.tap(find.byKey(const Key('settings-about')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('about-page')), findsOneWidget);
-    expect(find.text('0.9.0'), findsWidgets);
+    expect(find.text('0.9.1'), findsWidgets);
     expect(find.byType(MusicArkNowPlayingBar), findsOneWidget);
   });
 }

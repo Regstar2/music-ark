@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_localizations_ext.dart';
 import 'content_label_bridge.dart';
-import 'musicark_bridge.dart';
 
 class YandexContentLabelsButton extends StatelessWidget {
   const YandexContentLabelsButton({
@@ -24,21 +24,26 @@ class YandexContentLabelsButton extends StatelessWidget {
           ),
         ),
         icon: const Icon(Icons.sell_outlined),
-        label: const Text('ОРИГИНАЛ / ЦЕНЗУРА'),
+        label: Text(context.l10n.yandexVersionLabels),
       );
 }
 
 class _YandexContentLabelsDialog extends StatefulWidget {
-  const _YandexContentLabelsDialog({required this.bridge, required this.labelBridge});
+  const _YandexContentLabelsDialog({
+    required this.bridge,
+    required this.labelBridge,
+  });
 
   final MusicArkBridgeClient bridge;
   final ContentLabelBridgeClient labelBridge;
 
   @override
-  State<_YandexContentLabelsDialog> createState() => _YandexContentLabelsDialogState();
+  State<_YandexContentLabelsDialog> createState() =>
+      _YandexContentLabelsDialogState();
 }
 
-class _YandexContentLabelsDialogState extends State<_YandexContentLabelsDialog> {
+class _YandexContentLabelsDialogState
+    extends State<_YandexContentLabelsDialog> {
   final _search = TextEditingController();
   List<Map<String, dynamic>> _tracks = const [];
   Map<String, String> _labels = const {};
@@ -58,17 +63,26 @@ class _YandexContentLabelsDialogState extends State<_YandexContentLabelsDialog> 
   }
 
   List<Map<String, dynamic>> _maps(dynamic value) => value is List
-      ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+      ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList()
       : <Map<String, dynamic>>[];
 
   String _id(Map<String, dynamic> track) =>
       '${track['external_id'] ?? track['externalId'] ?? ''}'.trim();
 
-  String _title(Map<String, dynamic> track) => '${track['title'] ?? '—'}'.trim();
+  String _title(Map<String, dynamic> track) =>
+      '${track['title'] ?? '—'}'.trim();
 
   String _artists(Map<String, dynamic> track) {
     final raw = track['artists'];
-    if (raw is List) return raw.map((item) => '$item').where((item) => item.isNotEmpty).join(', ');
+    if (raw is List) {
+      return raw
+          .map((item) => '$item')
+          .where((item) => item.isNotEmpty)
+          .join(', ');
+    }
     return '${raw ?? ''}'.trim();
   }
 
@@ -148,46 +162,48 @@ class _YandexContentLabelsDialogState extends State<_YandexContentLabelsDialog> 
     final q = _search.text.trim().toLowerCase();
     if (q.isEmpty) return _tracks;
     return _tracks.where((track) {
-      final haystack = '${_title(track)} ${_artists(track)} ${_id(track)}'.toLowerCase();
+      final haystack =
+          '${_title(track)} ${_artists(track)} ${_id(track)}'.toLowerCase();
       return haystack.contains(q);
     }).toList(growable: false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final visible = _visible;
     return AlertDialog(
       key: const Key('yandex-content-labels-dialog'),
-      title: const Text('Пометки треков Яндекс Музыки'),
+      title: Text(l10n.yandexContentLabelsDialogTitle),
       content: SizedBox(
         width: 820,
         height: 640,
         child: Column(
           children: [
-            const Text(
-              'Пометка хранится в MusicArk и не изменяет данные на Яндекс Музыке.',
-            ),
+            Text(l10n.yandexContentLabelsDescription),
             const SizedBox(height: 8),
             TextField(
               key: const Key('yandex-content-labels-search'),
               controller: _search,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Название, исполнитель или Track ID',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: l10n.yandexContentLabelsSearch,
+                prefixIcon: const Icon(Icons.search),
               ),
             ),
             if (_busy) const LinearProgressIndicator(),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, key: const Key('yandex-content-labels-error')),
+                child: Text(
+                  _error!,
+                  key: const Key('yandex-content-labels-error'),
+                ),
               ),
             const SizedBox(height: 8),
             Expanded(
               child: visible.isEmpty && !_busy
-                  ? const Center(child: Text('Треки в локальном кэше Яндекс Музыки не найдены.'))
+                  ? Center(child: Text(l10n.yandexContentLabelsEmpty))
                   : ListView.separated(
                       key: const Key('yandex-content-labels-list'),
                       itemCount: visible.length,
@@ -200,27 +216,42 @@ class _YandexContentLabelsDialogState extends State<_YandexContentLabelsDialog> 
                           key: Key('yandex-content-label-track-$id'),
                           leading: const Icon(Icons.music_note),
                           title: Text(_title(track)),
-                          subtitle: Text('${_artists(track)} · ID: $id'),
+                          subtitle: Text(
+                            '${_artists(track)} · ${l10n.yandexIdPrefix}: $id',
+                          ),
                           trailing: Wrap(
                             spacing: 6,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              if (label != null)
+                              if (label != null && label.isNotEmpty)
                                 Chip(
                                   key: Key('yandex-content-label-$id'),
                                   visualDensity: VisualDensity.compact,
-                                  label: Text(label == 'censored' ? 'ЦЕНЗУРА' : 'ОРИГИНАЛ'),
+                                  label: Text(
+                                    label == 'censored'
+                                        ? l10n.censored
+                                        : l10n.original,
+                                  ),
                                 ),
                               PopupMenuButton<String>(
                                 key: Key('yandex-content-label-menu-$id'),
-                                tooltip: 'Пометить версию трека',
+                                tooltip: l10n.yandexMarkTrack,
                                 initialValue: label,
                                 onSelected: (value) => _setLabel(track, value),
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(value: 'original', child: Text('ОРИГИНАЛ')),
-                                  PopupMenuItem(value: 'censored', child: Text('ЦЕНЗУРА')),
-                                  PopupMenuDivider(),
-                                  PopupMenuItem(value: '', child: Text('Снять пометку')),
+                                itemBuilder: (_) => [
+                                  PopupMenuItem(
+                                    value: 'original',
+                                    child: Text(l10n.original),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'censored',
+                                    child: Text(l10n.censored),
+                                  ),
+                                  const PopupMenuDivider(),
+                                  PopupMenuItem(
+                                    value: '',
+                                    child: Text(l10n.yandexClearLabel),
+                                  ),
                                 ],
                                 icon: const Icon(Icons.sell_outlined),
                               ),
@@ -234,8 +265,14 @@ class _YandexContentLabelsDialogState extends State<_YandexContentLabelsDialog> 
         ),
       ),
       actions: [
-        TextButton(onPressed: _busy ? null : _load, child: const Text('Обновить')),
-        FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть')),
+        TextButton(
+          onPressed: _busy ? null : _load,
+          child: Text(l10n.refresh),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.close),
+        ),
       ],
     );
   }

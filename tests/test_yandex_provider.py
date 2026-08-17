@@ -9,7 +9,12 @@ import sqlite3
 import tempfile
 import unittest
 
-from musicark.providers.yandex_mapper import map_track_source, map_yandex_playlist, map_yandex_track
+from musicark.providers.yandex_mapper import (
+    map_track_source,
+    map_yandex_album,
+    map_yandex_playlist,
+    map_yandex_track,
+)
 from musicark.providers.yandex_music_provider import YandexMusicProvider, YandexTokenMissingError
 from musicark.storage.database import initialize_database
 
@@ -82,6 +87,29 @@ class YandexMapperTests(unittest.TestCase):
         self.assertEqual(
             mapped.artwork_url,
             "https://avatars.yandex.net/get-music-content/42/200x200",
+        )
+
+    def test_map_album_creates_liked_album_summary(self) -> None:
+        mapped = map_yandex_album(
+            {
+                "id": 77,
+                "title": "Favorite Album",
+                "artists": [{"name": "Favorite Artist"}],
+                "track_count": 12,
+                "cover_uri": "//avatars.yandex.net/get-music-content/77/%%",
+                "available": True,
+                "year": 2026,
+            },
+            liked_at="2026-08-17T12:00:00+00:00",
+        )
+        self.assertEqual(mapped["externalId"], "77")
+        self.assertEqual(mapped["title"], "Favorite Album")
+        self.assertEqual(mapped["artists"], ["Favorite Artist"])
+        self.assertEqual(mapped["trackCount"], 12)
+        self.assertEqual(mapped["availability"], "available")
+        self.assertEqual(
+            mapped["artworkUrl"],
+            "https://avatars.yandex.net/get-music-content/77/400x400",
         )
 
     def test_map_playlist_creates_universal_provider_playlist(self) -> None:

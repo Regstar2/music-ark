@@ -5,6 +5,7 @@ import 'account_control.dart';
 import 'account_session.dart';
 import 'app_localizations_ext.dart';
 import 'app_settings.dart';
+import 'app_ui_tokens.dart';
 import 'audio_player.dart';
 import 'content_label_bridge.dart';
 import 'coverage_bridge.dart';
@@ -16,12 +17,11 @@ import 'local_library_page.dart';
 import 'matching_bridge.dart';
 import 'matching_page.dart';
 import 'metadata_bridge.dart';
-import 'musicark_bridge.dart';
+import 'musicark_mark.dart';
 import 'settings_page.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
-import 'yandex_content_labels.dart';
 
 class MusicArkShell extends StatefulWidget {
   const MusicArkShell({
@@ -45,10 +45,8 @@ class MusicArkShell extends StatefulWidget {
   final AppSettingsController settings;
   final AccountSessionController accountSession;
 
-  // These feature bridges are explicit shell dependencies. Do not infer their
-  // availability from the concrete type of [bridge]: v0.9.0 wraps the Yandex
-  // bridge to observe session payloads, and concrete-type checks would silently
-  // disable Metadata Editor and ORIGINAL/CENSORED controls.
+  // Feature bridges stay explicit dependencies. The Yandex bridge is wrapped by
+  // v0.9.x session observation and must never be used as a runtime capability test.
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
 
@@ -68,11 +66,8 @@ class _MusicArkShellState extends State<MusicArkShell> {
   bool _downloadsOpened = false;
   bool _syncOpened = false;
 
-  // IndexedStack deliberately keeps pages alive, but the data pages must not keep
-  // stale database snapshots. Bumping the activation revision gives the selected
-  // page a fresh State/initState on every navigation activation. This is also the
-  // cross-screen invalidation boundary: mutations already reload their own page;
-  // any other page re-reads authoritative state the next time it is opened.
+  // Data pages re-read authoritative state when they are activated. The Yandex
+  // page remains alive continuously so playlist scope survives theme/locale changes.
   final List<int> _activationRevision = List<int>.filled(6, 0);
 
   @override
@@ -116,42 +111,34 @@ class _MusicArkShellState extends State<MusicArkShell> {
     }
   }
 
-  Widget _buildYandexSection() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // The Yandex page still contains its own fixed-width 280 px sidebar and
-        // desktop track controls. Letting the outer shell squeeze that nested
-        // layout to phone-like widths makes ListTile.trailing consume the whole
-        // row and can trigger a render exception. Until the Yandex page gets a
-        // dedicated compact layout, keep a safe desktop workspace and scroll it
-        // horizontally on unusually narrow windows instead of crashing.
-        const minimumWorkspaceWidth = 920.0;
-        final workspaceWidth = constraints.maxWidth < minimumWorkspaceWidth
-            ? minimumWorkspaceWidth
-            : constraints.maxWidth;
-        final nestedTheme = Theme.of(context).copyWith(
-          // The application shell owns the product title. Hide the legacy nested
-          // app bar so stale historical version labels are not shown in the UI.
-          appBarTheme: Theme.of(context).appBarTheme.copyWith(toolbarHeight: 0),
-        );
-        return SingleChildScrollView(
-          key: const Key('yandex-horizontal-viewport'),
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: workspaceWidth,
-            child: Theme(
-              data: nestedTheme,
-              child: yandex.MusicArkHomePage(
-                key: ValueKey('yandex-${widget.accountSession.logoutRevision}'),
-                bridge: widget.bridge,
-                contentLabelBridge: widget.contentLabelBridge,
+  Widget _buildYandexSection() => yandex.MusicArkHomePage(
+        key: ValueKey('yandex-${widget.accountSession.logoutRevision}'),
+        bridge: widget.bridge,
+        contentLabelBridge: widget.contentLabelBridge,
+      );
+
+  Widget _buildBrand(BuildContext context) => SizedBox(
+        width: AppUiTokens.sidebarWidth - 28,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+          child: Row(
+            children: [
+              const MusicArkMark(size: 32),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'MusicArk',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
               ),
-            ),
+            ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
 
   Widget _buildSidebar(BuildContext context) {
     final l10n = context.l10n;
@@ -189,39 +176,55 @@ class _MusicArkShellState extends State<MusicArkShell> {
     ];
 
     return SizedBox(
-      width: 220,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: NavigationRail(
-              key: const Key('main-navigation'),
-              selectedIndex: _index < _settingsIndex ? _index : null,
-              onDestinationSelected: _selectSection,
-              labelType: NavigationRailLabelType.all,
-              groupAlignment: -1,
-              leading: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text('MusicArk', style: Theme.of(context).textTheme.titleMedium),
+      key: const Key('musicark-primary-sidebar'),
+      width: AppUiTokens.sidebarWidth,
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: NavigationRail(
+                key: const Key('main-navigation'),
+                extended: true,
+                scrollable: true,
+                minWidth: 64,
+                minExtendedWidth: AppUiTokens.sidebarWidth,
+                useIndicator: true,
+                selectedIndex: _index < _settingsIndex ? _index : null,
+                onDestinationSelected: _selectSection,
+                groupAlignment: -1,
+                leading: _buildBrand(context),
+                destinations: destinations,
               ),
-              destinations: destinations,
             ),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            key: const Key('nav-settings'),
-            selected: _index >= _settingsIndex,
-            leading: const Icon(Icons.settings_outlined),
-            title: Text(l10n.navSettings),
-            onTap: () => _selectSection(_settingsIndex),
-          ),
-          const Divider(height: 1),
-          AccountControl(
-            session: widget.accountSession,
-            onOpenYandex: () => _selectSection(0),
-            onLogout: _logout,
-          ),
-        ],
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: ListTile(
+                key: const Key('nav-settings'),
+                selected: _index >= _settingsIndex,
+                leading: const Icon(Icons.settings_outlined),
+                title: Text(
+                  l10n.navSettings,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppUiTokens.mediumRadius,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                onTap: () => _selectSection(_settingsIndex),
+              ),
+            ),
+            const Divider(height: 1),
+            AccountControl(
+              session: widget.accountSession,
+              onOpenYandex: () => _selectSection(0),
+              onLogout: _logout,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -240,24 +243,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                   child: IndexedStack(
                     index: _index,
                     children: [
-                      // Keep the Yandex page stateful. Theme and locale rebuild the
-                      // MaterialApp, but this State remains and preserves playlist scope.
-                      Column(
-                        children: [
-                          if (widget.contentLabelBridge != null)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: YandexContentLabelsButton(
-                                  bridge: widget.bridge,
-                                  labelBridge: widget.contentLabelBridge,
-                                ),
-                              ),
-                            ),
-                          Expanded(child: _buildYandexSection()),
-                        ],
-                      ),
+                      _buildYandexSection(),
                       _localLibraryOpened
                           ? LocalLibraryPage(
                               key: ValueKey('local-${_activationRevision[1]}'),

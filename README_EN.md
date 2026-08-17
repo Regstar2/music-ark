@@ -2,23 +2,22 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.0 — UI, Account & Settings.**  
+**Current code version: 0.9.1 — Main Screen UI Polish.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers; v0.9.0 adds a unified application shell, global account state, settings, light/dark themes, RU/EN localization infrastructure, offline Help and diagnostic About information.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.1 does not change music semantics; it focuses on a unified desktop main screen and Yandex Music UI.
 
-## Desktop shell v0.9.0
+## Desktop shell and Yandex UI v0.9.1
 
-`Settings` and the account control live in the utility area at the bottom of the global left sidebar. Without a stored Yandex session the control shows `Sign in`; when authenticated it shows the account name and an initials fallback avatar. Sign-in reuses the existing Yandex workflow and logout uses the existing backend boundary. Account bootstrap remains cache-first and does not require a network request on every launch.
+MusicArk uses one permanent global left sidebar. The second permanent Yandex Music sidebar is removed: `Tracks`, `Playlists` and `Albums` use top-level navigation inside the main workspace.
 
-UI settings apply without restart and are stored separately from the music SQLite database:
+The `Albums` tab shows **albums that the user explicitly liked in Yandex Music**. This is a separate cache-first provider collection: the liked-album index refreshes with the library, while tracks for an individual album are loaded lazily when the album is opened and are then cached by MusicArk. Albums are not inferred from album tags on liked tracks. No music-database schema bump is required because the existing generic provider-collection storage is reused.
 
-- theme: `System` / `Light` / `Dark`;
-- language: `System` / `Russian` / `English`;
-- Help remains available offline;
-- About reports app/backend/schema versions, OS information and safe diagnostics without tokens or library contents.
+The Yandex workspace uses the available window width instead of the old mandatory `~920 px` horizontal-scroll layout. Search, sort and `Version labels` reflow on narrower desktop windows; the track list uses a table-like layout when wide and a compact row layout when space is tighter. Track sorting also includes `Unavailable first`.
 
-MusicArk uses standard Flutter `ThemeMode`, Material 3 `ColorScheme`, and `gen_l10n`/ARB resources. Theme/locale changes rebuild the application presentation without recreating the shell state that owns the current Yandex playlist and Now Playing lifecycle.
+The normal technical `available` value is not rendered on every track. Unavailable tracks are visually muted, playback is disabled, and the reason is exposed through a tooltip. ORIGINAL/CENSORED remain app-level labels: a compact chip stays visible in the row, inline editing remains available, and the global label manager is preserved.
+
+The global sidebar uses shared layout tokens and a small vector MusicArk mark. `System / Light / Dark`, `System / Russian / English`, account control, Settings, Help and About remain supported. Now Playing stays application-wide and gains a responsive presentation without adding queue/next/previous/shuffle/repeat semantics.
 
 ## Product loop
 
@@ -94,8 +93,6 @@ Local Library displays a thumbnail for each track. Priority is embedded artwork,
 
 Yandex Library provides artwork and built-in playback. The backend prepares or reuses a private cache under `.musicark/playback/yandex` and passes only the local path to Flutter. The Yandex token, Authorization headers and protected/signed provider media URLs are never passed to Flutter. Playback-cache files are not indexed into Local Library and do not affect Matching or Coverage.
 
-The Yandex workspace keeps a minimum width of about `920 px`; narrower windows use horizontal scrolling. This remains a desktop safeguard rather than a mobile/responsive redesign.
-
 ## Content labels and Variant acceptance
 
 App-level **ORIGINAL / CENSORED** marks can be stored for a local track and a cached Yandex identity. They do not mutate Yandex, rewrite audio metadata, change Matching identity or increase confidence.
@@ -136,7 +133,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.0 does not bump the SQLite schema: theme/locale preferences use a separate UI-only typed store. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.1 does not bump the SQLite schema. Theme/locale preferences remain separate from the music database. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -163,8 +160,9 @@ flutter run -d windows
 v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
-v0.9.0 — UI, Account & Settings                        current
+v0.9.0 — UI, Account & Settings                        complete
+v0.9.1 — Main Screen UI Polish                         current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.0. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.0.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.1. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.1.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

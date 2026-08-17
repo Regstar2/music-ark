@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/content_label_bridge.dart';
-import 'package:musicark_ui/musicark_bridge.dart';
 import 'package:musicark_ui/yandex_app.dart' as yandex;
 
 void main() {
@@ -11,14 +10,14 @@ void main() {
     MusicArkBridgeClient bridge,
     ContentLabelBridgeClient labels,
   ) async {
+    tester.platformDispatcher.localeTestValue = const Locale('ru');
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
     await tester.binding.setSurfaceSize(const Size(1500, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
-      MaterialApp(
-        home: yandex.MusicArkHomePage(
-          bridge: bridge,
-          contentLabelBridge: labels,
-        ),
+      yandex.MusicArkDesktopApp(
+        bridge: bridge,
+        contentLabelBridge: labels,
       ),
     );
     await tester.pumpAndSettle();

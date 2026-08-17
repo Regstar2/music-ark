@@ -5,7 +5,6 @@ import 'package:musicark_ui/content_label_bridge.dart';
 import 'package:musicark_ui/folder_picker.dart';
 import 'package:musicark_ui/local_library_page.dart';
 import 'package:musicark_ui/main.dart';
-import 'package:musicark_ui/musicark_bridge.dart';
 
 void main() {
   testWidgets('Local Library scans configured roots on every tab activation', (tester) async {

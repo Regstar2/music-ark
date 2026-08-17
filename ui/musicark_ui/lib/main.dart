@@ -7,10 +7,12 @@ import 'app_localizations_ext.dart';
 import 'app_settings.dart';
 import 'app_shell.dart';
 import 'app_theme.dart';
+import 'content_label_bridge.dart';
 import 'coverage_bridge.dart';
 import 'download_bridge.dart';
 import 'l10n/app_localizations.dart';
 import 'matching_bridge.dart';
+import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
 
@@ -18,6 +20,21 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   runApp(const MusicArkDesktopApp());
+}
+
+Locale resolveAppLocale(Locale? locale) {
+  final language = locale?.languageCode.toLowerCase();
+  return language == 'en' ? const Locale('en') : const Locale('ru');
+}
+
+class _InjectedDefaultsStorage implements AppSettingsStorage {
+  const _InjectedDefaultsStorage();
+
+  @override
+  Future<Map<String, dynamic>> read() async => const {};
+
+  @override
+  Future<void> write(Map<String, dynamic> value) async {}
 }
 
 class MusicArkDesktopApp extends StatefulWidget {
@@ -28,6 +45,8 @@ class MusicArkDesktopApp extends StatefulWidget {
     this.coverageBridge,
     this.downloadBridge,
     this.syncBridge,
+    this.metadataBridge,
+    this.contentLabelBridge,
     this.settingsStorage,
   });
 
@@ -36,6 +55,8 @@ class MusicArkDesktopApp extends StatefulWidget {
   final CoverageBridgeClient? coverageBridge;
   final DownloadBridgeClient? downloadBridge;
   final SyncBridgeClient? syncBridge;
+  final MetadataBridgeClient? metadataBridge;
+  final ContentLabelBridgeClient? contentLabelBridge;
   final AppSettingsStorage? settingsStorage;
 
   @override
@@ -54,7 +75,11 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
   @override
   void initState() {
     super.initState();
-    _settings = AppSettingsController(storage: widget.settingsStorage);
+    final injectedMode = widget.bridge != null;
+    _settings = AppSettingsController(
+      storage: widget.settingsStorage ??
+          (injectedMode ? const _InjectedDefaultsStorage() : null),
+    );
     _accountSession = AccountSessionController();
     _bridge = SessionAwareMusicArkBridge(
       widget.bridge ?? MusicArkBridge(),
@@ -72,8 +97,6 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
     try {
       await _bridge.bootstrap();
     } on Object {
-      // The Yandex page owns structured provider error rendering. The global
-      // account control only needs to leave its bootstrap progress state.
       _accountSession.finishInitialization();
     }
   }
@@ -87,37 +110,42 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
 
   @override
   Widget build(BuildContext context) {
+    final injectedMode = widget.bridge != null;
+    final featureLabels = widget.contentLabelBridge ??
+        (injectedMode ? null : const ContentLabelBridge());
     return AnimatedBuilder(
       animation: _settings,
-      builder: (context, _) => MaterialApp(
-        onGenerateTitle: (context) => context.l10n.appName,
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: _settings.themeMode,
-        locale: _settings.locale,
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        supportedLocales: AppLocalizations.supportedLocales,
-        localeResolutionCallback: (locale, _) {
-          final language = locale?.languageCode.toLowerCase();
-          if (language == 'en') return const Locale('en');
-          if (language == 'ru') return const Locale('ru');
-          return const Locale('ru');
-        },
-        home: MusicArkShell(
-          bridge: _bridge,
-          matchingBridge: _matchingBridge,
-          coverageBridge: _coverageBridge,
-          downloadBridge: _downloadBridge,
-          syncBridge: _syncBridge,
-          settings: _settings,
-          accountSession: _accountSession,
-        ),
-      ),
+      builder: (context, _) {
+        final effectiveLocale = _settings.locale ??
+            resolveAppLocale(
+              WidgetsBinding.instance.platformDispatcher.locale,
+            );
+        return MaterialApp(
+          onGenerateTitle: (context) => context.l10n.appName,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: _settings.themeMode,
+          locale: effectiveLocale,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: MusicArkShell(
+            bridge: _bridge,
+            matchingBridge: _matchingBridge,
+            coverageBridge: _coverageBridge,
+            downloadBridge: _downloadBridge,
+            syncBridge: _syncBridge,
+            metadataBridge: widget.metadataBridge ?? const MetadataBridge(),
+            contentLabelBridge: featureLabels,
+            settings: _settings,
+            accountSession: _accountSession,
+          ),
+        );
+      },
     );
   }
 }

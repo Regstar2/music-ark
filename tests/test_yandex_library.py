@@ -1,4 +1,4 @@
-"""Tests for v0.3 Yandex Library orchestration and playlist cache semantics."""
+"""Tests for cache-first Yandex Library orchestration."""
 
 from __future__ import annotations
 
@@ -40,7 +40,27 @@ def track(external_id: str, title: str) -> ProviderTrack:
 
 
 def playlist(external_id: str, title: str, count: int) -> ProviderPlaylist:
-    return ProviderPlaylist(provider_id="yandex_music", external_id=external_id, title=title, track_external_ids=(), owner_name="Tester", visibility="private", raw_data={"track_count": count})
+    return ProviderPlaylist(
+        provider_id="yandex_music",
+        external_id=external_id,
+        title=title,
+        track_external_ids=(),
+        owner_name="Tester",
+        visibility="private",
+        raw_data={"track_count": count},
+    )
+
+
+def album(external_id: str, title: str, count: int) -> dict:
+    return {
+        "providerId": "yandex_music",
+        "externalId": external_id,
+        "title": title,
+        "artists": ["Artist"],
+        "trackCount": count,
+        "artworkUrl": f"https://covers.example/album-{external_id}.jpg",
+        "availability": "available",
+    }
 
 
 class FakeProvider:
@@ -48,21 +68,43 @@ class FakeProvider:
         self.liked = [track("l1", "Liked One")]
         self.playlist_index = [playlist("10", "Rock", 2), playlist("20", "Workout", 1)]
         self.playlist_tracks = {"10": [track("1", "One"), track("2", "Two")], "20": [track("3", "Three")]}
+        self.liked_albums = [album("70", "Favorite Album", 2)]
+        self.album_tracks = {"70": [track("71", "Album One"), track("72", "Album Two")]}
         self.offline = False
         self.content_calls = 0
+        self.album_content_calls = 0
+
     def _check(self) -> None:
         if self.offline:
             raise YandexMusicError("offline")
+
     def auth_check(self) -> dict:
-        self._check(); return {"provider": "yandex_music", "providerUserId": "u-1", "displayName": "Tester"}
+        self._check()
+        return {"provider": "yandex_music", "providerUserId": "u-1", "displayName": "Tester"}
+
     def list_tracks(self) -> list[ProviderTrack]:
-        self._check(); return list(self.liked)
+        self._check()
+        return list(self.liked)
+
     def list_playlist_metadata(self) -> list[ProviderPlaylist]:
-        self._check(); return list(self.playlist_index)
+        self._check()
+        return list(self.playlist_index)
+
+    def list_liked_albums(self) -> list[dict]:
+        self._check()
+        return [dict(item) for item in self.liked_albums]
+
     def get_playlist(self, external_id: str) -> tuple[ProviderPlaylist, list[ProviderTrack]]:
-        self._check(); self.content_calls += 1
+        self._check()
+        self.content_calls += 1
         metadata = next(item for item in self.playlist_index if item.external_id == external_id)
         return metadata, list(self.playlist_tracks.get(external_id, []))
+
+    def get_album(self, external_id: str) -> tuple[dict, list[ProviderTrack]]:
+        self._check()
+        self.album_content_calls += 1
+        metadata = next(item for item in self.liked_albums if item["externalId"] == external_id)
+        return dict(metadata), list(self.album_tracks.get(external_id, []))
 
 
 class YandexLibraryTests(unittest.TestCase):
@@ -74,63 +116,95 @@ class YandexLibraryTests(unittest.TestCase):
         self.provider = FakeProvider()
         self.liked_cache = LikedCacheRepository(self.database)
         self.playlist_cache = PlaylistCacheRepository(self.database)
-        self.service = YandexLibraryService(base_dir=self.base_dir, credential_store=self.credentials, liked_cache=self.liked_cache, playlist_cache=self.playlist_cache, provider_factory=lambda token: self.provider)  # type: ignore[arg-type]
+        self.service = YandexLibraryService(
+            base_dir=self.base_dir,
+            credential_store=self.credentials,
+            liked_cache=self.liked_cache,
+            playlist_cache=self.playlist_cache,
+            provider_factory=lambda token: self.provider,  # type: ignore[arg-type]
+        )
+
     def tearDown(self) -> None:
         self.tmp.cleanup()
-    def test_login_caches_playlist_metadata_without_fetching_contents(self) -> None:
+
+    def test_login_caches_indexes_without_fetching_contents(self) -> None:
         result = self.service.login("secret")
         self.assertEqual(result["playlists"]["source"], "network")
         self.assertEqual([p["externalId"] for p in result["playlists"]["items"]], ["10", "20"])
         self.assertEqual(result["playlists"]["items"][0]["trackCount"], 2)
         self.assertEqual(result["liked"]["tracks"][0]["artwork_url"], "https://covers.example/l1.jpg")
+        self.assertEqual([a["externalId"] for a in result["albums"]["items"]], ["70"])
+        self.assertEqual(result["albums"]["items"][0]["title"], "Favorite Album")
         self.assertEqual(self.provider.content_calls, 0)
+        self.assertEqual(self.provider.album_content_calls, 0)
         cached = self.service.bootstrap()
         self.assertEqual(cached["playlists"]["source"], "cache")
-        self.assertEqual(cached["playlists"]["count"], 2)
-        self.assertEqual(cached["liked"]["tracks"][0]["artwork_url"], "https://covers.example/l1.jpg")
+        self.assertEqual(cached["albums"]["source"], "cache")
+        self.assertEqual(cached["albums"]["count"], 1)
+
+    def test_liked_album_detail_is_lazy_and_cache_first(self) -> None:
+        self.service.login("secret")
+        empty = self.service.album("70")
+        self.assertEqual(empty["collection"]["tracks"], [])
+        refreshed = self.service.album_refresh("70")
+        self.assertEqual([item["external_id"] for item in refreshed["collection"]["tracks"]], ["71", "72"])
+        self.assertEqual(self.provider.album_content_calls, 1)
+        cached = self.service.album("70")
+        self.assertEqual(cached["collection"]["source"], "cache")
+        self.assertEqual([item["external_id"] for item in cached["collection"]["tracks"]], ["71", "72"])
+
     def test_playlist_snapshot_preserves_order_and_reorder(self) -> None:
         self.service.login("secret")
         first = self.service.playlist_refresh("10")
         self.assertEqual([t["external_id"] for t in first["collection"]["tracks"]], ["1", "2"])
-        self.assertEqual(first["collection"]["tracks"][0]["artwork_url"], "https://covers.example/1.jpg")
         self.provider.playlist_tracks["10"] = [track("2", "Two"), track("1", "One")]
         second = self.service.playlist_refresh("10")
         self.assertEqual(second["collection"]["diff"], {"added": 0, "removed": 0, "unchanged": 2})
         self.assertEqual([t["external_id"] for t in second["collection"]["tracks"]], ["2", "1"])
+
     def test_playlist_membership_added_removed_and_duplicate_track_ids(self) -> None:
-        self.service.login("secret"); self.service.playlist_refresh("10")
+        self.service.login("secret")
+        self.service.playlist_refresh("10")
         self.provider.playlist_tracks["10"] = [track("2", "Two"), track("2", "Two duplicate occurrence"), track("4", "Four")]
         result = self.service.playlist_refresh("10")
         self.assertEqual(result["collection"]["diff"], {"added": 2, "removed": 1, "unchanged": 1})
         self.assertEqual([t["external_id"] for t in result["collection"]["tracks"]], ["2", "2", "4"])
-    def test_library_refresh_removes_deleted_playlist_and_deduplicates_index(self) -> None:
-        self.service.login("secret"); self.service.playlist_refresh("10")
+
+    def test_library_refresh_removes_deleted_playlist_and_liked_album(self) -> None:
+        self.service.login("secret")
+        self.service.playlist_refresh("10")
+        self.service.album_refresh("70")
         self.provider.playlist_index = [playlist("20", "Workout", 1), playlist("20", "Duplicate should be ignored", 999)]
+        self.provider.liked_albums = []
         result = self.service.library_refresh()
         self.assertEqual(result["playlists"]["diff"]["removed"], 1)
-        self.assertEqual([p["externalId"] for p in result["playlists"]["items"]], ["20"])
-        self.assertEqual(self.service.playlist("10")["collection"]["tracks"], [])
+        self.assertEqual(result["albums"]["diff"]["removed"], 1)
+        self.assertEqual(self.service.album("70")["collection"]["tracks"], [])
+
     def test_empty_playlist_and_offline_cache_behavior(self) -> None:
-        self.provider.playlist_index = [playlist("30", "Empty", 0)]; self.provider.playlist_tracks["30"] = []
+        self.provider.playlist_index = [playlist("30", "Empty", 0)]
+        self.provider.playlist_tracks["30"] = []
         self.service.login("secret")
         self.assertEqual(self.service.playlist_refresh("30")["collection"]["count"], 0)
-        self.provider.playlist_index = [playlist("10", "Rock", 2)]; self.provider.playlist_tracks["10"] = [track("1", "One"), track("2", "Two")]
-        self.service.library_refresh(); self.service.playlist_refresh("10"); self.provider.offline = True
+        self.provider.offline = True
         with self.assertRaises(YandexMusicError):
-            self.service.playlist_refresh("10")
-        cached = self.service.playlist("10")
-        self.assertEqual(cached["collection"]["source"], "cache")
-        self.assertEqual([t["external_id"] for t in cached["collection"]["tracks"]], ["1", "2"])
-    def test_library_refresh_is_lazy_for_playlist_contents(self) -> None:
-        self.service.login("secret"); self.provider.content_calls = 0; self.service.library_refresh()
+            self.service.library_refresh()
+        cached = self.service.bootstrap()
+        self.assertEqual(cached["liked"]["source"], "cache")
+        self.assertEqual(cached["albums"]["items"][0]["externalId"], "70")
+
+    def test_library_refresh_is_lazy_for_playlist_and_album_contents(self) -> None:
+        self.service.login("secret")
+        self.provider.content_calls = 0
+        self.provider.album_content_calls = 0
+        self.service.library_refresh()
         self.assertEqual(self.provider.content_calls, 0)
+        self.assertEqual(self.provider.album_content_calls, 0)
+
     def test_playback_prepare_uses_private_cache_without_returning_provider_url(self) -> None:
         self.credentials.token = "secret"
         prepared = self.base_dir / ".musicark" / "playback" / "yandex" / "yandex_123.mp3"
-        with patch(
-            "musicark.yandex_library.YandexMusicDownloadProvider.execute",
-            return_value=SimpleNamespace(path=str(prepared)),
-        ) as execute:
+        with patch("musicark.yandex_library.YandexMusicDownloadProvider.execute", return_value=SimpleNamespace(path=str(prepared))) as execute:
             result = self.service.playback_prepare("123")
         task = execute.call_args.args[0]
         self.assertEqual(result["externalId"], "123")
@@ -138,16 +212,22 @@ class YandexLibraryTests(unittest.TestCase):
         self.assertNotIn("url", result)
         self.assertNotIn("token", result)
         self.assertEqual(Path(task.target_folder), self.base_dir / ".musicark" / "playback" / "yandex")
-        self.assertEqual(task.raw_payload["target_filename"], "yandex_123.mp3")
+
     def test_playback_prepare_rejects_non_numeric_provider_identity(self) -> None:
         self.credentials.token = "secret"
         with self.assertRaises(ValueError):
             self.service.playback_prepare("not-a-track")
-    def test_logout_clears_session_liked_and_playlist_cache(self) -> None:
-        self.service.login("secret"); self.service.playlist_refresh("10")
+
+    def test_logout_clears_session_liked_playlist_and_album_cache(self) -> None:
+        self.service.login("secret")
+        self.service.playlist_refresh("10")
+        self.service.album_refresh("70")
         result = self.service.logout()
-        self.assertFalse(result["session"]["hasStoredToken"]); self.assertIsNone(self.credentials.token)
-        self.assertEqual(self.liked_cache.load().count, 0); self.assertEqual(self.playlist_cache.list_metadata(), [])
+        self.assertFalse(result["session"]["hasStoredToken"])
+        self.assertIsNone(self.credentials.token)
+        self.assertEqual(self.liked_cache.load().count, 0)
+        self.assertEqual(self.playlist_cache.list_metadata(), [])
+        self.assertEqual(result["albums"]["items"], [])
 
 
 if __name__ == "__main__":

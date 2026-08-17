@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 
-from musicark.core.errors import MetadataEditorError
+from musicark.metadata.service import MetadataEditorError
 from musicark.platform_bridge import build_snapshot, run_action, update_settings
 from musicark.storage.database import initialize_database
 

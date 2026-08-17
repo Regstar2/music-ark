@@ -64,7 +64,7 @@ void main() {
     bool active = true,
     bool settle = true,
   }) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    await tester.binding.setSurfaceSize(const Size(1400, 1300));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(

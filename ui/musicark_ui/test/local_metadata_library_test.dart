@@ -87,7 +87,7 @@ void main() {
     final temp = await Directory.systemTemp.createTemp('musicark-artwork-test-');
     final image = File('${temp.path}${Platform.pathSeparator}cover.png');
     await image.writeAsBytes(base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgAAAAAgAB4iG8MwAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==',
     ));
 
     final metadata = FakeMetadataBridge(

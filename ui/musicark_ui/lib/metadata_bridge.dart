@@ -315,7 +315,7 @@ class FakeMetadataBridge implements MetadataBridgeClient {
     final artists = yf['artists'] is List ? (yf['artists'] as List).join(', ') : '';
     final title = '${yf['title'] ?? ''}'.trim();
     final suggestedName = title.isEmpty ? null : '${artists.isEmpty ? '' : '$artists - '}$title.mp3';
-    rows.add({'field': 'fileName', 'local': (local as Map)['fileName'], 'yandex': suggestedName, 'available': suggestedName != null, 'selected': suggestedName != null});
+    rows.add({'field': 'fileName', 'local': local['fileName'], 'yandex': suggestedName, 'available': suggestedName != null, 'selected': suggestedName != null});
     rows.add({'field': 'artwork', 'local': false, 'yandex': true, 'available': true, 'selected': true});
     return {'local': local, 'yandex': yandex, 'rows': rows};
   }

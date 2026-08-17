@@ -31,6 +31,7 @@ class CoveragePage extends StatefulWidget {
 
 class _CoveragePageState extends State<CoveragePage> {
   static const _pageSize = 100;
+  static const _bulkPageSize = 500;
 
   final _searchController = TextEditingController();
   Timer? _searchTimer;
@@ -103,9 +104,6 @@ class _CoveragePageState extends State<CoveragePage> {
         }
         _items = _maps(tracks['items']);
         _total = _asInt(tracks['count']);
-        _selected.removeWhere(
-          (id) => !_items.any((item) => item['externalId'] == id),
-        );
         _loading = false;
       });
     } catch (error) {
@@ -117,7 +115,10 @@ class _CoveragePageState extends State<CoveragePage> {
     }
   }
 
-  Future<void> _reloadTracks({bool refreshSummary = true}) async {
+  Future<void> _reloadTracks({
+    bool refreshSummary = true,
+    bool clearSelection = false,
+  }) async {
     if (mounted) {
       setState(() {
         _loading = true;
@@ -145,8 +146,6 @@ class _CoveragePageState extends State<CoveragePage> {
       var items = _maps(tracks['items']);
       var total = _asInt(tracks['count']);
 
-      // If downloading the last row of a later page makes that page empty,
-      // return to the last valid page instead of rendering a false empty state.
       if (items.isEmpty && total > 0 && _offset >= total) {
         final nextOffset = ((total - 1) ~/ _pageSize) * _pageSize;
         tracks = await widget.bridge.coverageTracks(
@@ -169,7 +168,7 @@ class _CoveragePageState extends State<CoveragePage> {
         if (refreshSummary) _summary = Map<String, dynamic>.from(results.first);
         _items = items;
         _total = total;
-        _selected.clear();
+        if (clearSelection) _selected.clear();
         _loading = false;
       });
     } catch (error) {
@@ -207,7 +206,10 @@ class _CoveragePageState extends State<CoveragePage> {
     _searchTimer?.cancel();
     _searchTimer = Timer(const Duration(milliseconds: 250), () {
       if (!mounted) return;
-      setState(() => _offset = 0);
+      setState(() {
+        _offset = 0;
+        _selected.clear();
+      });
       _reloadTracks(refreshSummary: false);
     });
   }
@@ -215,7 +217,7 @@ class _CoveragePageState extends State<CoveragePage> {
   Future<void> _setAction(String externalId, String action) async {
     try {
       await widget.bridge.coverageSetAction(externalId, action);
-      await _reloadTracks();
+      await _reloadTracks(clearSelection: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -226,10 +228,61 @@ class _CoveragePageState extends State<CoveragePage> {
     final ids = _selected.toList(growable: false);
     try {
       await widget.bridge.coverageSetActions(ids, action);
-      await _reloadTracks();
+      await _reloadTracks(clearSelection: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
+  }
+
+  Future<void> _selectAllFiltered() async {
+    if (_status != 'missing' || _loading || _total <= 0) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final ids = <String>{};
+      var offset = 0;
+      while (true) {
+        final payload = await widget.bridge.coverageTracks(
+          limit: _bulkPageSize,
+          offset: offset,
+          status: _status,
+          collectionId: _collectionId,
+          search: _searchController.text.trim(),
+          sort: _sort,
+          userAction: _userAction,
+          variantStatus: _variantStatus,
+        );
+        final items = _maps(payload['items']);
+        final total = _asInt(payload['count']);
+        for (final item in items) {
+          final id = (item['externalId'] ?? '').toString().trim();
+          if (id.isNotEmpty && item['coverageStatus'] == 'missing') {
+            ids.add(id);
+          }
+        }
+        offset += items.length;
+        if (items.isEmpty || offset >= total) break;
+      }
+      if (!mounted) return;
+      setState(() {
+        _selected
+          ..clear()
+          ..addAll(ids);
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _clearSelection() {
+    _updateView(_selected.clear);
   }
 
   Future<void> _enqueueDownload(String externalId) async {
@@ -240,8 +293,6 @@ class _CoveragePageState extends State<CoveragePage> {
       _error = null;
     });
     try {
-      // A direct Download click is its own explicit user intent. It must not
-      // mutate triage state or drain unrelated queued downloads.
       final queued = await bridge.enqueue(externalId);
       final rawTask = queued['task'];
       final task = rawTask is Map
@@ -261,7 +312,7 @@ class _CoveragePageState extends State<CoveragePage> {
           if (error.code != 'worker_busy') rethrow;
         }
       }
-      await _reloadTracks();
+      await _reloadTracks(clearSelection: true);
       if (!mounted) return;
       final message = finalStatus == 'completed'
           ? 'Трек скачан и добавлен в локальную библиотеку.'

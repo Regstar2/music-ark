@@ -10,7 +10,8 @@
 | v0.5.1 | Variant / Altered Track Detection | complete |
 | v0.6.0 | Missing Tracks / Library Coverage | complete |
 | v0.7.0 | Download + Local Playback | complete |
-| v0.8.0 | Controlled Sync | current development |
+| v0.8.0 | Controlled Sync | complete baseline |
+| v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | current development |
 | next | stabilization / TBD | TBD |
 
 Version notes:
@@ -24,7 +25,6 @@ Version notes:
 - `docs/versions/v0.6.0.md`
 - `docs/versions/v0.7.0.md`
 - `docs/versions/v0.8.0.md`
+- `docs/versions/v0.8.1.md`
 
-v0.5 identity, v0.5.1 Variant, v0.6 Coverage and v0.7 Download remain authoritative independent layers. v0.8 does not replace them: it creates an immutable preview and safely coordinates only current supported operations, primarily `missing + wanted → DownloadService.enqueue()` after confirmation and revalidation.
-
-No new large product slice is committed after v0.8; the next version is intentionally **TBD / stabilization** until there is a concrete need.
+v0.8.1 does not add a broader Sync executor. It hardens the existing v0.7 Download → Local indexing → exact identity path so MusicArk-created Yandex MP3 files carry durable standard metadata and trusted embedded provider provenance across rescans and a fresh Local Library index.

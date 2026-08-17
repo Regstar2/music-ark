@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 from musicark.core.config import load_config
@@ -37,7 +39,10 @@ class LocalLibraryService:
         self._database_path = database_path or self._resolve_database_path()
         initialize_database(self._database_path)
         self._repository = repository or LocalLibraryStorageRepository(self._database_path)
-        self._scanner = scanner or LocalLibraryScanner(self._repository)
+        self._scanner = scanner or LocalLibraryScanner(
+            self._repository,
+            database_path=self._database_path,
+        )
         self._indexer = indexer or LocalFileIndexer(self._database_path, self._repository)
 
     def _resolve_database_path(self) -> Path:
@@ -128,6 +133,7 @@ class LocalLibraryService:
             sort=sort,
             root_id=root_id,
         )
+        self._attach_origins(items)
         return {
             "count": total,
             "limit": page_limit,
@@ -139,7 +145,40 @@ class LocalLibraryService:
         item = self._repository.get_track(track_id)
         if item is None:
             raise ValueError(f"Local track {track_id} was not found.")
+        self._attach_origins([item])
         return {"track": item}
+
+    def _attach_origins(self, items: list[dict[str, Any]]) -> None:
+        ids = [int(item["id"]) for item in items if item.get("id") is not None]
+        if not ids:
+            return
+        origins: dict[int, tuple[str | None, str | None]] = {}
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                for offset in range(0, len(ids), 500):
+                    batch = ids[offset : offset + 500]
+                    placeholders = ",".join("?" for _ in batch)
+                    rows = conn.execute(
+                        f"""
+                        SELECT id, source_provider_id, source_external_id
+                        FROM local_audio_files WHERE id IN ({placeholders})
+                        """,
+                        batch,
+                    ).fetchall()
+                    origins.update(
+                        {
+                            int(row[0]): (row[1], row[2])
+                            for row in rows
+                        }
+                    )
+        except sqlite3.Error:
+            return
+        for item in items:
+            origin = origins.get(int(item.get("id") or 0))
+            if origin is None:
+                continue
+            item["sourceProviderId"] = origin[0]
+            item["sourceExternalId"] = origin[1]
 
     def stats(self) -> dict[str, Any]:
         return self._repository.local_stats()

@@ -1,4 +1,4 @@
-"""Download queue domain models for MusicArk v0.7."""
+"""Download queue domain models for MusicArk v0.8.1."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
+
+from musicark.providers.models import LocalAudioFile
 
 
 class DownloadStatus(StrEnum):
@@ -51,3 +53,17 @@ class DownloadTask:
     error_message: str | None = None
     result_local_file_id: int | None = None
     raw_payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadArtifact:
+    """Enriched output returned by providers that finalize metadata before indexing.
+
+    ``provider_raw_metadata`` is public provider metadata only. Credentials and
+    temporary signed download URLs must never cross this boundary.
+    """
+
+    audio: LocalAudioFile
+    metadata_snapshot: dict[str, Any] = field(default_factory=dict)
+    provider_raw_metadata: dict[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()

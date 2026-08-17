@@ -1,8 +1,8 @@
 name: musicark_ui
-description: "MusicArk Yandex, local library, identity matching, coverage, controlled sync, and authorized download desktop app."
+description: "MusicArk Yandex, local library, identity matching, coverage, controlled sync, authorized download, and explicit metadata editor desktop app."
 publish_to: 'none'
 
-version: 0.8.0+1
+version: 0.8.2+1
 
 environment:
   sdk: ^3.11.5

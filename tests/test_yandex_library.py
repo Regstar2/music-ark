@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from musicark.providers.models import ProviderPlaylist, ProviderTrack
 from musicark.providers.yandex_music_provider import YandexMusicError
@@ -25,7 +27,16 @@ class FakeCredentialStore:
 
 
 def track(external_id: str, title: str) -> ProviderTrack:
-    return ProviderTrack(provider_id="yandex_music", external_id=external_id, title=title, artists=("Artist",), album_title="Album", duration_seconds=180, availability="available")
+    return ProviderTrack(
+        provider_id="yandex_music",
+        external_id=external_id,
+        title=title,
+        artists=("Artist",),
+        album_title="Album",
+        duration_seconds=180,
+        availability="available",
+        artwork_url=f"https://covers.example/{external_id}.jpg",
+    )
 
 
 def playlist(external_id: str, title: str, count: int) -> ProviderPlaylist:
@@ -71,14 +82,17 @@ class YandexLibraryTests(unittest.TestCase):
         self.assertEqual(result["playlists"]["source"], "network")
         self.assertEqual([p["externalId"] for p in result["playlists"]["items"]], ["10", "20"])
         self.assertEqual(result["playlists"]["items"][0]["trackCount"], 2)
+        self.assertEqual(result["liked"]["tracks"][0]["artwork_url"], "https://covers.example/l1.jpg")
         self.assertEqual(self.provider.content_calls, 0)
         cached = self.service.bootstrap()
         self.assertEqual(cached["playlists"]["source"], "cache")
         self.assertEqual(cached["playlists"]["count"], 2)
+        self.assertEqual(cached["liked"]["tracks"][0]["artwork_url"], "https://covers.example/l1.jpg")
     def test_playlist_snapshot_preserves_order_and_reorder(self) -> None:
         self.service.login("secret")
         first = self.service.playlist_refresh("10")
         self.assertEqual([t["external_id"] for t in first["collection"]["tracks"]], ["1", "2"])
+        self.assertEqual(first["collection"]["tracks"][0]["artwork_url"], "https://covers.example/1.jpg")
         self.provider.playlist_tracks["10"] = [track("2", "Two"), track("1", "One")]
         second = self.service.playlist_refresh("10")
         self.assertEqual(second["collection"]["diff"], {"added": 0, "removed": 0, "unchanged": 2})
@@ -110,6 +124,25 @@ class YandexLibraryTests(unittest.TestCase):
     def test_library_refresh_is_lazy_for_playlist_contents(self) -> None:
         self.service.login("secret"); self.provider.content_calls = 0; self.service.library_refresh()
         self.assertEqual(self.provider.content_calls, 0)
+    def test_playback_prepare_uses_private_cache_without_returning_provider_url(self) -> None:
+        self.credentials.token = "secret"
+        prepared = self.base_dir / ".musicark" / "playback" / "yandex" / "yandex_123.mp3"
+        with patch(
+            "musicark.yandex_library.YandexMusicDownloadProvider.execute",
+            return_value=SimpleNamespace(path=str(prepared)),
+        ) as execute:
+            result = self.service.playback_prepare("123")
+        task = execute.call_args.args[0]
+        self.assertEqual(result["externalId"], "123")
+        self.assertEqual(result["path"], str(prepared))
+        self.assertNotIn("url", result)
+        self.assertNotIn("token", result)
+        self.assertEqual(Path(task.target_folder), self.base_dir / ".musicark" / "playback" / "yandex")
+        self.assertEqual(task.raw_payload["target_filename"], "yandex_123.mp3")
+    def test_playback_prepare_rejects_non_numeric_provider_identity(self) -> None:
+        self.credentials.token = "secret"
+        with self.assertRaises(ValueError):
+            self.service.playback_prepare("not-a-track")
     def test_logout_clears_session_liked_and_playlist_cache(self) -> None:
         self.service.login("secret"); self.service.playlist_refresh("10")
         result = self.service.logout()

@@ -63,7 +63,10 @@ void main() {
     expect(find.byKey(const ValueKey('coverage-row-202')), findsNothing);
 
     final chip = tester.widget<ChoiceChip>(
-      find.byKey(const Key('coverage-filter-missing')),
+      find.descendant(
+        of: find.byKey(const Key('coverage-filter-missing')),
+        matching: find.byType(ChoiceChip),
+      ),
     );
     expect(chip.selected, isTrue);
   });

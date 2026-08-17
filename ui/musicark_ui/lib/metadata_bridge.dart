@@ -7,7 +7,11 @@ abstract interface class MetadataBridgeClient {
   Future<Map<String, dynamic>> getMetadata(int localFileId);
   Future<Map<String, dynamic>> updateMetadata(int localFileId, Map<String, dynamic> changes);
   Future<Map<String, dynamic>> artworkBatch(List<int> localFileIds);
-  Future<Map<String, dynamic>> searchYandex(int localFileId, {String query = ''});
+  Future<Map<String, dynamic>> searchYandex(
+    int localFileId, {
+    String title = '',
+    String artist = '',
+  });
   Future<Map<String, dynamic>> getYandex(String externalId);
   Future<Map<String, dynamic>> compareYandex(int localFileId, String externalId);
   Future<Map<String, dynamic>> applyYandex(
@@ -38,8 +42,17 @@ class MetadataBridge implements MetadataBridgeClient {
       _run('local_artwork_batch', localFileIds: localFileIds);
 
   @override
-  Future<Map<String, dynamic>> searchYandex(int localFileId, {String query = ''}) =>
-      _run('yandex_metadata_search', localFileId: localFileId, query: query);
+  Future<Map<String, dynamic>> searchYandex(
+    int localFileId, {
+    String title = '',
+    String artist = '',
+  }) =>
+      _run(
+        'yandex_metadata_search',
+        localFileId: localFileId,
+        title: title,
+        artist: artist,
+      );
 
   @override
   Future<Map<String, dynamic>> getYandex(String externalId) =>
@@ -69,6 +82,8 @@ class MetadataBridge implements MetadataBridgeClient {
     int? localFileId,
     String? externalId,
     String? query,
+    String? title,
+    String? artist,
     bool bindIdentity = false,
     Map<String, dynamic>? payload,
     List<int>? localFileIds,
@@ -105,6 +120,8 @@ class MetadataBridge implements MetadataBridgeClient {
       if (localFileId != null) ...['--local-file-id', '$localFileId'],
       if (externalId != null && externalId.isNotEmpty) ...['--external-id', externalId],
       if (query != null && query.isNotEmpty) ...['--query', query],
+      if (title != null && title.isNotEmpty) ...['--title', title],
+      if (artist != null && artist.isNotEmpty) ...['--artist', artist],
       if (bindIdentity) '--bind-identity',
     ];
     final result = await Process.run(
@@ -217,6 +234,7 @@ class FakeMetadataBridge implements MetadataBridgeClient {
   final List<Map<String, dynamic>> searchItems;
   final List<Map<String, dynamic>> updates = [];
   final List<Map<String, dynamic>> applies = [];
+  final List<Map<String, dynamic>> searches = [];
 
   @override
   Future<Map<String, dynamic>> artworkBatch(List<int> localFileIds) async => {
@@ -232,6 +250,7 @@ class FakeMetadataBridge implements MetadataBridgeClient {
             {
               'localFileId': localFileId,
               'path': r'C:\Music\Track.mp3',
+              'fileName': 'Track.mp3',
               'format': 'mp3',
               'writable': true,
               'fields': <String, dynamic>{},
@@ -251,19 +270,32 @@ class FakeMetadataBridge implements MetadataBridgeClient {
       ..remove('artworkImagePath')
       ..remove('removeArtwork')
       ..remove('textFrames')
-      ..remove('customTextTags');
+      ..remove('customTextTags')
+      ..remove('fileName');
     fields.addAll(fieldChanges);
     document['fields'] = fields;
+    if (changes.containsKey('fileName')) {
+      document['fileName'] = '${changes['fileName']}';
+    }
     documents[localFileId] = document;
     return {'metadata': document, 'matching': {'recalculated': 1}};
   }
 
   @override
-  Future<Map<String, dynamic>> searchYandex(int localFileId, {String query = ''}) async => {
-        'query': query.isEmpty ? 'Track' : query,
-        'count': searchItems.length,
-        'items': searchItems,
-      };
+  Future<Map<String, dynamic>> searchYandex(
+    int localFileId, {
+    String title = '',
+    String artist = '',
+  }) async {
+    searches.add({'localFileId': localFileId, 'title': title, 'artist': artist});
+    return {
+      'query': [artist, title].where((value) => value.trim().isNotEmpty).join(' '),
+      'titleQuery': title,
+      'artistQuery': artist,
+      'count': searchItems.length,
+      'items': searchItems,
+    };
+  }
 
   @override
   Future<Map<String, dynamic>> getYandex(String externalId) async => {
@@ -280,6 +312,10 @@ class FakeMetadataBridge implements MetadataBridgeClient {
     for (final entry in yf.entries) {
       rows.add({'field': entry.key, 'local': lf[entry.key], 'yandex': entry.value, 'available': entry.value != null, 'selected': entry.value != null});
     }
+    final artists = yf['artists'] is List ? (yf['artists'] as List).join(', ') : '';
+    final title = '${yf['title'] ?? ''}'.trim();
+    final suggestedName = title.isEmpty ? null : '${artists.isEmpty ? '' : '$artists - '}$title.mp3';
+    rows.add({'field': 'fileName', 'local': (local as Map)['fileName'], 'yandex': suggestedName, 'available': suggestedName != null, 'selected': suggestedName != null});
     rows.add({'field': 'artwork', 'local': false, 'yandex': true, 'available': true, 'selected': true});
     return {'local': local, 'yandex': yandex, 'rows': rows};
   }
@@ -297,11 +333,43 @@ class FakeMetadataBridge implements MetadataBridgeClient {
       'selectedFields': List<String>.from(selectedFields),
       'bindIdentity': bindIdentity,
     });
+    final document = Map<String, dynamic>.from((await getMetadata(localFileId))['metadata'] as Map);
+    final yandex = Map<String, dynamic>.from((await getYandex(externalId))['track'] as Map);
+    final yandexFields = Map<String, dynamic>.from(yandex['fields'] as Map? ?? const {});
+    final fields = Map<String, dynamic>.from(document['fields'] as Map? ?? const {});
+    for (final field in selectedFields) {
+      if (field != 'artwork' && field != 'fileName' && yandexFields[field] != null) {
+        fields[field] = yandexFields[field];
+      }
+    }
+    document['fields'] = fields;
+    var renamed = false;
+    if (selectedFields.contains('fileName')) {
+      final artists = yandexFields['artists'] is List ? (yandexFields['artists'] as List).join(', ') : '';
+      final title = '${yandexFields['title'] ?? ''}'.trim();
+      if (title.isNotEmpty) {
+        document['fileName'] = '${artists.isEmpty ? '' : '$artists - '}$title.mp3';
+        renamed = true;
+      }
+    }
+    if (bindIdentity) {
+      document['identity'] = {
+        'status': 'exact',
+        'method': 'exact_id',
+        'confidence': 1.0,
+        'reason': 'user_confirmed',
+        'externalId': externalId,
+      };
+    }
+    documents[localFileId] = document;
     return {
+      'metadata': document,
       'identity': bindIdentity
           ? {'status': 'matched', 'method': 'exact_id', 'confidence': 1.0, 'reason': 'user_confirmed'}
           : null,
       'matching': {'recalculated': 1},
+      'yandex': {'appliedFields': List<String>.from(selectedFields)},
+      'fileRename': {'changed': renamed, 'fileName': document['fileName']},
     };
   }
 }

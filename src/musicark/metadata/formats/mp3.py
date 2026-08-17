@@ -63,6 +63,40 @@ def _as_text_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+def _repair_cp1251_mojibake(value: str) -> str:
+    """Repair the common CP1251-as-Latin-1 display corruption conservatively.
+
+    The source ID3 frame is never rewritten by this read helper. A repaired value is
+    returned only when the decoded candidate is clearly Cyrillic and the original
+    contains no Cyrillic, so ordinary Latin comments are left untouched.
+    """
+    text = str(value or "")
+    if not text or any("А" <= char <= "я" or char in "Ёё" for char in text):
+        return text
+    try:
+        repaired = text.encode("latin-1").decode("cp1251")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    cyrillic = sum(1 for char in repaired if "А" <= char <= "я" or char in "Ёё")
+    letters = sum(1 for char in repaired if char.isalpha())
+    high_bytes = sum(1 for char in text if 0xC0 <= ord(char) <= 0xFF)
+    if cyrillic >= 4 and letters > 0 and cyrillic / letters >= 0.55 and high_bytes >= 4:
+        return repaired
+    return text
+
+
+def _comment_text(frame: Any) -> str | None:
+    raw = getattr(frame, "text", None)
+    if isinstance(raw, (list, tuple)):
+        parts = [str(item) for item in raw if str(item) != ""]
+        text = "\n".join(parts).strip()
+    else:
+        text = str(raw or "").strip()
+    if not text:
+        return None
+    return _repair_cp1251_mojibake(text)
+
+
 class Mp3MetadataAdapter(MetadataFormatAdapter):
     """Full v8.2.0 writer. All mutations happen on a caller-owned temporary copy."""
 
@@ -91,7 +125,7 @@ class Mp3MetadataAdapter(MetadataFormatAdapter):
 
         comments = tags.getall("COMM")
         lyrics_frames = tags.getall("USLT")
-        comment = str(getattr(comments[0], "text", "")).strip() if comments else None
+        comment = _comment_text(comments[0]) if comments else None
         lyrics = str(getattr(lyrics_frames[0], "text", "")).strip() if lyrics_frames else None
         explicit_raw = _txxx(tags, "MUSICARK_EXPLICIT") or _txxx(tags, "ITUNESADVISORY")
         explicit = None
@@ -129,7 +163,31 @@ class Mp3MetadataAdapter(MetadataFormatAdapter):
 
         for key, frame in tags.items():
             frame_id = str(getattr(frame, "FrameID", key)).split(":", 1)[0]
-            if isinstance(frame, TextFrame):
+            if frame_id == "COMM":
+                comment_value = _comment_text(frame)
+                all_tags.append(
+                    {
+                        "key": str(key),
+                        "frameId": "COMM",
+                        "description": str(getattr(frame, "desc", "")) or None,
+                        "values": [comment_value] if comment_value is not None else [],
+                        "editable": True,
+                        "provenance": False,
+                    }
+                )
+            elif frame_id == "USLT":
+                text = str(getattr(frame, "text", "") or "").strip()
+                all_tags.append(
+                    {
+                        "key": str(key),
+                        "frameId": "USLT",
+                        "description": str(getattr(frame, "desc", "")) or None,
+                        "values": [text] if text else [],
+                        "editable": True,
+                        "provenance": False,
+                    }
+                )
+            elif isinstance(frame, TextFrame):
                 description = str(getattr(frame, "desc", "")) or None
                 all_tags.append(
                     {
@@ -139,28 +197,6 @@ class Mp3MetadataAdapter(MetadataFormatAdapter):
                         "values": _texts(frame),
                         "editable": not bool(description in PROVENANCE_DESCRIPTIONS),
                         "provenance": bool(description in PROVENANCE_DESCRIPTIONS),
-                    }
-                )
-            elif frame_id == "COMM":
-                all_tags.append(
-                    {
-                        "key": str(key),
-                        "frameId": "COMM",
-                        "description": str(getattr(frame, "desc", "")) or None,
-                        "values": [str(getattr(frame, "text", ""))],
-                        "editable": True,
-                        "provenance": False,
-                    }
-                )
-            elif frame_id == "USLT":
-                all_tags.append(
-                    {
-                        "key": str(key),
-                        "frameId": "USLT",
-                        "description": str(getattr(frame, "desc", "")) or None,
-                        "values": [str(getattr(frame, "text", ""))],
-                        "editable": True,
-                        "provenance": False,
                     }
                 )
             else:

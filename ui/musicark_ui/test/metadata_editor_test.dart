@@ -7,6 +7,7 @@ import 'package:musicark_ui/metadata_editor_page.dart';
 Map<String, dynamic> localDocument() => {
       'localFileId': 2,
       'path': r'C:\Music\Призраков Не Существует.mp3',
+      'fileName': 'Призраков Не Существует.mp3',
       'format': 'mp3',
       'writable': true,
       'fields': {
@@ -76,9 +77,11 @@ void main() {
     return bridge;
   }
 
+
   testWidgets('shows artwork placeholder, basic fields, multiple artists and advanced tags', (tester) async {
     await openEditor(tester);
     expect(find.byKey(const Key('metadata-editor-page')), findsOneWidget);
+    expect(find.byKey(const Key('metadata-field-fileName')), findsOneWidget);
     expect(find.byKey(const Key('metadata-field-title')), findsOneWidget);
     expect(find.text('drivemusic.me'), findsOneWidget);
     expect(find.text('Second Artist'), findsOneWidget);
@@ -101,6 +104,7 @@ void main() {
     expect(bridge.updates, hasLength(1));
     expect((bridge.updates.single['changes'] as Map)['title'], 'Исправленное название');
     expect(bridge.applies, isEmpty);
+    expect(find.byKey(const Key('metadata-success')), findsOneWidget);
   });
 
   testWidgets('Yandex search opens compare and Apply Metadata stays non-exact', (tester) async {
@@ -109,7 +113,15 @@ void main() {
     await tester.tap(find.byKey(const Key('metadata-yandex-search')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('yandex-search-dialog')), findsOneWidget);
+    expect(find.byKey(const Key('yandex-search-title')), findsOneWidget);
+    expect(find.byKey(const Key('yandex-search-artist')), findsOneWidget);
     expect(find.byKey(const Key('yandex-result-123456')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('yandex-search-title')), 'Нужное название');
+    await tester.enterText(find.byKey(const Key('yandex-search-artist')), 'Нужный автор');
+    await tester.tap(find.byKey(const Key('yandex-search-run')));
+    await tester.pumpAndSettle();
+    expect(bridge.searches.last['title'], 'Нужное название');
+    expect(bridge.searches.last['artist'], 'Нужный автор');
 
     await tester.tap(find.byKey(const Key('yandex-result-123456')));
     await tester.pumpAndSettle();
@@ -118,6 +130,7 @@ void main() {
     expect(find.byKey(const Key('compare-select-none')), findsOneWidget);
     expect(find.byKey(const Key('compare-apply-metadata')), findsOneWidget);
     expect(find.byKey(const Key('compare-apply-bind')), findsOneWidget);
+    expect(find.byKey(const Key('compare-field-fileName')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('compare-select-none')));
     await tester.tap(find.byKey(const Key('compare-select-all')));
@@ -125,6 +138,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(bridge.applies, hasLength(1));
     expect(bridge.applies.single['bindIdentity'], isFalse);
+    expect(find.byKey(const Key('metadata-success')), findsOneWidget);
+    expect(find.textContaining('Применены поля:'), findsOneWidget);
+  });
+
+  testWidgets('filename can be edited and suggested from current artist and title', (tester) async {
+    final bridge = await openEditor(tester);
+    await tester.enterText(find.byKey(const Key('metadata-field-title')), 'Новая песня');
+    await tester.scrollUntilVisible(find.byKey(const Key('metadata-suggest-filename')), 400);
+    await tester.tap(find.byKey(const Key('metadata-suggest-filename')));
+    await tester.pump();
+    final field = tester.widget<TextField>(find.byKey(const Key('metadata-field-fileName')));
+    expect(field.controller!.text, 'Новая песня.mp3');
+    await tester.scrollUntilVisible(find.byKey(const Key('metadata-save')), 600);
+    await tester.tap(find.byKey(const Key('metadata-save')));
+    await tester.pumpAndSettle();
+    expect((bridge.updates.single['changes'] as Map)['fileName'], 'Новая песня.mp3');
   });
 
   testWidgets('Apply + Bind explicitly requests exact user-confirmed identity', (tester) async {
@@ -139,5 +168,7 @@ void main() {
     expect(bridge.applies, hasLength(1));
     expect(bridge.applies.single['bindIdentity'], isTrue);
     expect(bridge.applies.single['externalId'], '123456');
+    expect(find.byKey(const Key('metadata-success')), findsOneWidget);
+    expect(find.textContaining('Exact-связь'), findsOneWidget);
   });
 }

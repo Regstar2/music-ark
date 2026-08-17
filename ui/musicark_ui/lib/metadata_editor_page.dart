@@ -44,6 +44,7 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
   bool _removeArtwork = false;
   String? _artworkImagePath;
   String? _error;
+  String? _success;
 
   @override
   void initState() {
@@ -80,6 +81,7 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
       for (final name in _scalarFields) {
         _controller(name).text = fields[name] == null ? '' : '${fields[name]}';
       }
+      _controller('fileName').text = '${document['fileName'] ?? ''}';
       _artists = _strings(fields['artists']);
       _albumArtists = _strings(fields['albumArtists']);
       _genres = _strings(fields['genres']);
@@ -145,6 +147,9 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
     for (final entry in current.entries) {
       if (!_same(entry.value, original[entry.key])) result[entry.key] = entry.value;
     }
+    final currentFileName = _controller('fileName').text.trim();
+    final originalFileName = '${_document?['fileName'] ?? ''}'.trim();
+    if (currentFileName != originalFileName) result['fileName'] = currentFileName;
     if (_artworkImagePath != null) result['artworkImagePath'] = _artworkImagePath;
     if (_removeArtwork) result['removeArtwork'] = true;
     if (_advancedTextFrames.isNotEmpty) result['textFrames'] = _advancedTextFrames;
@@ -152,18 +157,49 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
     return result;
   }
 
+  String _resultMessage(
+    Map<String, dynamic> response, {
+    required bool bindIdentity,
+    required bool fromYandex,
+  }) {
+    final yandex = Map<String, dynamic>.from(response['yandex'] as Map? ?? const {});
+    final fields = (yandex['appliedFields'] as List? ?? const []).map((value) => '$value').toList();
+    final rename = Map<String, dynamic>.from(response['fileRename'] as Map? ?? const {});
+    final parts = <String>[];
+    if (fromYandex) {
+      parts.add(fields.isEmpty
+          ? 'Данные Яндекс Музыки применены.'
+          : 'Применены поля: ${fields.map(_fieldLabel).join(', ')}.');
+    } else {
+      parts.add('Изменения сохранены в аудиофайл.');
+    }
+    if (rename['changed'] == true) {
+      parts.add('Файл переименован: ${rename['fileName'] ?? '—'}.');
+    }
+    parts.add('Локальный индекс обновлён, Matching пересчитан.');
+    if (bindIdentity) {
+      parts.add('Exact-связь с выбранным треком Яндекс Музыки сохранена.');
+    }
+    return parts.join(' ');
+  }
+
+  void _setSuccess(String message) {
+    if (!mounted) return;
+    setState(() => _success = message);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _save() async {
     setState(() {
       _busy = true;
       _error = null;
+      _success = null;
     });
     try {
-      await widget.bridge.updateMetadata(widget.localFileId, _changes());
+      final response = await widget.bridge.updateMetadata(widget.localFileId, _changes());
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Метаданные сохранены. Файл переиндексирован, Matching пересчитан.')),
-      );
+      _setSuccess(_resultMessage(response, bindIdentity: false, fromYandex: false));
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -184,8 +220,17 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
     });
   }
 
+  String _searchArtistHint() {
+    for (final value in _artists) {
+      final clean = value.trim();
+      if (clean.isNotEmpty && clean.toLowerCase() != 'drivemusic.me') return clean;
+    }
+    return '';
+  }
+
   Future<void> _searchYandex() async {
-    final query = TextEditingController();
+    final title = TextEditingController(text: _controller('title').text.trim());
+    final artist = TextEditingController(text: _searchArtistHint());
     var items = <Map<String, dynamic>>[];
     var loading = false;
     var initialSearch = false;
@@ -203,14 +248,16 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
             try {
               final response = await widget.bridge.searchYandex(
                 widget.localFileId,
-                query: query.text.trim(),
+                title: title.text.trim(),
+                artist: artist.text.trim(),
               );
               if (!dialogContext.mounted) return;
               items = (response['items'] as List? ?? const [])
                   .whereType<Map>()
                   .map((item) => Map<String, dynamic>.from(item))
                   .toList();
-              if (query.text.trim().isEmpty) query.text = '${response['query'] ?? ''}';
+              if (title.text.trim().isEmpty) title.text = '${response['titleQuery'] ?? ''}';
+              if (artist.text.trim().isEmpty) artist.text = '${response['artistQuery'] ?? ''}';
             } on MusicArkBridgeException catch (error) {
               searchError = error.message;
             } finally {
@@ -226,22 +273,47 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
             key: const Key('yandex-search-dialog'),
             title: const Text('Получить данные из Яндекс Музыки'),
             content: SizedBox(
-              width: 760,
-              height: 560,
+              width: 820,
+              height: 600,
               child: Column(
                 children: [
-                  TextField(
-                    key: const Key('yandex-search-query'),
-                    controller: query,
-                    onSubmitted: (_) => runSearch(),
-                    decoration: InputDecoration(
-                      labelText: 'Поиск',
-                      suffixIcon: IconButton(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('yandex-search-title'),
+                          controller: title,
+                          onSubmitted: (_) => runSearch(),
+                          decoration: const InputDecoration(
+                            labelText: 'Название песни',
+                            prefixIcon: Icon(Icons.music_note_outlined),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          key: const Key('yandex-search-artist'),
+                          controller: artist,
+                          onSubmitted: (_) => runSearch(),
+                          decoration: const InputDecoration(
+                            labelText: 'Исполнитель',
+                            prefixIcon: Icon(Icons.person_outline),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        key: const Key('yandex-search-run'),
+                        tooltip: 'Искать',
                         onPressed: loading ? null : runSearch,
                         icon: const Icon(Icons.search),
                       ),
-                    ),
+                    ],
                   ),
+                  const SizedBox(height: 8),
                   if (loading) const LinearProgressIndicator(key: Key('yandex-search-loading')),
                   if (searchError != null)
                     Text(searchError!, key: const Key('yandex-search-error')),
@@ -285,8 +357,8 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
         },
       ),
     );
-    query.dispose();
-    if (mounted) await _load();
+    title.dispose();
+    artist.dispose();
   }
 
   Future<bool> _showCompare(String externalId) async {
@@ -314,12 +386,16 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
                     applyError = null;
                   });
                   try {
-                    await widget.bridge.applyYandex(
+                    final response = await widget.bridge.applyYandex(
                       widget.localFileId,
                       externalId,
                       selected.entries.where((entry) => entry.value).map((entry) => entry.key).toList(),
                       bindIdentity: bind,
                     );
+                    await _load();
+                    if (mounted) {
+                      _setSuccess(_resultMessage(response, bindIdentity: bind, fromYandex: true));
+                    }
                     if (dialogContext.mounted) Navigator.pop(dialogContext, true);
                   } on MusicArkBridgeException catch (error) {
                     applyError = error.message;
@@ -374,7 +450,7 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
                                   onChanged: row['available'] == true && !applying
                                       ? (value) => setDialogState(() => selected['${row['field']}'] = value == true)
                                       : null,
-                                  title: Text('${row['field']}'),
+                                  title: Text(_fieldLabel('${row['field']}')),
                                   subtitle: Text('LOCAL: ${_display(row['local'])}\nYANDEX: ${_display(row['yandex'])}'),
                                   controlAffinity: ListTileControlAffinity.leading,
                                 ),
@@ -407,6 +483,24 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
       return false;
     }
   }
+
+  String _fieldLabel(String field) => switch (field) {
+        'title' => 'Название',
+        'artists' => 'Исполнители',
+        'album' => 'Альбом',
+        'albumArtists' => 'Исполнители альбома',
+        'releaseDate' => 'Дата',
+        'year' => 'Год',
+        'genres' => 'Жанры',
+        'isrc' => 'ISRC',
+        'publisher' => 'Publisher',
+        'label' => 'Label',
+        'copyright' => 'Copyright',
+        'explicit' => 'Explicit',
+        'artwork' => 'Обложка',
+        'fileName' => 'Имя файла',
+        _ => field,
+      };
 
   String _display(dynamic value) {
     if (value == null) return '—';
@@ -483,6 +577,22 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
     values.dispose();
   }
 
+  void _suggestFileNameFromFields() {
+    final title = _controller('title').text.trim();
+    var artist = '';
+    for (final value in _artists) {
+      final clean = value.trim();
+      if (clean.isNotEmpty && clean.toLowerCase() != 'drivemusic.me') {
+        artist = clean;
+        break;
+      }
+    }
+    if (title.isEmpty) return;
+    final suffix = '.mp3';
+    final stem = artist.isEmpty ? title : '$artist - $title';
+    setState(() => _controller('fileName').text = '$stem$suffix');
+  }
+
   Widget _field(String name, String label, {int maxLines = 1}) => Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
@@ -521,6 +631,15 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Text(_error!, key: const Key('metadata-error')),
+                    ),
+                  if (_success != null)
+                    Card(
+                      key: const Key('metadata-success'),
+                      child: ListTile(
+                        leading: const Icon(Icons.check_circle_outline),
+                        title: const Text('Изменения применены'),
+                        subtitle: Text(_success!),
+                      ),
                     ),
                   if (!writable)
                     const Card(
@@ -568,6 +687,22 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
                         width: 760,
                         child: Column(
                           children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: _field('fileName', 'Имя файла')),
+                                const SizedBox(width: 8),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: OutlinedButton.icon(
+                                    key: const Key('metadata-suggest-filename'),
+                                    onPressed: writable ? _suggestFileNameFromFields : null,
+                                    icon: const Icon(Icons.auto_fix_high_outlined),
+                                    label: const Text('Автор - название'),
+                                  ),
+                                ),
+                              ],
+                            ),
                             _field('title', 'Название'),
                             Row(children: [Expanded(child: _field('subtitle', 'Subtitle')), const SizedBox(width: 12), Expanded(child: _field('version', 'Version'))]),
                             _ListEditor(key: const Key('metadata-artists'), label: 'Исполнители', values: _artists, enabled: writable, onChanged: (values) => setState(() => _artists = values)),

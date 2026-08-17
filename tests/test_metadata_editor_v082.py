@@ -162,6 +162,7 @@ class MetadataTransactionTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(adapter.read(path)["fields"]["title"], "Original")
 
+
     def test_metadata_only_repair_reindexes_and_rematches_without_exact_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -317,6 +318,100 @@ class MetadataTransactionTests(unittest.TestCase):
             self.assertEqual(coverage.summary()["covered"], 1)
             self.assertEqual(coverage.summary()["missing"], 0)
             self.assertEqual(coverage.tracks(status="missing")["count"], 0)
+
+
+class MetadataEditorFollowupTests(unittest.TestCase):
+    def test_comment_reader_flattens_values_and_repairs_cp1251_mojibake(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "comment.mp3"
+            _make_mp3(path)
+            from mutagen.id3 import COMM, ID3
+
+            expected = "Только для некоммерческого использования"
+            broken = expected.encode("cp1251").decode("latin-1")
+            tags = ID3(str(path))
+            tags.add(COMM(encoding=3, lang="eng", desc="MusicArk", text=[broken]))
+            tags.save(str(path), v2_version=4)
+
+            parsed = Mp3MetadataAdapter().read(path)
+            self.assertEqual(parsed["fields"]["comment"], expected)
+            comment_rows = [row for row in parsed["allTags"] if row["frameId"] == "COMM"]
+            self.assertEqual(comment_rows[0]["values"], [expected])
+            self.assertNotIn("['", parsed["fields"]["comment"])
+
+    def test_filename_edit_renames_file_and_preserves_local_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "music"
+            root.mkdir()
+            old_path = root / "bad-name.mp3"
+            _make_mp3(old_path)
+            adapter = Mp3MetadataAdapter()
+            adapter.apply(old_path, {"title": "Title", "artists": ["Artist"]})
+            before_duration = adapter.validate_audio(old_path)
+
+            local = LocalLibraryService(base_dir=base)
+            local.add_root(root)
+            local.scan()
+            before = local.tracks(limit=10)["items"][0]
+            file_id = int(before["id"])
+
+            result = MetadataEditorService(base_dir=base).update(
+                file_id, {"fileName": "Artist - Title.mp3"}, confirm=True
+            )
+            new_path = root / "Artist - Title.mp3"
+            self.assertFalse(old_path.exists())
+            self.assertTrue(new_path.exists())
+            self.assertTrue(result["fileRename"]["changed"])
+            self.assertEqual(result["fileRename"]["fileName"], "Artist - Title.mp3")
+            self.assertAlmostEqual(adapter.validate_audio(new_path), before_duration, delta=0.1)
+
+            after = local.track(file_id)["track"]
+            self.assertEqual(int(after["id"]), file_id)
+            self.assertEqual(after["fileName"], "Artist - Title.mp3")
+            self.assertEqual(Path(after["path"]), new_path.resolve())
+
+    def test_filename_collision_is_rejected_before_audio_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "music"
+            root.mkdir()
+            first = root / "first.mp3"
+            second = root / "second.mp3"
+            _make_mp3(first)
+            _make_mp3(second)
+            Mp3MetadataAdapter().apply(first, {"title": "First", "artists": ["Artist"]})
+            Mp3MetadataAdapter().apply(second, {"title": "Second", "artists": ["Artist"]})
+            original = first.read_bytes()
+
+            local = LocalLibraryService(base_dir=base)
+            local.add_root(root)
+            local.scan()
+            first_id = next(
+                int(item["id"])
+                for item in local.tracks(limit=10)["items"]
+                if item["fileName"] == "first.mp3"
+            )
+            with self.assertRaises(MetadataEditorError):
+                MetadataEditorService(base_dir=base).update(
+                    first_id, {"fileName": "second.mp3"}, confirm=True
+                )
+            self.assertEqual(first.read_bytes(), original)
+            self.assertTrue(second.exists())
+
+    def test_yandex_filename_suggestion_uses_artist_dash_title(self) -> None:
+        from musicark.download.metadata import YandexTrackMetadata
+
+        metadata = YandexTrackMetadata(
+            provider_id="yandex_music",
+            external_id="42",
+            title="Название",
+            artists=("Автор",),
+        )
+        self.assertEqual(
+            MetadataEditorService._suggested_filename(metadata, ".mp3"),
+            "Автор - Название.mp3",
+        )
 
 
 if __name__ == "__main__":

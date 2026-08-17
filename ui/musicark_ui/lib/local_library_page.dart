@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'content_label_bridge.dart';
 import 'desktop_file_actions.dart';
 import 'folder_picker.dart';
 import 'metadata_bridge.dart';
@@ -15,13 +16,17 @@ class LocalLibraryPage extends StatefulWidget {
     LocalFolderPicker? folderPicker,
     this.fileActions = const SystemLocalFileActions(),
     MetadataBridgeClient? metadataBridge,
+    ContentLabelBridgeClient? contentLabelBridge,
   })  : folderPicker = folderPicker ?? const SystemLocalFolderPicker(),
-        metadataBridge = metadataBridge ?? (bridge is MusicArkBridge ? const MetadataBridge() : null);
+        metadataBridge = metadataBridge ?? (bridge is MusicArkBridge ? const MetadataBridge() : null),
+        contentLabelBridge = contentLabelBridge ??
+            (bridge is MusicArkBridge ? const ContentLabelBridge() : null);
 
   final MusicArkBridgeClient bridge;
   final LocalFolderPicker folderPicker;
   final LocalFileActions fileActions;
   final MetadataBridgeClient? metadataBridge;
+  final ContentLabelBridgeClient? contentLabelBridge;
 
   @override
   State<LocalLibraryPage> createState() => _LocalLibraryPageState();
@@ -41,7 +46,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    _activate();
   }
 
   @override
@@ -53,6 +58,78 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   List<Map<String, dynamic>> _maps(dynamic value) => value is List
       ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(growable: false)
       : <Map<String, dynamic>>[];
+
+
+  Future<void> _activate() async {
+    try {
+      final rootsPayload = await widget.bridge.localRoots();
+      final roots = _maps(rootsPayload['items']);
+      if (!mounted) return;
+      if (roots.isEmpty) {
+        await _reload();
+        return;
+      }
+      // The shell recreates this page on every Local Library activation. Scanning
+      // here therefore keeps the index current without turning background pages
+      // into filesystem writers.
+      await _scan();
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.message;
+        });
+      }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _withContentLabels(
+    List<Map<String, dynamic>> tracks,
+  ) async {
+    final labels = widget.contentLabelBridge;
+    if (labels == null || tracks.isEmpty) return tracks;
+    final ids = tracks
+        .map((track) => int.tryParse('${track['id']}'))
+        .whereType<int>()
+        .toList(growable: false);
+    try {
+      final payload = await labels.batch(localFileIds: ids);
+      final raw = payload['local'];
+      final byId = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      return tracks.map((track) {
+        final copy = Map<String, dynamic>.from(track);
+        final label = byId['${track['id']}'];
+        if (label != null) copy['contentLabel'] = '$label';
+        return copy;
+      }).toList(growable: false);
+    } on MusicArkBridgeException {
+      return tracks;
+    }
+  }
+
+  Future<void> _setContentLabel(Map<String, dynamic> track, String label) async {
+    final labels = widget.contentLabelBridge;
+    final id = int.tryParse('${track['id']}');
+    if (labels == null || id == null) return;
+    try {
+      await labels.setLocal(id, label);
+      if (!mounted) return;
+      setState(() {
+        _tracks = _tracks.map((item) {
+          if ('${item['id']}' != '$id') return item;
+          final copy = Map<String, dynamic>.from(item);
+          if (label.isEmpty) {
+            copy.remove('contentLabel');
+          } else {
+            copy['contentLabel'] = label;
+          }
+          return copy;
+        }).toList(growable: false);
+      });
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    }
+  }
 
   Future<List<Map<String, dynamic>>> _withArtwork(List<Map<String, dynamic>> tracks) async {
     final metadata = widget.metadataBridge;
@@ -69,6 +146,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         return copy;
       }).toList(growable: false);
     } on MusicArkBridgeException {
+      // Artwork is optional decoration. A cache/read failure must not hide Local Library.
       return tracks;
     }
   }
@@ -87,7 +165,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         search: _search.text.trim(),
         sort: _sort,
       );
-      final tracks = await _withArtwork(_maps(tracksPayload['items']));
+      var tracks = await _withArtwork(_maps(tracksPayload['items']));
+      tracks = await _withContentLabels(tracks);
       if (!mounted) return;
       setState(() {
         _roots = _maps(rootsPayload['items']);
@@ -111,7 +190,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         search: _search.text.trim(),
         sort: _sort,
       );
-      final items = await _withArtwork(_maps(payload['items']));
+      var items = await _withArtwork(_maps(payload['items']));
+      items = await _withContentLabels(items);
       if (!mounted) return;
       setState(() {
         _tracks = [..._tracks, ...items];
@@ -474,6 +554,32 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Text(_duration(track['durationSeconds'])),
+                            if ('${track['contentLabel'] ?? ''}'.isNotEmpty)
+                              Chip(
+                                key: Key('local-content-label-${track['id']}'),
+                                visualDensity: VisualDensity.compact,
+                                label: Text(
+                                  track['contentLabel'] == 'censored'
+                                      ? 'ЦЕНЗУРА'
+                                      : 'ОРИГИНАЛ',
+                                ),
+                              ),
+                            if (widget.contentLabelBridge != null)
+                              PopupMenuButton<String>(
+                                key: Key('local-content-label-menu-${track['id']}'),
+                                tooltip: 'Пометить версию трека',
+                                initialValue: '${track['contentLabel'] ?? ''}'.isEmpty
+                                    ? null
+                                    : '${track['contentLabel']}',
+                                onSelected: (value) => _setContentLabel(track, value),
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(value: 'original', child: Text('ОРИГИНАЛ')),
+                                  PopupMenuItem(value: 'censored', child: Text('ЦЕНЗУРА')),
+                                  PopupMenuDivider(),
+                                  PopupMenuItem(value: '', child: Text('Снять пометку')),
+                                ],
+                                icon: const Icon(Icons.sell_outlined),
+                              ),
                             if (widget.metadataBridge != null)
                               IconButton(
                                 key: Key('local-edit-${track['id']}'),
@@ -515,7 +621,7 @@ class _LocalArtwork extends StatelessWidget {
         child: file != null && file.existsSync()
             ? Image.file(file, fit: BoxFit.cover, cacheWidth: size.round(), cacheHeight: size.round())
             : ColoredBox(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: Icon(Icons.album_outlined, size: size * .6),
               ),
       ),

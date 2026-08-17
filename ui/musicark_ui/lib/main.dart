@@ -13,6 +13,7 @@ import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
+import 'yandex_content_labels.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -165,7 +166,18 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                     children: [
                       // Keep the Yandex page stateful: recreating it would lose the
                       // currently opened playlist and could change matching scope.
-                      yandex.MusicArkHomePage(bridge: widget.bridge),
+                      Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: YandexContentLabelsButton(bridge: widget.bridge),
+                            ),
+                          ),
+                          Expanded(child: yandex.MusicArkHomePage(bridge: widget.bridge)),
+                        ],
+                      ),
                       _localLibraryOpened
                           ? LocalLibraryPage(
                               key: ValueKey('local-${_activationRevision[1]}'),

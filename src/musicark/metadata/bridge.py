@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-file-id", type=int, default=None)
     parser.add_argument("--external-id", default="")
     parser.add_argument("--query", default="")
+    parser.add_argument("--title", default="")
+    parser.add_argument("--artist", default="")
     parser.add_argument("--bind-identity", action="store_true")
     return parser
 
@@ -97,7 +99,9 @@ def main() -> int:
                 raise MetadataEditorError("Artwork batch ids must be a JSON array.")
             payload = service.artwork_batch([int(item) for item in values])
         elif args.command == "yandex_metadata_search":
-            payload = service.yandex_search(_file_id(args.local_file_id), args.query)
+            payload = service.yandex_search(
+                _file_id(args.local_file_id), title=args.title, artist=args.artist, query=args.query
+            )
         elif args.command == "yandex_metadata_get":
             payload = service.yandex_get(args.external_id)
         elif args.command == "local_metadata_compare_yandex":

@@ -29,4 +29,4 @@ Version notes:
 - `docs/versions/v0.8.1.md`
 - `docs/versions/v0.8.2.md`
 
-v0.8.2 adds an explicit transactional editor for existing local MP3 metadata and artwork, Yandex Track search/compare/import, and a separate user-confirmed exact identity action. Ordinary Scan/Matching/Coverage/Sync remain read-only with respect to user audio files.
+v0.8.2 adds an explicit transactional editor for existing local MP3 metadata/artwork/filename, structured Yandex Track search/compare/import, app-level ORIGINAL/CENSORED marks, and a separate user-confirmed exact identity action. Local Library scans automatically when its tab is activated; ordinary Scan/Matching/Coverage/Sync still never rewrite user audio files.

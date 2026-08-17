@@ -16,7 +16,9 @@ from musicark.core.config import load_config
 from musicark.core.errors import MusicArkError
 from musicark.coverage.service import LibraryCoverageService
 from musicark.download.metadata import YandexTrackMetadata
+from musicark.download.provider import sanitize_filename
 from musicark.local_library.service import LocalLibraryService
+from musicark.storage.local_library_storage import normalize_local_path
 from musicark.matching.scoring import MatchScorer
 from musicark.provenance import (
     MUSICARK_EXTERNAL_ID,
@@ -153,6 +155,7 @@ class MetadataEditorService:
             writable=writable, fields=fields, all_tags=all_tags, artwork=art,
             identity=self._identity_payload(row),
         ).as_dict()
+        document["fileName"] = path.name
         document["technical"] = {
             "durationSeconds": row.get("duration_seconds"),
             "bitrate": row.get("bitrate"),
@@ -205,6 +208,75 @@ class MetadataEditorService:
             return data, "image/jpeg"
         raise MetadataEditorError("Only PNG and JPEG artwork is supported for MP3.")
 
+    def _target_path_for_filename(
+        self, row: dict[str, Any], path: Path, requested: Any
+    ) -> Path:
+        raw = str(requested or "").strip()
+        if not raw:
+            raise MetadataEditorError("File name cannot be empty.")
+        if Path(raw).name != raw:
+            raise MetadataEditorError("File name must not contain a directory path.")
+        if not Path(raw).suffix:
+            raw += path.suffix
+        filename = sanitize_filename(raw, fallback=path.name)
+        if Path(filename).suffix.casefold() != path.suffix.casefold():
+            raise MetadataEditorError("Changing the audio file extension is not allowed.")
+        target = path.with_name(filename).resolve(strict=False)
+        if target.parent != path.parent:
+            raise MetadataEditorError("File rename must stay inside the current folder.")
+        normalized = normalize_local_path(target)
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                collision = conn.execute(
+                    "SELECT id FROM local_audio_files WHERE normalized_path=? AND id<>?",
+                    (normalized, int(row["id"])),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise MetadataEditorError("Failed to validate the target file name.") from exc
+        if collision is not None or (target != path and target.exists()):
+            raise MetadataEditorError(f"A file named '{filename}' already exists.")
+        return target
+
+    def _update_index_path(self, row: dict[str, Any], old_path: Path, new_path: Path) -> None:
+        if new_path == old_path:
+            return
+        normalized = normalize_local_path(new_path)
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        UPDATE local_audio_files
+                        SET path=?, normalized_path=?, file_name=?, extension=?, updated_at=datetime('now')
+                        WHERE id=?
+                        """,
+                        (str(new_path), normalized, new_path.name, new_path.suffix.casefold(), int(row["id"])),
+                    )
+                    # Legacy local track_sources use the path as provider identity.
+                    conn.execute(
+                        """
+                        UPDATE OR IGNORE track_sources
+                        SET external_id=?, url=?
+                        WHERE provider_id='local_library' AND external_id=?
+                        """,
+                        (str(new_path), str(new_path), str(old_path)),
+                    )
+        except sqlite3.Error as exc:
+            raise MetadataEditorError("The file was renamed, but the Local Library path could not be updated.") from exc
+        row["path"] = str(new_path)
+        row["file_name"] = new_path.name
+        row["extension"] = new_path.suffix.casefold()
+
+    @staticmethod
+    def _suggested_filename(metadata: YandexTrackMetadata, suffix: str) -> str | None:
+        title = str(metadata.title or "").strip()
+        if not title:
+            return None
+        artists = ", ".join(str(item).strip() for item in metadata.artists if str(item).strip())
+        stem = f"{artists} - {title}" if artists else title
+        extension = suffix if suffix.startswith(".") else f".{suffix}"
+        return sanitize_filename(f"{stem}{extension}", fallback=f"{title}{extension}")
+
     def _reindex(self, row: dict[str, Any], path: Path) -> dict[str, Any]:
         root_id = row.get("library_root_id")
         if root_id is None:
@@ -237,7 +309,14 @@ class MetadataEditorService:
         if confirm is not True:
             raise MetadataEditorError("Metadata writes require explicit confirmation.")
         row = self._row(local_file_id)
+        changes = dict(changes)
         path = Path(str(row["path"])).resolve(strict=False)
+        requested_file_name = changes.pop("fileName", None) if "fileName" in changes else None
+        final_path = (
+            self._target_path_for_filename(row, path, requested_file_name)
+            if requested_file_name is not None
+            else path
+        )
         if not self._adapter.supports(path):
             raise MetadataEditorError(
                 f"Editing '{path.suffix}' is not implemented yet. MP3 is the full v8.2.0 write adapter."
@@ -252,6 +331,7 @@ class MetadataEditorService:
         previous_fingerprint = self._matching.local_library_fingerprint()
         original_duration = self._adapter.validate_audio(path)
         temp = path.with_name(f".{path.stem}.musicark-edit-{uuid.uuid4().hex}{path.suffix}")
+        backup: Path | None = None
         replaced = False
         try:
             shutil.copy2(path, temp)
@@ -268,13 +348,32 @@ class MetadataEditorService:
             # Read-back validation happens before replacement; malformed written tags
             # therefore cannot damage the original file.
             self._adapter.read(temp)
-            os.replace(temp, path)
+            if final_path == path:
+                os.replace(temp, path)
+            else:
+                backup = path.with_name(f".{path.name}.musicark-rename-backup-{uuid.uuid4().hex}")
+                os.replace(path, backup)
+                try:
+                    os.replace(temp, final_path)
+                except Exception:
+                    os.replace(backup, path)
+                    backup = None
+                    raise
+                try:
+                    backup.unlink(missing_ok=True)
+                finally:
+                    backup = None
             replaced = True
         except Exception as exc:  # noqa: BLE001
             try:
                 temp.unlink(missing_ok=True)
             except OSError:
                 pass
+            if backup is not None and backup.exists() and not path.exists():
+                try:
+                    os.replace(backup, path)
+                except OSError:
+                    pass
             self._audit.append(
                 AuditEvent(
                     event_type="local_metadata_update", entity_type="local_audio_file",
@@ -289,9 +388,18 @@ class MetadataEditorService:
         # The filesystem transaction is complete. Everything below updates derived
         # MusicArk state for this same file; it never walks or hashes the whole library.
         try:
-            indexed = self._reindex(row, path)
+            try:
+                self._update_index_path(row, path, final_path)
+            except Exception:
+                if final_path != path and final_path.exists() and not path.exists():
+                    try:
+                        os.replace(final_path, path)
+                    except OSError:
+                        pass
+                raise
+            indexed = self._reindex(row, final_path)
             refreshed_artwork = self._artwork.ensure_local(
-                int(local_file_id), path,
+                int(local_file_id), final_path,
                 source_external_id=(str(row["source_external_id"]) if row.get("source_external_id") else None),
             )
             matching = self._refresh.run(int(local_file_id), previous_fingerprint=previous_fingerprint)
@@ -302,9 +410,10 @@ class MetadataEditorService:
                     entity_id=str(local_file_id), status="success",
                     details=json.dumps(
                         {
-                            "path": str(path), "changedFields": sorted(changes.keys()),
+                            "path": str(final_path), "changedFields": sorted(changes.keys()),
                             "artworkChanged": bool(artwork_data is not None or remove_artwork),
                             "provenanceWritten": provenance is not None,
+                            "fileRenamed": final_path != path,
                             "singleFileReindex": True,
                         },
                         ensure_ascii=False,
@@ -316,6 +425,12 @@ class MetadataEditorService:
                 "index": indexed,
                 "matching": matching,
                 "artwork": refreshed_artwork.as_dict(),
+                "fileRename": {
+                    "changed": final_path != path,
+                    "oldPath": str(path),
+                    "newPath": str(final_path),
+                    "fileName": final_path.name,
+                },
             }
         except Exception as exc:  # noqa: BLE001
             self._audit.append(
@@ -358,21 +473,39 @@ class MetadataEditorService:
             "copyright": metadata.copyright,
         }
 
-    def _query_hint(self, document: dict[str, Any]) -> str:
+    def _query_hints(self, document: dict[str, Any]) -> tuple[str, str]:
         fields = document.get("fields") or {}
         title = str(fields.get("title") or "").strip()
         artists = [str(item).strip() for item in (fields.get("artists") or []) if str(item).strip()]
         garbage = {"unknown artist", "unknown", "drivemusic.me", "—", "-"}
         useful = [item for item in artists if item.casefold() not in garbage]
-        if title and useful:
-            return f"{useful[0]} {title}"
-        if title:
-            return title
-        return Path(str(document.get("path") or "")).stem
+        return title, (useful[0] if useful else "")
 
-    def yandex_search(self, local_file_id: int, query: str = "") -> dict[str, Any]:
+    def yandex_search(
+        self,
+        local_file_id: int,
+        *,
+        title: str = "",
+        artist: str = "",
+        query: str = "",
+    ) -> dict[str, Any]:
         local_document = self.get(local_file_id)["metadata"]
-        effective = str(query).strip() or self._query_hint(local_document)
+        default_title, default_artist = self._query_hints(local_document)
+        title_query = str(title).strip()
+        artist_query = str(artist).strip()
+        compatibility_query = str(query).strip()
+        if not title_query and not artist_query and compatibility_query:
+            effective = compatibility_query
+        elif title_query or artist_query:
+            # Separate fields are explicit: an intentionally empty artist/title is
+            # not silently restored from broken local tags.
+            effective = " ".join(part for part in (artist_query, title_query) if part).strip()
+        else:
+            title_query = default_title
+            artist_query = default_artist
+            effective = " ".join(part for part in (artist_query, title_query) if part).strip()
+        if not effective:
+            effective = Path(str(local_document.get("path") or "")).stem
         metadata_items = self._yandex.search(effective, limit=25)
         fields = local_document.get("fields") or {}
         local_for_score = {
@@ -399,7 +532,13 @@ class MetadataEditorService:
             public = self._yandex.public_payload(item, cache_artwork=index < 12)
             public["similarity"] = score
             items.append(public)
-        return {"query": effective, "count": len(items), "items": items}
+        return {
+            "query": effective,
+            "titleQuery": title_query,
+            "artistQuery": artist_query,
+            "count": len(items),
+            "items": items,
+        }
 
     def yandex_get(self, external_id: str) -> dict[str, Any]:
         metadata = self._yandex.get(external_id)
@@ -428,6 +567,16 @@ class MetadataEditorService:
                     "available": bool(nonempty(yandex_value)),
                 }
             )
+        suggested_name = self._suggested_filename(metadata, Path(str(local["path"])).suffix)
+        rows.append(
+            {
+                "field": "fileName",
+                "local": local.get("fileName") or Path(str(local["path"])).name,
+                "yandex": suggested_name,
+                "selected": bool(nonempty(suggested_name)),
+                "available": bool(nonempty(suggested_name)),
+            }
+        )
         return {"local": local, "yandex": yandex, "rows": rows}
 
     def _existing_identity(self, local_file_id: int) -> tuple[str | None, str | None]:
@@ -459,12 +608,17 @@ class MetadataEditorService:
 
         patch: dict[str, Any] = {}
         for field in selected:
-            if field == "artwork":
+            if field in {"artwork", "fileName"}:
                 continue
             value = y_fields.get(field)
             # Empty Yandex fields never erase good local metadata implicitly.
             if nonempty(value):
                 patch[field] = value
+        if "fileName" in selected:
+            current_suffix = Path(str(self._row(local_file_id)["path"])).suffix
+            suggested_name = self._suggested_filename(metadata, current_suffix)
+            if suggested_name:
+                patch["fileName"] = suggested_name
 
         artwork_data = None
         artwork_mime = None

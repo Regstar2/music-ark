@@ -120,13 +120,49 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      title: Text(label),
-      trailing: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Text(value, textAlign: TextAlign.end, overflow: TextOverflow.ellipsis),
-      ),
+    final valueStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 460) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: valueStyle,
+                ),
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(flex: 2, child: Text(label)),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                  style: valueStyle,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

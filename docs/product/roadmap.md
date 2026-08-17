@@ -12,7 +12,8 @@ v0.7   — Download + Local Playback                     complete
 v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
-v0.9.0 — UI, Account & Settings                        current
+v0.9.0 — UI, Account & Settings                        complete
+v0.9.1 — Main Screen UI Polish                         current
 v0.10.x — Yandex Upload                                next
 ```
 
@@ -28,16 +29,24 @@ The production Yandex download path writes available standard MP3 metadata and t
 
 ## v0.8.2 — Local Metadata Editor / Yandex Metadata Import
 
-v0.8.2 adds an explicit write boundary for existing user-owned MP3 files: structured/advanced ID3 editing, artwork and safe filename changes, Yandex search/Compare, selective Apply Metadata and explicit Apply + Bind. It also includes app-level ORIGINAL/CENSORED marks, reviewed-variant acceptance, Yandex artwork/playback and the narrow-window desktop safeguard.
+v0.8.2 adds an explicit write boundary for existing user-owned MP3 files: structured/advanced ID3 editing, artwork and safe filename changes, Yandex search/Compare, selective Apply Metadata and explicit Apply + Bind. It also includes app-level ORIGINAL/CENSORED marks, reviewed-variant acceptance and Yandex artwork/playback.
 
 Schema progression reaches `1.8.4` through forward-only migrations. Scan, Matching, Coverage and Sync remain non-mutating for existing user audio files; only an explicit Metadata Editor action may rewrite one.
 
 ## v0.9.0 — UI, Account & Settings
 
-v0.9.0 does not add new music semantics. It adds the global desktop shell account control, Settings utility destination, persisted System/Light/Dark theme preference, persisted System/Russian/English locale preference, Flutter localization resources, offline Help, About/diagnostics and presentation cleanup while retaining the existing Yandex page lifetime and Now Playing boundary.
+v0.9.0 adds the global desktop shell account control, Settings utility destination, persisted System/Light/Dark theme preference, persisted System/Russian/English locale preference, Flutter localization resources, offline Help and About/diagnostics. It does not add new music semantics.
 
 The SQLite schema remains `1.8.4`; UI preferences are stored separately. The Yandex account contract is reused cache-first and logout remains the existing provider application boundary.
 
+## v0.9.1 — Main Screen UI Polish
+
+v0.9.1 removes the duplicate permanent Yandex navigation sidebar and makes the global MusicArk sidebar the only permanent application navigation. Liked tracks and Playlists move to top-level Yandex workspace navigation, while playlist contents use a detail view with explicit back navigation.
+
+The Yandex workspace becomes responsive for desktop resizing: search/sort/version-label controls reflow, wide track rows use table-like album/label/time columns, compact rows retain the same actions, normal `available` status is hidden, and unavailable playback is disabled with explanatory presentation. ORIGINAL/CENSORED feature bridges remain explicit dependencies.
+
+The release also centralizes small UI layout tokens, adds a theme-aware MusicArk mark, refines light/dark presentation and makes Now Playing responsive without adding new playback semantics. SQLite remains `1.8.4` and backend music behavior is unchanged.
+
 ## Next — v0.10.x Yandex Upload
 
-The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.0**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.0 UI acceptance.
+The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.1**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.1 UI acceptance.

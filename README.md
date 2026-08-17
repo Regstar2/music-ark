@@ -2,23 +2,22 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.0 — UI, Account & Settings.**  
+**Текущая версия кода: 0.9.1 — Main Screen UI Polish.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями; v0.9.0 добавляет единую оболочку приложения, глобальное состояние аккаунта, настройки, светлую/тёмную тему, RU/EN localization infrastructure, локальную справку и диагностический About.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.1 не меняет музыкальную семантику и посвящена единому desktop UI главного экрана и Яндекс Музыки.
 
-## Desktop shell v0.9.0
+## Desktop shell и Yandex UI v0.9.1
 
-В нижней части глобальной левой панели находятся `Настройки` и account control. Без сохранённой Yandex session показывается `Войти`, а при авторизации — имя аккаунта и fallback-аватар с инициалами. Вход использует существующий Yandex workflow; logout проходит через тот же backend boundary, что и раньше. Account bootstrap остаётся cache-first и не требует сетевого запроса при каждом запуске.
+MusicArk использует одну постоянную глобальную левую панель. Второй постоянный sidebar Яндекс Музыки удалён: `Треки`, `Плейлисты` и `Альбомы` доступны через верхнюю навигацию внутри основной рабочей области.
 
-Настройки интерфейса применяются без перезапуска и сохраняются отдельно от музыкальной SQLite БД:
+Вкладка `Альбомы` показывает **альбомы, которым пользователь явно поставил «Мне нравится» в Яндекс Музыке**. Это отдельная cache-first коллекция провайдера: индекс любимых альбомов обновляется вместе с библиотекой, а треки конкретного альбома загружаются лениво при открытии и затем сохраняются в локальном кэше MusicArk. Альбомы не выводятся из альбомных тегов любимых треков. Новая музыкальная SQLite-схема для этого не требуется: используется существующее универсальное хранилище provider collections.
 
-- тема: `Как в системе` / `Светлая` / `Тёмная`;
-- язык: `Как в системе` / `Русский` / `English`;
-- Help работает локально;
-- About показывает версию приложения, backend/schema, ОС и безопасную диагностическую информацию без токенов и содержимого библиотеки.
+Yandex workspace использует доступную ширину окна без прежнего обязательного `~920 px` horizontal-scroll layout. Search, sort и `Пометки версий` перестраиваются на узком desktop window; список треков использует table-like layout на широкой области и компактный row layout на меньшей ширине. В сортировке треков доступен вариант `Недоступные сначала`.
 
-MusicArk использует стандартные Flutter `ThemeMode`, Material 3 `ColorScheme` и `gen_l10n`/ARB resources. Смена theme/locale не пересоздаёт application shell и не должна сбрасывать текущий Yandex playlist или Now Playing.
+Обычный технический статус `available` не отображается у каждого трека. Недоступный трек визуально приглушён, playback отключён, а причина доступна через tooltip. ORIGINAL/CENSORED остаются app-level пометками: компактный chip показывается в строке, inline-редактирование и общий менеджер пометок сохранены.
+
+В глобальной панели используются единые layout tokens и небольшой векторный MusicArk mark. `System / Light / Dark`, `System / Russian / English`, account control, Settings, Help и About сохраняются. Now Playing остаётся application-wide и получил responsive presentation без добавления queue/next/previous/shuffle/repeat.
 
 ## Основной цикл
 
@@ -94,8 +93,6 @@ Local Library показывает thumbnail каждого трека. Прио
 
 В Yandex Library доступны artwork и встроенное воспроизведение. Backend готовит или переиспользует приватный playback cache под `.musicark/playback/yandex` и передаёт Flutter только локальный путь. Yandex token, Authorization headers и protected/signed provider media URL во Flutter не передаются. Playback cache не индексируется в Local Library и не влияет на Matching или Coverage.
 
-Для Yandex workspace сохраняется минимальная ширина около `920 px`; более узкое окно использует horizontal scrolling. Это текущий safeguard, а не mobile/responsive redesign.
-
 ## Content labels и Variant acceptance
 
 App-level метки **ОРИГИНАЛ / ЦЕНЗУРА** можно задавать для local track и cached Yandex identity. Они не меняют Yandex, не переписывают audio metadata, не меняют Matching identity и не повышают confidence.
@@ -136,7 +133,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.0 не повышает SQLite schema: theme/locale preferences хранятся отдельным UI-only typed store. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.1 не повышает SQLite schema. Theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -163,8 +160,9 @@ flutter run -d windows
 v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
-v0.9.0 — UI, Account & Settings                        current
+v0.9.0 — UI, Account & Settings                        complete
+v0.9.1 — Main Screen UI Polish                         current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.0 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.0.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.1 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.1.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

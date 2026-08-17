@@ -1,7 +1,7 @@
 """JSON process bridge for MusicArk desktop UI.
 
-The process boundary covers Yandex cache, Local Library, v0.5 identity matching,
-v0.5.1 variant verification, and v0.6 Library Coverage.
+The process boundary covers Yandex cache, Local Library, identity matching,
+variant verification, and Library Coverage.
 """
 
 from __future__ import annotations
@@ -42,46 +42,6 @@ class BridgeErrorCode(str, Enum):
     UNEXPECTED_ERROR = "unexpected_error"
 
 
-def bootstrap(service: Any) -> dict[str, Any]:
-    return service.bootstrap()
-
-
-def login(token: str, service: Any) -> dict[str, Any]:
-    return service.login(token)
-
-
-def refresh(service: Any) -> dict[str, Any]:
-    return service.refresh()
-
-
-def liked_refresh(service: Any) -> dict[str, Any]:
-    return service.liked_refresh()
-
-
-def playlists(service: Any) -> dict[str, Any]:
-    return service.playlists()
-
-
-def playlist(external_id: str, service: Any) -> dict[str, Any]:
-    return service.playlist(external_id)
-
-
-def playlist_refresh(external_id: str, service: Any) -> dict[str, Any]:
-    return service.playlist_refresh(external_id)
-
-
-def library_refresh(service: Any) -> dict[str, Any]:
-    return service.library_refresh()
-
-
-def cached(service: Any) -> dict[str, Any]:
-    return service.cached()
-
-
-def logout(service: Any) -> dict[str, Any]:
-    return service.logout()
-
-
 def _error_payload(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, YandexTokenMissingError):
         code = BridgeErrorCode.TOKEN_MISSING
@@ -100,6 +60,60 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     return {"error": {"code": code.value, "message": str(exc)}}
 
 
+# Public helpers are kept for the legacy in-process bridge contract used by
+# tests and integrations. The process entry point below uses the same service.
+def bootstrap(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).bootstrap()
+
+
+def login(token: str, service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).login(token)
+
+
+def refresh(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).refresh()
+
+
+def liked_refresh(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).liked_refresh()
+
+
+def playlists(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).playlists()
+
+
+def playlist(external_id: str, service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).playlist(external_id)
+
+
+def playlist_refresh(external_id: str, service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).playlist_refresh(external_id)
+
+
+def albums(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).albums()
+
+
+def album(external_id: str, service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).album(external_id)
+
+
+def album_refresh(external_id: str, service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).album_refresh(external_id)
+
+
+def library_refresh(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).library_refresh()
+
+
+def cached(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).cached()
+
+
+def logout(service: YandexLibraryService | None = None) -> dict[str, Any]:
+    return (service or YandexLibraryService()).logout()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="musicark-mvp-bridge")
     parser.add_argument("--base-dir", default=None)
@@ -107,7 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "bootstrap", "login", "refresh", "liked_refresh", "playlists", "playlist",
-            "playlist_refresh", "library_refresh", "yandex_playback_prepare", "cached", "logout",
+            "playlist_refresh", "albums", "album", "album_refresh", "library_refresh",
+            "yandex_playback_prepare", "cached", "logout",
             "local_roots", "local_root_add", "local_root_remove", "local_scan",
             "local_tracks", "local_track", "local_stats",
             "matching_summary", "matching_run", "matching_results", "matching_result",
@@ -144,10 +159,6 @@ def _required_text(value: str | None, flag: str) -> str:
     return clean
 
 
-def _required_playlist_id(value: str | None) -> str:
-    return _required_text(value, "--playlist-id")
-
-
 def _required_root_id(value: int | None) -> int:
     if value is None:
         raise BridgeRequestError("--root-id is required for this command.")
@@ -180,13 +191,7 @@ def _local_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str,
     if args.command == "local_scan":
         return service.scan(args.root_id)
     if args.command == "local_tracks":
-        return service.tracks(
-            limit=args.limit,
-            offset=args.offset,
-            search=args.search,
-            sort=args.sort,
-            root_id=args.root_id,
-        )
+        return service.tracks(limit=args.limit, offset=args.offset, search=args.search, sort=args.sort, root_id=args.root_id)
     if args.command == "local_track":
         return service.track(_required_track_id(args.track_id))
     if args.command == "local_stats":
@@ -201,13 +206,7 @@ def _matching_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[s
     if args.command == "matching_run":
         return service.run()
     if args.command == "matching_results":
-        return service.results(
-            limit=args.limit,
-            offset=args.offset,
-            status=args.status,
-            search=args.search,
-            sort=args.sort,
-        )
+        return service.results(limit=args.limit, offset=args.offset, status=args.status, search=args.search, sort=args.sort)
     external_id = _required_text(args.external_id, "--external-id")
     if args.command == "matching_result":
         return service.result(external_id)
@@ -240,9 +239,7 @@ def _variant_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[st
 def _coverage_bulk_ids() -> list[str]:
     raw = os.getenv("MUSICARK_COVERAGE_BULK", "").strip()
     if not raw:
-        raise BridgeRequestError(
-            "Bulk provider identities are missing from bridge environment."
-        )
+        raise BridgeRequestError("Bulk provider identities are missing from bridge environment.")
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -262,33 +259,21 @@ def _coverage_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[s
     if args.command == "coverage_collections":
         return service.collections()
     if args.command == "coverage_tracks":
-        return service.tracks(
-            collection_id=args.collection_id,
-            status=args.status or "missing",
-            search=args.search,
-            sort=args.sort,
-            user_action=args.user_action,
-            variant_status=args.variant_status,
-            limit=args.limit,
-            offset=args.offset,
-        )
-
+        return service.tracks(collection_id=args.collection_id, status=args.status or "missing", search=args.search,
+                              sort=args.sort, user_action=args.user_action, variant_status=args.variant_status,
+                              limit=args.limit, offset=args.offset)
     if args.command == "coverage_set_actions":
-        action = _required_text(args.action, "--action")
-        return service.set_actions(_coverage_bulk_ids(), action)
-
+        return service.set_actions(_coverage_bulk_ids(), _required_text(args.action, "--action"))
     external_id = _required_text(args.external_id, "--external-id")
     if args.command == "coverage_track":
         return service.track(external_id)
     if args.command == "coverage_set_action":
-        action = _required_text(args.action, "--action")
-        return service.set_action(external_id, action)
+        return service.set_action(external_id, _required_text(args.action, "--action"))
     raise BridgeRequestError(f"Unknown coverage command: {args.command}")
 
 
 def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     base_dir = Path(args.base_dir) if args.base_dir else None
     try:
         if args.command.startswith("local_"):
@@ -312,15 +297,19 @@ def main() -> int:
             elif args.command == "playlists":
                 payload = playlists(service)
             elif args.command == "playlist":
-                payload = playlist(_required_playlist_id(args.playlist_id), service)
+                payload = playlist(_required_text(args.playlist_id, "--playlist-id"), service)
             elif args.command == "playlist_refresh":
-                payload = playlist_refresh(_required_playlist_id(args.playlist_id), service)
+                payload = playlist_refresh(_required_text(args.playlist_id, "--playlist-id"), service)
+            elif args.command == "albums":
+                payload = albums(service)
+            elif args.command == "album":
+                payload = album(_required_text(args.external_id, "--external-id"), service)
+            elif args.command == "album_refresh":
+                payload = album_refresh(_required_text(args.external_id, "--external-id"), service)
             elif args.command == "library_refresh":
                 payload = library_refresh(service)
             elif args.command == "yandex_playback_prepare":
-                payload = service.playback_prepare(
-                    _required_text(args.external_id, "--external-id")
-                )
+                payload = service.playback_prepare(_required_text(args.external_id, "--external-id"))
             elif args.command == "cached":
                 payload = cached(service)
             else:

@@ -5,7 +5,7 @@ import 'package:musicark_ui/main.dart';
 import 'package:musicark_ui/musicark_bridge.dart';
 
 void main() {
-  testWidgets('Yandex section keeps a safe desktop workspace on narrow windows', (
+  testWidgets('Yandex section remains usable on a narrow desktop window', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(700, 800));
@@ -18,11 +18,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('yandex-horizontal-viewport')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('library-sidebar')), findsOneWidget);
+    expect(find.byKey(const Key('musicark-primary-sidebar')), findsOneWidget);
+    expect(find.byKey(const Key('library-sidebar')), findsNothing);
+    expect(find.byKey(const Key('yandex-primary-tabs')), findsOneWidget);
+    expect(find.byKey(const Key('nav-liked')), findsOneWidget);
+    expect(find.byKey(const Key('nav-playlists')), findsOneWidget);
+    expect(find.byKey(const Key('nav-albums')), findsOneWidget);
+    expect(find.byKey(const Key('track-list')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

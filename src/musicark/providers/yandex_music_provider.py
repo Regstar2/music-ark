@@ -15,7 +15,12 @@ from musicark.storage.provider_storage import ProviderStorageRepository
 
 from .base import MusicProvider
 from .models import ProviderCapabilities, ProviderPlaylist, ProviderTrack
-from .yandex_mapper import map_track_source, map_yandex_playlist, map_yandex_track
+from .yandex_mapper import (
+    map_track_source,
+    map_yandex_album,
+    map_yandex_playlist,
+    map_yandex_track,
+)
 
 
 class YandexMusicError(MusicArkError):
@@ -64,18 +69,73 @@ class YandexMusicProvider(MusicProvider):
         return {"status": "ok", "provider": "yandex_music"}
 
     def list_tracks(self) -> list[ProviderTrack]:
-        payload = self._fetch_liked_tracks_payload()
-        return [map_yandex_track(item) for item in payload]
+        return [map_yandex_track(item) for item in self._fetch_liked_tracks_payload()]
 
     def list_playlists(self) -> list[ProviderPlaylist]:
         """Legacy eager playlist scan retained for provider-storage compatibility."""
-        payload = self._fetch_playlists_payload()
-        return [map_yandex_playlist(item) for item in payload]
+        return [map_yandex_playlist(item) for item in self._fetch_playlists_payload()]
 
     def list_playlist_metadata(self) -> list[ProviderPlaylist]:
         """Return the user's playlist index without fetching each playlist's tracks."""
-        payload = self._fetch_playlist_metadata_payload()
-        return [map_yandex_playlist(item) for item in payload]
+        return [map_yandex_playlist(item) for item in self._fetch_playlist_metadata_payload()]
+
+    def list_liked_albums(self) -> list[dict[str, Any]]:
+        """Return albums explicitly liked by the authenticated Yandex user."""
+        client = self._build_client()
+        try:
+            method = getattr(client, "users_likes_albums", None)
+            if not callable(method):
+                raise YandexMusicError("Installed yandex-music client does not support liked albums.")
+            result: list[dict[str, Any]] = []
+            for like in method(rich=True) or []:
+                like_payload = self._dto_payload(like)
+                album_obj = getattr(like, "album", None)
+                raw_album = self._dto_payload(album_obj) if album_obj is not None else {}
+                if not raw_album and isinstance(like_payload.get("album"), dict):
+                    raw_album = dict(like_payload["album"])
+                if not raw_album:
+                    continue
+                liked_at = getattr(like, "timestamp", None) or like_payload.get("timestamp")
+                mapped = map_yandex_album(raw_album, liked_at=liked_at)
+                if mapped["externalId"]:
+                    result.append(mapped)
+            return result
+        except YandexMusicError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError("Failed to scan liked Yandex albums.") from exc
+
+    def get_album(self, external_id: str) -> tuple[dict[str, Any], list[ProviderTrack]]:
+        """Fetch one Yandex album with its ordered tracks."""
+        clean_id = external_id.strip()
+        if not clean_id:
+            raise YandexMusicError("Album external id is empty.")
+        client = self._build_client()
+        try:
+            method = getattr(client, "albums_with_tracks", None)
+            if not callable(method):
+                raise YandexMusicError("Installed yandex-music client cannot load album tracks.")
+            album_obj = method(clean_id)
+            raw_album = self._dto_payload(album_obj)
+            if not raw_album:
+                raise YandexMusicError(f"Yandex album '{clean_id}' was not found.")
+            track_payloads: list[dict[str, Any]] = []
+            volumes = getattr(album_obj, "volumes", None)
+            if volumes is None:
+                volumes = raw_album.get("volumes") or []
+            for volume in volumes or []:
+                for item in volume or []:
+                    payload = self._dto_payload(item)
+                    if payload.get("id") is not None:
+                        track_payloads.append(payload)
+            return (
+                map_yandex_album(raw_album),
+                [map_yandex_track(item) for item in track_payloads],
+            )
+        except YandexMusicError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise YandexMusicError(f"Failed to scan Yandex album '{clean_id}'.") from exc
 
     def get_playlist(self, external_id: str) -> tuple[ProviderPlaylist, list[ProviderTrack]]:
         """Fetch one playlist and map its ordered tracks across the provider boundary."""
@@ -141,22 +201,17 @@ class YandexMusicProvider(MusicProvider):
             embedded = getattr(item, "track", None)
             payload = self._dto_payload(embedded if embedded is not None else item)
             payloads.append(payload)
-
-            # Some test doubles and API responses may already carry a full Track.
             if payload.get("title") and payload.get("artists"):
                 continue
-
             external_id = payload.get("id") or getattr(item, "id", None)
             if external_id is None:
                 continue
-            request_id = getattr(item, "track_id", None) or str(external_id)
-            request_id = str(request_id)
+            request_id = str(getattr(item, "track_id", None) or external_id)
             if request_id not in request_ids:
                 request_ids.append(request_id)
 
         if not request_ids:
             return payloads
-
         tracks_method = getattr(client, "tracks", None)
         if not callable(tracks_method):
             return payloads
@@ -194,7 +249,6 @@ class YandexMusicProvider(MusicProvider):
         account = self.auth_check()
         tracks_payload = self._fetch_liked_tracks_payload()
         playlists_payload = self._fetch_playlists_payload()
-
         tracks = [map_yandex_track(item) for item in tracks_payload]
         playlists = [map_yandex_playlist(item) for item in playlists_payload]
         track_sources = [map_track_source(track) for track in tracks]
@@ -222,9 +276,7 @@ class YandexMusicProvider(MusicProvider):
             ],
         }
         storage.insert_raw_response("yandex_music", "scan_all", raw_storage_payload)
-
-        audit = AuditLogRepository(database_path)
-        audit.append(
+        AuditLogRepository(database_path).append(
             AuditEvent(
                 event_type="provider_scan",
                 entity_type="provider",
@@ -233,7 +285,6 @@ class YandexMusicProvider(MusicProvider):
                 details=f"scan_all tracks={len(tracks)} playlists={len(playlists)}",
             )
         )
-
         return {
             "schemaVersion": 1,
             "provider": "yandex_music",
@@ -251,11 +302,9 @@ class YandexMusicProvider(MusicProvider):
     def _resolve_token(self) -> str:
         if self._token:
             return self._token
-
         token = os.getenv("YANDEX_MUSIC_TOKEN", "").strip()
         if token:
             return token
-
         if self._base_dir is not None:
             local_properties = self._base_dir / "local.properties"
             if local_properties.exists():

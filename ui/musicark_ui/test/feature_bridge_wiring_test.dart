@@ -8,7 +8,6 @@ import 'package:musicark_ui/coverage_bridge.dart';
 import 'package:musicark_ui/download_bridge.dart';
 import 'package:musicark_ui/matching_bridge.dart';
 import 'package:musicark_ui/metadata_bridge.dart';
-import 'package:musicark_ui/musicark_bridge.dart';
 import 'package:musicark_ui/sync_bridge.dart';
 
 class _MemorySettingsStorage implements AppSettingsStorage {

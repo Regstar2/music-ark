@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/content_label_bridge.dart';
-import 'package:musicark_ui/musicark_bridge.dart';
+import 'package:musicark_ui/l10n/app_localizations.dart';
 import 'package:musicark_ui/yandex_content_labels.dart';
 
 void main() {
@@ -13,8 +14,19 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('ru'),
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
-          body: YandexContentLabelsButton(bridge: bridge, labelBridge: labels),
+          body: YandexContentLabelsButton(
+            bridge: bridge,
+            labelBridge: labels,
+          ),
         ),
       ),
     );

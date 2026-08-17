@@ -13,7 +13,8 @@
 | v0.8.0 | Controlled Sync | complete |
 | v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | complete |
 | v0.8.2 | Local Metadata Editor / Yandex Metadata Import | complete |
-| v0.9.0 | UI, Account & Settings | current / Draft validation |
+| v0.9.0 | UI, Account & Settings | complete |
+| v0.9.1 | Main Screen UI Polish | current / Draft validation |
 | v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
@@ -30,9 +31,10 @@ Version notes:
 - `docs/versions/v0.8.1.md`
 - `docs/versions/v0.8.2.md`
 - `docs/versions/v0.9.0.md`
+- `docs/versions/v0.9.1.md`
 
-Current package version is `0.9.0`; current schema target remains `1.8.4`. v0.9.0 adds the global application shell account control, persisted theme/locale preferences, Material 3 light/dark themes, Flutter RU/EN localization infrastructure, offline Help and diagnostic About information. It does not add a SQLite migration or new music/provider mutation behavior.
+Current package version is `0.9.1`; current schema target remains `1.8.4`. v0.9.1 removes the duplicate permanent Yandex sidebar, introduces responsive Liked/Playlists/detail presentation, table-like track rows, shared UI tokens and responsive Now Playing while preserving the v0.9.0 account/settings shell and all v0.8.2 music semantics.
 
 v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
 
-This index describes source state and does not by itself indicate that v0.9.0 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.
+This index describes source state and does not by itself indicate that v0.9.1 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

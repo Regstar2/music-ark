@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .models import ProviderPlaylist, ProviderTrack, TrackSource
 
 
@@ -55,6 +57,34 @@ def map_yandex_track(raw_track: dict) -> ProviderTrack:
         raw_payload_ref=f"track:{track_id}" if track_id else None,
         raw_data=raw_track,
     )
+
+
+def map_yandex_album(raw_album: dict[str, Any], *, liked_at: Any = None) -> dict[str, Any]:
+    """Return a stable provider-bound summary for a Yandex album."""
+    album_id = str(raw_album.get("id") or "").strip()
+    artists_payload = raw_album.get("artists") or []
+    artists = [
+        str(artist.get("name", "")).strip()
+        for artist in artists_payload
+        if isinstance(artist, dict) and artist.get("name")
+    ]
+    available = raw_album.get("available")
+    availability = "available" if available is True else ("unavailable" if available is False else None)
+    track_count = raw_album.get("track_count")
+    if not isinstance(track_count, int):
+        track_count = 0
+    return {
+        "providerId": "yandex_music",
+        "externalId": album_id,
+        "title": str(raw_album.get("title") or "").strip(),
+        "artists": artists,
+        "artworkUrl": _artwork_url({}, raw_album, size="400x400"),
+        "trackCount": track_count,
+        "year": raw_album.get("year"),
+        "releaseDate": raw_album.get("release_date"),
+        "availability": availability,
+        "likedAt": str(liked_at) if liked_at is not None else None,
+    }
 
 
 def map_yandex_playlist(raw_playlist: dict) -> ProviderPlaylist:

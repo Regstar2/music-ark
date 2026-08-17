@@ -1,4 +1,4 @@
-"""Application orchestration for the v0.3 Yandex Library desktop experience."""
+"""Application orchestration for the cache-first Yandex Library experience."""
 
 from __future__ import annotations
 
@@ -10,10 +10,8 @@ from musicark.credentials import CredentialStore, SystemCredentialStore
 from musicark.download.models import DownloadTask
 from musicark.download.provider import YandexMusicDownloadProvider
 from musicark.matching.scope import MatchingScopeState
-from musicark.providers.yandex_music_provider import (
-    YandexMusicProvider,
-    YandexTokenMissingError,
-)
+from musicark.providers.yandex_music_provider import YandexMusicProvider, YandexTokenMissingError
+from musicark.storage.album_cache import AlbumCacheRepository, AlbumCacheSnapshot
 from musicark.storage.liked_cache import LikedCacheRepository, LikedCacheSnapshot
 from musicark.storage.playlist_cache import PlaylistCacheRepository, PlaylistCacheSnapshot
 
@@ -21,23 +19,18 @@ ProviderFactory = Callable[[str], YandexMusicProvider]
 
 
 class YandexLibraryService:
-    """Coordinate secure session, provider access, cache-first collections, and playback cache."""
+    """Coordinate secure session, provider access and cache-first collections."""
 
-    def __init__(
-        self,
-        base_dir: Path | None = None,
-        credential_store: CredentialStore | None = None,
-        liked_cache: LikedCacheRepository | None = None,
-        playlist_cache: PlaylistCacheRepository | None = None,
-        provider_factory: ProviderFactory | None = None,
-    ) -> None:
+    def __init__(self, base_dir: Path | None = None, credential_store: CredentialStore | None = None,
+                 liked_cache: LikedCacheRepository | None = None, playlist_cache: PlaylistCacheRepository | None = None,
+                 album_cache: AlbumCacheRepository | None = None, provider_factory: ProviderFactory | None = None) -> None:
         self._base_dir = base_dir
         self._credentials = credential_store or SystemCredentialStore()
-        database_path = self._resolve_database_path()
-        self._database_path = database_path
-        self._liked_cache = liked_cache or LikedCacheRepository(database_path)
-        self._playlist_cache = playlist_cache or PlaylistCacheRepository(database_path)
-        self._matching_scope = MatchingScopeState(database_path)
+        self._database_path = self._resolve_database_path()
+        self._liked_cache = liked_cache or LikedCacheRepository(self._database_path)
+        self._playlist_cache = playlist_cache or PlaylistCacheRepository(self._database_path)
+        self._album_cache = album_cache or AlbumCacheRepository(self._database_path)
+        self._matching_scope = MatchingScopeState(self._database_path)
         self._provider_factory = provider_factory
 
     def _resolve_database_path(self) -> Path:
@@ -45,13 +38,10 @@ class YandexLibraryService:
         raw = Path(config.database_path)
         if raw.is_absolute():
             return raw
-        root = self._base_dir if self._base_dir is not None else Path.home()
-        return root / raw
+        return (self._base_dir if self._base_dir is not None else Path.home()) / raw
 
     def _provider(self, token: str) -> YandexMusicProvider:
-        if self._provider_factory is not None:
-            return self._provider_factory(token)
-        return YandexMusicProvider(base_dir=self._base_dir, token=token)
+        return self._provider_factory(token) if self._provider_factory is not None else YandexMusicProvider(base_dir=self._base_dir, token=token)
 
     def _saved_token(self) -> str:
         token = self._credentials.get_token()
@@ -60,246 +50,151 @@ class YandexLibraryService:
         return token
 
     @staticmethod
-    def _liked_payload(
-        snapshot: LikedCacheSnapshot,
-        *,
-        source: str,
-        diff: dict[str, int] | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "source": source,
-            "count": snapshot.count,
-            "lastUpdated": snapshot.refreshed_at,
-            "tracks": snapshot.tracks,
-            "diff": diff or {"added": 0, "removed": 0, "unchanged": snapshot.count},
-        }
-
-    @staticmethod
-    def _playlist_index_payload(
-        items: list[dict[str, Any]],
-        *,
-        source: str,
-        diff: dict[str, int] | None = None,
-    ) -> dict[str, Any]:
-        updates = [str(item["lastUpdated"]) for item in items if item.get("lastUpdated")]
-        return {
-            "source": source,
-            "count": len(items),
-            "lastUpdated": max(updates) if updates else None,
-            "items": items,
-            "diff": diff or {"added": 0, "removed": 0, "unchanged": len(items)},
-        }
-
-    @staticmethod
-    def _playlist_collection_payload(
-        snapshot: PlaylistCacheSnapshot,
-        *,
-        source: str,
-        diff: dict[str, int] | None = None,
-    ) -> dict[str, Any]:
-        last_updated = snapshot.content_refreshed_at or snapshot.refreshed_at
-        return {
-            "source": source,
-            "count": snapshot.count,
-            "lastUpdated": last_updated,
-            "tracks": snapshot.tracks,
-            "diff": diff or {"added": 0, "removed": 0, "unchanged": snapshot.count},
-        }
-
-    @staticmethod
     def _session(has_token: bool, account: dict[str, Any]) -> dict[str, Any]:
         return {"hasStoredToken": has_token, "account": account if has_token else {}}
 
-    def _library_state(
-        self,
-        *,
-        has_token: bool,
-        account: dict[str, Any],
-        liked: LikedCacheSnapshot,
-        liked_source: str,
-        playlists: list[dict[str, Any]],
-        playlists_source: str,
-        liked_diff: dict[str, int] | None = None,
-        playlists_diff: dict[str, int] | None = None,
-    ) -> dict[str, Any]:
+    @staticmethod
+    def _liked_payload(snapshot: LikedCacheSnapshot, *, source: str, diff: dict[str, int] | None = None) -> dict[str, Any]:
+        return {"source": source, "count": snapshot.count, "lastUpdated": snapshot.refreshed_at, "tracks": snapshot.tracks,
+                "diff": diff or {"added": 0, "removed": 0, "unchanged": snapshot.count}}
+
+    @staticmethod
+    def _index_payload(items: list[dict[str, Any]], *, source: str, last_updated: str | None = None,
+                       diff: dict[str, int] | None = None) -> dict[str, Any]:
+        updates = [str(item["lastUpdated"]) for item in items if item.get("lastUpdated")]
+        return {"source": source, "count": len(items), "lastUpdated": last_updated or (max(updates) if updates else None),
+                "items": items, "diff": diff or {"added": 0, "removed": 0, "unchanged": len(items)}}
+
+    @staticmethod
+    def _collection_payload(snapshot: PlaylistCacheSnapshot | AlbumCacheSnapshot, *, source: str,
+                            diff: dict[str, int] | None = None) -> dict[str, Any]:
+        updated = snapshot.content_refreshed_at or snapshot.refreshed_at
+        return {"source": source, "count": snapshot.count, "lastUpdated": updated, "tracks": snapshot.tracks,
+                "diff": diff or {"added": 0, "removed": 0, "unchanged": snapshot.count}}
+
+    def _library_state(self, *, has_token: bool, account: dict[str, Any], liked: LikedCacheSnapshot, liked_source: str,
+                       playlists: list[dict[str, Any]], playlists_source: str, albums: list[dict[str, Any]], albums_source: str,
+                       liked_diff: dict[str, int] | None = None, playlists_diff: dict[str, int] | None = None,
+                       albums_diff: dict[str, int] | None = None) -> dict[str, Any]:
         liked_payload = self._liked_payload(liked, source=liked_source, diff=liked_diff)
         return {
-            "session": self._session(has_token, account),
-            "liked": liked_payload,
-            "library": liked_payload,
-            "playlists": self._playlist_index_payload(
-                playlists,
-                source=playlists_source,
-                diff=playlists_diff,
-            ),
+            "session": self._session(has_token, account), "liked": liked_payload, "library": liked_payload,
+            "playlists": self._index_payload(playlists, source=playlists_source, diff=playlists_diff),
+            "albums": self._index_payload(albums, source=albums_source, last_updated=self._album_cache.index_refreshed_at(), diff=albums_diff),
         }
 
     def bootstrap(self) -> dict[str, Any]:
         token = self._credentials.get_token()
         liked = self._liked_cache.load()
-        playlists = self._playlist_cache.list_metadata()
+        source = "cache" if token else "none"
         if token:
             self._matching_scope.ensure_default()
-        return self._library_state(
-            has_token=token is not None,
-            account=liked.account,
-            liked=liked,
-            liked_source="cache" if token else "none",
-            playlists=playlists,
-            playlists_source="cache" if token else "none",
-        )
+        return self._library_state(has_token=token is not None, account=liked.account, liked=liked, liked_source=source,
+                                   playlists=self._playlist_cache.list_metadata(), playlists_source=source,
+                                   albums=self._album_cache.list_metadata(), albums_source=source)
 
     def login(self, token: str) -> dict[str, Any]:
         clean = token.strip()
         if not clean:
             raise YandexTokenMissingError("Yandex token is empty.")
-
         provider = self._provider(clean)
         account = provider.auth_check()
         tracks = provider.list_tracks()
         playlists = provider.list_playlist_metadata()
-
+        albums = provider.list_liked_albums()
         self._credentials.set_token(clean)
         try:
             liked_diff = self._liked_cache.replace(account, tracks)
             playlists_diff = self._playlist_cache.replace_index(playlists)
+            albums_diff = self._album_cache.replace_index(albums)
             self._matching_scope.set_liked()
         except Exception:
             self._credentials.delete_token()
             raise
-
-        return self._library_state(
-            has_token=True,
-            account=account,
-            liked=self._liked_cache.load(),
-            liked_source="network",
-            playlists=self._playlist_cache.list_metadata(),
-            playlists_source="network",
-            liked_diff=liked_diff,
-            playlists_diff=playlists_diff,
-        )
+        return self._library_state(has_token=True, account=account, liked=self._liked_cache.load(), liked_source="network",
+                                   playlists=self._playlist_cache.list_metadata(), playlists_source="network",
+                                   albums=self._album_cache.list_metadata(), albums_source="network",
+                                   liked_diff=liked_diff, playlists_diff=playlists_diff, albums_diff=albums_diff)
 
     def liked_refresh(self) -> dict[str, Any]:
-        token = self._saved_token()
-        provider = self._provider(token)
+        provider = self._provider(self._saved_token())
         account = provider.auth_check()
-        tracks = provider.list_tracks()
-        diff = self._liked_cache.replace(account, tracks)
+        diff = self._liked_cache.replace(account, provider.list_tracks())
         self._matching_scope.set_liked()
-        return self._library_state(
-            has_token=True,
-            account=account,
-            liked=self._liked_cache.load(),
-            liked_source="network",
-            playlists=self._playlist_cache.list_metadata(),
-            playlists_source="cache",
-            liked_diff=diff,
-        )
+        return self._library_state(has_token=True, account=account, liked=self._liked_cache.load(), liked_source="network",
+                                   playlists=self._playlist_cache.list_metadata(), playlists_source="cache",
+                                   albums=self._album_cache.list_metadata(), albums_source="cache", liked_diff=diff)
 
     def refresh(self) -> dict[str, Any]:
-        """Backward-compatible v0.2 alias for refreshing Liked."""
         return self.liked_refresh()
 
     def playlists(self) -> dict[str, Any]:
         liked = self._liked_cache.load()
         token = self._credentials.get_token()
-        return self._library_state(
-            has_token=token is not None,
-            account=liked.account,
-            liked=liked,
-            liked_source="cache" if token else "none",
-            playlists=self._playlist_cache.list_metadata(),
-            playlists_source="cache" if token else "none",
-        )
+        source = "cache" if token else "none"
+        return self._library_state(has_token=token is not None, account=liked.account, liked=liked, liked_source=source,
+                                   playlists=self._playlist_cache.list_metadata(), playlists_source=source,
+                                   albums=self._album_cache.list_metadata(), albums_source=source)
+
+    def albums(self) -> dict[str, Any]:
+        return self.playlists()
 
     def playlist(self, external_id: str) -> dict[str, Any]:
         snapshot = self._playlist_cache.load(external_id)
         liked = self._liked_cache.load()
         token = self._credentials.get_token()
-        # A stale/deleted cached playlist can still be queried by legacy callers; only
-        # an active playlist is allowed to become the current Matching scope.
         if snapshot.refreshed_at is not None:
             self._matching_scope.set_playlist(external_id)
-        return {
-            "session": self._session(token is not None, liked.account),
-            "playlist": snapshot.metadata,
-            "collection": self._playlist_collection_payload(snapshot, source="cache"),
-        }
+        return {"session": self._session(token is not None, liked.account), "playlist": snapshot.metadata,
+                "collection": self._collection_payload(snapshot, source="cache")}
 
     def playlist_refresh(self, external_id: str) -> dict[str, Any]:
-        token = self._saved_token()
-        provider = self._provider(token)
+        provider = self._provider(self._saved_token())
         playlist, tracks = provider.get_playlist(external_id)
         diff = self._playlist_cache.replace_playlist(playlist, tracks)
         snapshot = self._playlist_cache.load(external_id)
-        liked = self._liked_cache.load()
         self._matching_scope.set_playlist(external_id)
-        return {
-            "session": self._session(True, liked.account),
-            "playlist": snapshot.metadata,
-            "collection": self._playlist_collection_payload(
-                snapshot,
-                source="network",
-                diff=diff,
-            ),
-        }
+        return {"session": self._session(True, self._liked_cache.load().account), "playlist": snapshot.metadata,
+                "collection": self._collection_payload(snapshot, source="network", diff=diff)}
+
+    def album(self, external_id: str) -> dict[str, Any]:
+        snapshot = self._album_cache.load(external_id)
+        liked = self._liked_cache.load()
+        return {"session": self._session(self._credentials.get_token() is not None, liked.account), "album": snapshot.metadata,
+                "collection": self._collection_payload(snapshot, source="cache")}
+
+    def album_refresh(self, external_id: str) -> dict[str, Any]:
+        provider = self._provider(self._saved_token())
+        album, tracks = provider.get_album(external_id)
+        diff = self._album_cache.replace_album(album, tracks)
+        snapshot = self._album_cache.load(external_id)
+        return {"session": self._session(True, self._liked_cache.load().account), "album": snapshot.metadata,
+                "collection": self._collection_payload(snapshot, source="network", diff=diff)}
 
     def library_refresh(self) -> dict[str, Any]:
-        """Refresh account, Liked, and playlist index without eagerly loading every playlist."""
-        token = self._saved_token()
-        provider = self._provider(token)
+        provider = self._provider(self._saved_token())
         account = provider.auth_check()
-        tracks = provider.list_tracks()
-        playlists = provider.list_playlist_metadata()
-
-        liked_diff = self._liked_cache.replace(account, tracks)
-        playlists_diff = self._playlist_cache.replace_index(playlists)
+        liked_diff = self._liked_cache.replace(account, provider.list_tracks())
+        playlists_diff = self._playlist_cache.replace_index(provider.list_playlist_metadata())
+        albums_diff = self._album_cache.replace_index(provider.list_liked_albums())
         self._matching_scope.ensure_default()
-        return self._library_state(
-            has_token=True,
-            account=account,
-            liked=self._liked_cache.load(),
-            liked_source="network",
-            playlists=self._playlist_cache.list_metadata(),
-            playlists_source="network",
-            liked_diff=liked_diff,
-            playlists_diff=playlists_diff,
-        )
+        return self._library_state(has_token=True, account=account, liked=self._liked_cache.load(), liked_source="network",
+                                   playlists=self._playlist_cache.list_metadata(), playlists_source="network",
+                                   albums=self._album_cache.list_metadata(), albums_source="network",
+                                   liked_diff=liked_diff, playlists_diff=playlists_diff, albums_diff=albums_diff)
 
     def playback_prepare(self, external_id: str) -> dict[str, Any]:
-        """Acquire an authorized Yandex track into MusicArk's private playback cache.
-
-        Flutter receives only the resulting local path. Provider download URLs and
-        credentials stay inside the backend process, and the cache file is not added
-        to Local Library or Matching.
-        """
         identity = str(external_id).strip()
         if not identity.isdigit():
             raise ValueError("Yandex Track ID must be numeric.")
         token = self._saved_token()
         app_root = self._base_dir if self._base_dir is not None else self._database_path.parent.parent
         playback_root = app_root / ".musicark" / "playback" / "yandex"
-        task = DownloadTask(
-            task_type="yandex_playback",
-            source_id=identity,
-            provider_id="yandex_music_download",
-            target_folder=str(playback_root),
-            raw_payload={
-                "track_id": identity,
-                "quality": "best",
-                "target_filename": f"yandex_{identity}.mp3",
-            },
-        )
-        local_audio = YandexMusicDownloadProvider(
-            base_dir=self._base_dir,
-            token=token,
-        ).execute(task)
-        return {
-            "providerId": "yandex_music",
-            "externalId": identity,
-            "path": local_audio.path,
-            "cached": True,
-        }
+        task = DownloadTask(task_type="yandex_playback", source_id=identity, provider_id="yandex_music_download",
+                            target_folder=str(playback_root), raw_payload={"track_id": identity, "quality": "best",
+                                                                          "target_filename": f"yandex_{identity}.mp3"})
+        local_audio = YandexMusicDownloadProvider(base_dir=self._base_dir, token=token).execute(task)
+        return {"providerId": "yandex_music", "externalId": identity, "path": local_audio.path, "cached": True}
 
     def cached(self) -> dict[str, Any]:
         return self.bootstrap()
@@ -308,13 +203,8 @@ class YandexLibraryService:
         self._credentials.delete_token()
         self._liked_cache.clear()
         self._playlist_cache.clear()
+        self._album_cache.clear()
         self._matching_scope.clear()
         liked = self._liked_cache.load()
-        return self._library_state(
-            has_token=False,
-            account={},
-            liked=liked,
-            liked_source="none",
-            playlists=[],
-            playlists_source="none",
-        )
+        return self._library_state(has_token=False, account={}, liked=liked, liked_source="none", playlists=[],
+                                   playlists_source="none", albums=[], albums_source="none")

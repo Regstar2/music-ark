@@ -135,7 +135,9 @@ class ContentLabelBridge implements ContentLabelBridgeClient {
 
   String _resolveRepoRoot() {
     final override = Platform.environment['MUSICARK_REPO_ROOT']?.trim();
-    if (override != null && override.isNotEmpty && _looksLikeRoot(Directory(override))) {
+    if (override != null &&
+        override.isNotEmpty &&
+        _looksLikeRoot(Directory(override))) {
       return Directory(override).absolute.path;
     }
     final starts = <Directory>{
@@ -160,7 +162,9 @@ class ContentLabelBridge implements ContentLabelBridgeClient {
   bool _looksLikeRoot(Directory directory) {
     final separator = Platform.pathSeparator;
     return File('${directory.path}${separator}pyproject.toml').existsSync() &&
-        File('${directory.path}${separator}src${separator}musicark${separator}content_labels${separator}bridge.py').existsSync();
+        File(
+          '${directory.path}${separator}src${separator}musicark${separator}content_labels${separator}bridge.py',
+        ).existsSync();
   }
 
   Future<_ContentLabelPythonCommand> _resolvePython(String repoRoot) async {
@@ -171,8 +175,8 @@ class ContentLabelBridge implements ContentLabelBridgeClient {
     }
     final separator = Platform.pathSeparator;
     final venv = Platform.isWindows
-        ? '$repoRoot${separator}.venv${separator}Scripts${separator}python.exe'
-        : '$repoRoot${separator}.venv${separator}bin${separator}python';
+        ? '$repoRoot$separator.venv${separator}Scripts${separator}python.exe'
+        : '$repoRoot$separator.venv${separator}bin${separator}python';
     if (File(venv).existsSync()) {
       final command = _ContentLabelPythonCommand(venv);
       if (await _works(command)) return command;
@@ -189,7 +193,10 @@ class ContentLabelBridge implements ContentLabelBridgeClient {
     for (final command in candidates) {
       if (await _works(command)) return command;
     }
-    throw const MusicArkBridgeException('python_not_found', 'Python was not found.');
+    throw const MusicArkBridgeException(
+      'python_not_found',
+      'Python was not found.',
+    );
   }
 
   Future<bool> _works(_ContentLabelPythonCommand command) async {
@@ -207,7 +214,10 @@ class ContentLabelBridge implements ContentLabelBridgeClient {
 }
 
 class _ContentLabelPythonCommand {
-  const _ContentLabelPythonCommand(this.executable, {this.prefixArgs = const []});
+  const _ContentLabelPythonCommand(
+    this.executable, {
+    this.prefixArgs = const [],
+  });
   final String executable;
   final List<String> prefixArgs;
 }
@@ -241,7 +251,11 @@ class FakeContentLabelBridge implements ContentLabelBridgeClient {
     } else {
       localLabels[localFileId] = label;
     }
-    return {'subject': 'local', 'localFileId': localFileId, 'label': label.isEmpty ? null : label};
+    return {
+      'subject': 'local',
+      'localFileId': localFileId,
+      'label': label.isEmpty ? null : label,
+    };
   }
 
   @override

@@ -1,93 +1,102 @@
-# Release Checklist — v0.9.0 UI, Account & Settings
+# Release Checklist — v0.9.1 Main Screen UI Polish
 
-This checklist is the acceptance gate for the v0.9.0 Draft candidate. It does not imply a published release, installer, package, tag or GitHub Release.
+This checklist is the acceptance gate for the v0.9.1 Draft candidate. It does not imply a published release, installer, package, tag or GitHub Release.
 
 ## Version / schema / Git
 
-- [ ] Python package version is `0.9.0`.
-- [ ] Flutter version is `0.9.0+1` unless an intentional build-number-only change is documented.
-- [ ] SQLite schema target remains `1.8.4`; v0.9.0 does not add a music DB migration.
-- [ ] v0.9.0 branch is based on the accepted v0.8.2 `main` baseline.
-- [ ] Draft PR targets `main` from `agent/v0.9.0-ui-account-settings`.
-- [ ] final diff contains no secrets, user data, avatar fixture from a real account, unrelated build output or mass formatting.
+- [ ] Python package version is `0.9.1`.
+- [ ] Flutter version is `0.9.1+1`.
+- [ ] SQLite schema target remains `1.8.4`; v0.9.1 adds no music DB migration.
+- [ ] branch is based on current accepted `main`.
+- [ ] Draft PR targets `main` from `agent/v0.9.1-main-ui-polish`.
+- [ ] final diff contains no secrets, user data, build output or unrelated mass formatting.
 - [ ] README.md, README_EN.md, CHANGELOG and version docs describe the same version/scope.
 
-## Global account / session
+## Single navigation architecture
 
-- [ ] logged-out state shows `Войти` / `Sign in` in the bottom sidebar account control.
-- [ ] sign-in routes to the existing Yandex Music login workflow.
-- [ ] cached signed-in startup shows cached account information without requiring network success.
-- [ ] login updates the global account control without restart.
-- [ ] account menu shows provider/account context, open-Yandex action and logout.
-- [ ] logout uses the existing backend credential/session boundary.
-- [ ] logout updates global shell and Yandex UI without restart.
-- [ ] no independent second credential store or authentication implementation exists.
-- [ ] account DTO visible to Flutter contains no token, cookie or Authorization data.
+- [ ] global MusicArk sidebar is the only permanent application sidebar.
+- [ ] old permanent Yandex nested sidebar is absent.
+- [ ] Yandex Tracks, Playlists and Albums remain reachable via top-level workspace navigation.
+- [ ] playlist detail has explicit back navigation.
+- [ ] album detail has explicit back navigation.
+- [ ] Settings and Account remain in the global utility area.
+- [ ] theme-aware MusicArk mark/title render in Light and Dark modes without overflow.
+- [ ] Settings ListTile does not trigger the Flutter background/ink assertion.
 
-## Avatar / profile fallback
+## Yandex workspace
 
-- [ ] provider account contract was checked against the pinned dependency version.
-- [ ] no undocumented avatar field or Yandex URL template is invented.
-- [ ] available name produces one/two initials.
-- [ ] missing name produces a generic user icon.
-- [ ] long displayName uses ellipsis and does not overflow the sidebar.
-- [ ] avatar/profile decoration failure cannot become a login/session error.
+- [ ] collection header shows title, count, human-readable update time and source.
+- [ ] refresh remains available.
+- [ ] track search works for title/artist/album.
+- [ ] Yandex/title/artist sorting preserves previous semantics.
+- [ ] `Unavailable first / Недоступные сначала` places unavailable tracks before available tracks without changing provider state.
+- [ ] playlist search and sort remain available.
+- [ ] Albums shows the authenticated user's explicit Yandex Music album likes, not albums inferred from liked-track metadata.
+- [ ] album index is cache-first and album contents are fetched lazily when a specific album is opened.
+- [ ] album detail contains the full provider album track list, not only tracks from `Liked / Мне нравится`.
+- [ ] unliking an album in Yandex and refreshing removes it from the active liked-album index without deleting unrelated cached collections.
+- [ ] album read paths do not like/unlike or otherwise mutate Yandex Music.
+- [ ] artwork loading and fallback remain available in track and album presentation.
+- [ ] normal `available` text is not shown on every track.
+- [ ] unavailable track playback is disabled and explained through tooltip/presentation.
 
-## Settings persistence
+## ORIGINAL / CENSORED regression
 
-- [ ] Settings appears in the lower utility area, separated from primary music destinations.
-- [ ] preference store contains only the required UI settings and a minimal schema marker.
-- [ ] theme preference survives restart.
-- [ ] locale preference survives restart.
-- [ ] preference persistence contains no credential or library data.
+- [ ] `ContentLabelBridgeClient` remains an explicit feature dependency.
+- [ ] session-aware bridge wrapping cannot disable label controls.
+- [ ] inline ORIGINAL chip renders.
+- [ ] inline CENSORED chip renders.
+- [ ] inline label menu changes a label.
+- [ ] label can be removed.
+- [ ] general `Version labels / Пометки версий` manager remains available from the toolbar.
+- [ ] standalone label/control tests have deterministic localization setup.
+- [ ] labels still do not mutate Yandex metadata, audio tags, identity or confidence.
 
-## Theme
+## Responsive desktop
 
-- [ ] System / Light / Dark are available.
-- [ ] switching applies without restart.
-- [ ] System follows platform brightness.
-- [ ] centralized Material 3 / ColorScheme theme definitions are used.
-- [ ] major feature pages are manually checked in Dark mode.
-- [ ] no unreadable hard-coded light/dark surfaces remain in active UI.
+Check at least:
 
-## Localization
+```text
+1920×1080
+1600×900
+1366×768
+~900 px narrow desktop application window
+```
 
-- [ ] standard Flutter localization pipeline is configured with RU and EN resources.
-- [ ] System / Russian / English are available and persistent.
-- [ ] system `ru` resolves to Russian.
-- [ ] system `en` resolves to English.
-- [ ] unsupported system locale deterministically falls back to Russian.
-- [ ] switching locale applies without restart.
-- [ ] global navigation/account/settings/help/about are localized.
-- [ ] Yandex, Local Library, Matching, Missing, Downloads, Sync, Metadata Editor, dialogs/status/empty/error UI static strings are localized for acceptance.
-- [ ] provider data, filenames, paths, technical IDs and backend internal codes remain untranslated.
-- [ ] ORIGINAL/CENSORED presentation is localized without changing stored internal codes or DB schema.
+- [ ] no `RenderFlex overflow`.
+- [ ] no ListTile background/ink assertion.
+- [ ] no ListTile/trailing width assertion in About.
+- [ ] toolbar reflows instead of requiring old ~920 px forced horizontal workspace.
+- [ ] title and album use ellipsis where needed.
+- [ ] labeled compact rows remain usable.
+- [ ] row actions remain reachable.
+- [ ] playlist and album navigation remain usable.
+- [ ] global sidebar brand/account/settings remain usable.
 
-## Help / About
+## Localization / injected-test isolation
 
-- [ ] Help works offline.
-- [ ] Help covers Yandex, Local Library, Matching, Missing, Downloads, Sync and Metadata Editor.
-- [ ] Help explicitly explains Matching != Variant.
-- [ ] Help explicitly explains Missing != Different Version.
-- [ ] Help states that Sync does not delete local-only files.
-- [ ] Help distinguishes Apply Metadata from Apply + Bind.
-- [ ] About shows factual MusicArk `0.9.0`, backend version and schema `1.8.4`.
-- [ ] no MusicArk license name is invented.
-- [ ] standard Flutter dependency license UI is used where applicable.
-- [ ] copied diagnostics contain no secrets, protected URLs or library contents.
-- [ ] stale visible version labels such as `MusicArk 0.3` / `MusicArk 0.8` are absent.
+- [ ] RU and EN resources describe explicitly liked albums accurately.
+- [ ] Yandex tabs including Albums, back navigation, search/sort/unavailable-first, version-label/table/empty-state/availability UI change language without restart.
+- [ ] unsupported system locale uses deterministic Russian fallback.
+- [ ] injected fake-bridge tests do not read the developer machine's persisted UI settings unless a settings storage is explicitly supplied.
+- [ ] injected fake-bridge tests do not start the production content-label subprocess unless a content-label bridge is explicitly supplied.
 
-## Shell / UI lifetime
+## Account / session regression
 
-- [ ] Yandex page state survives theme and locale changes.
-- [ ] open Yandex playlist/scope is not reset by Settings changes.
-- [ ] Now Playing remains alive while Settings, Help and About are open.
-- [ ] Settings/Help/About do not replace the playback engine.
-- [ ] Yandex workspace retains the approximately `920 px` narrow-window safeguard.
-- [ ] account control remains usable at narrow widths.
-- [ ] RU and EN long labels do not introduce render overflow.
+- [ ] cached signed-in account remains cache-first.
+- [ ] failed network refresh does not visually log a cached session out.
+- [ ] login/logout continue through existing Yandex credential/session boundaries.
+- [ ] no second account implementation or credential store is introduced.
+- [ ] account control remains global, not duplicated inside Yandex workspace.
 
-## v0.8.2 safety regression
+## Now Playing
+
+- [ ] player remains application-wide and survives ordinary page navigation.
+- [ ] Play/Pause, progress/seek, elapsed/duration and stop/close remain available.
+- [ ] compact player layout does not overflow at narrow desktop width.
+- [ ] no queue/next/previous/shuffle/repeat semantics are introduced in v0.9.1.
+
+## v0.8.2/v0.9.0 safety regression
 
 In ordinary Scan/Matching/Coverage/Sync scenarios:
 
@@ -97,50 +106,52 @@ Yandex provider mutations = 0
 ```
 
 - [ ] Metadata Editor remains the explicit ordinary write boundary.
-- [ ] Apply Metadata and Apply + Bind retain their existing separate semantics.
+- [ ] Apply Metadata and Apply + Bind retain separate semantics.
 - [ ] Matching semantics are unchanged.
 - [ ] Variant semantics are unchanged.
 - [ ] Coverage/Missing semantics are unchanged.
 - [ ] Download semantics are unchanged.
 - [ ] Controlled Sync semantics are unchanged.
-- [ ] no Yandex Upload, reverse Sync or `can_upload_tracks=true` is introduced.
+- [ ] no Yandex Upload or reverse Sync is introduced.
 
-## Python automated checks
+## Automated checks
 
 From repository root:
 
 - [ ] `python -m unittest discover -s tests -p "test_*.py" -v`.
 
-## Flutter automated checks
-
 From `ui/musicark_ui`:
 
 - [ ] `flutter pub get`.
-- [ ] `flutter analyze` with no accepted analyzer errors/warnings hidden by rule removal.
-- [ ] `flutter test test/account_session_test.dart`.
-- [ ] `flutter test test/account_control_test.dart`.
-- [ ] `flutter test test/app_settings_test.dart`.
+- [ ] `flutter analyze`.
+- [ ] `flutter test test/widget_test.dart`.
+- [ ] `flutter test test/feature_bridge_wiring_test.dart`.
 - [ ] `flutter test test/v0_9_shell_test.dart`.
+- [ ] `flutter test test/v0_9_1_content_labels_test.dart`.
+- [ ] `flutter test test/v0_9_1_responsive_test.dart`.
+- [ ] `flutter test test/v0_9_1_localization_test.dart`.
+- [ ] `flutter test test/yandex_content_label_test.dart`.
+- [ ] `flutter test test/yandex_track_controls_test.dart`.
+- [ ] `flutter test test/yandex_narrow_layout_test.dart`.
 - [ ] full `flutter test`.
 
-## Windows manual acceptance
+## Windows visual/manual acceptance
 
 - [ ] `flutter run -d windows` starts the development application.
-- [ ] cached profile / login / logout / login-again scenarios pass.
-- [ ] System / Light / Dark and persistence are manually checked.
-- [ ] Russian / English / System and persistence are manually checked.
-- [ ] Yandex / Local / Matching / Missing / Downloads / Sync / Metadata Editor / Settings / Help / About open without layout/render exceptions.
-- [ ] dark-mode scenarios from `docs/testing/manual-test-plan.md` are checked.
-- [ ] localization scenarios from `docs/testing/manual-test-plan.md` are checked.
+- [ ] 1920×1080 / 1600×900 / 1366×768 / narrow desktop resize are checked.
+- [ ] Light and Dark are manually inspected.
+- [ ] Russian and English are manually inspected.
+- [ ] Tracks / Playlists / liked Albums / detail / search / sort / unavailable-first / refresh / artwork / playback / labels are checked.
+- [ ] global account login/logout and Now Playing lifetime are checked.
+- [ ] Local / Matching / Missing / Downloads / Sync / Metadata Editor still open and behave as before.
 
-Release build, installer, MSIX, portable ZIP, signing and clean-machine packaging are **not** required by v0.9.0.
+Release build, installer, MSIX, portable ZIP, signing and clean-machine packaging are **not** required by v0.9.1.
 
 If Windows/toolchain validation is unavailable, record the relevant gates as **NOT VERIFIED**, never as passed.
 
 ## CI / PR
 
-- [ ] GitHub Actions result is recorded as PASS / FAIL / BLOCKED / NOT RUN.
-- [ ] infrastructure/billing blockers are described as infrastructure blockers, not code-test failures.
-- [ ] PR verification table contains only factual command/manual results.
-- [ ] the PR remains Draft while UI/localization/manual acceptance is incomplete.
-- [ ] the PR is not merged automatically.
+- [ ] GitHub Actions result is recorded factually as PASS / FAIL / BLOCKED / NOT RUN / NOT VERIFIED.
+- [ ] PR verification table contains only real command/manual results.
+- [ ] PR remains Draft until owner visual acceptance.
+- [ ] PR is not merged automatically.

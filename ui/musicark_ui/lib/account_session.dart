@@ -22,7 +22,10 @@ class AccountSessionController extends ChangeNotifier {
   String get initials {
     final clean = displayName.trim();
     if (clean.isEmpty) return '';
-    final parts = clean.split(RegExp(r'\s+')).where((item) => item.isNotEmpty).toList();
+    final parts = clean
+        .split(RegExp(r'\s+'))
+        .where((item) => item.isNotEmpty)
+        .toList();
     if (parts.length == 1) return _firstRune(parts.first).toUpperCase();
     return '${_firstRune(parts.first)}${_firstRune(parts[1])}'.toUpperCase();
   }
@@ -73,40 +76,66 @@ class SessionAwareMusicArkBridge implements MusicArkBridgeClient {
   @override
   Future<Map<String, dynamic>> bootstrap() => _accountResult(_delegate.bootstrap);
   @override
-  Future<Map<String, dynamic>> login(String token) => _accountResult(() => _delegate.login(token));
+  Future<Map<String, dynamic>> login(String token) =>
+      _accountResult(() => _delegate.login(token));
   @override
-  Future<Map<String, dynamic>> likedRefresh() => _accountResult(_delegate.likedRefresh);
+  Future<Map<String, dynamic>> likedRefresh() =>
+      _accountResult(_delegate.likedRefresh);
   @override
   Future<Map<String, dynamic>> playlists() => _accountResult(_delegate.playlists);
   @override
-  Future<Map<String, dynamic>> playlist(String externalId) => _accountResult(() => _delegate.playlist(externalId));
+  Future<Map<String, dynamic>> playlist(String externalId) =>
+      _accountResult(() => _delegate.playlist(externalId));
   @override
-  Future<Map<String, dynamic>> playlistRefresh(String externalId) => _accountResult(() => _delegate.playlistRefresh(externalId));
+  Future<Map<String, dynamic>> playlistRefresh(String externalId) =>
+      _accountResult(() => _delegate.playlistRefresh(externalId));
   @override
   Future<Map<String, dynamic>> albums() => _accountResult(_delegate.albums);
   @override
-  Future<Map<String, dynamic>> album(String externalId) => _accountResult(() => _delegate.album(externalId));
+  Future<Map<String, dynamic>> album(String externalId) =>
+      _accountResult(() => _delegate.album(externalId));
   @override
-  Future<Map<String, dynamic>> albumRefresh(String externalId) => _accountResult(() => _delegate.albumRefresh(externalId));
+  Future<Map<String, dynamic>> albumRefresh(String externalId) =>
+      _accountResult(() => _delegate.albumRefresh(externalId));
   @override
-  Future<Map<String, dynamic>> libraryRefresh() => _accountResult(_delegate.libraryRefresh);
+  Future<Map<String, dynamic>> libraryRefresh() =>
+      _accountResult(_delegate.libraryRefresh);
   @override
   Future<Map<String, dynamic>> logout() => _accountResult(_delegate.logout);
   @override
-  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) => _delegate.yandexPlaybackPrepare(externalId);
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) =>
+      _delegate.yandexPlaybackPrepare(externalId);
   @override
   Future<Map<String, dynamic>> localRoots() => _delegate.localRoots();
   @override
-  Future<Map<String, dynamic>> localRootAdd(String path) => _delegate.localRootAdd(path);
+  Future<Map<String, dynamic>> localRootAdd(String path) =>
+      _delegate.localRootAdd(path);
   @override
-  Future<Map<String, dynamic>> localRootRemove(int rootId) => _delegate.localRootRemove(rootId);
+  Future<Map<String, dynamic>> localRootRemove(int rootId) =>
+      _delegate.localRootRemove(rootId);
   @override
-  Future<Map<String, dynamic>> localScan({int? rootId}) => _delegate.localScan(rootId: rootId);
+  Future<Map<String, dynamic>> localScan({int? rootId}) =>
+      _delegate.localScan(rootId: rootId);
   @override
-  Future<Map<String, dynamic>> localTracks({int limit = 1000, int offset = 0, String search = '', String sort = 'artist', int? rootId}) =>
-      _delegate.localTracks(limit: limit, offset: offset, search: search, sort: sort, rootId: rootId);
+  Future<Map<String, dynamic>> localTracks({
+    int limit = 1000,
+    int offset = 0,
+    String search = '',
+    String sort = 'artist',
+    int? rootId,
+    List<int>? rootIds,
+  }) =>
+      _delegate.localTracks(
+        limit: limit,
+        offset: offset,
+        search: search,
+        sort: sort,
+        rootId: rootId,
+        rootIds: rootIds,
+      );
   @override
-  Future<Map<String, dynamic>> localTrack(int trackId) => _delegate.localTrack(trackId);
+  Future<Map<String, dynamic>> localTrack(int trackId) =>
+      _delegate.localTrack(trackId);
   @override
   Future<Map<String, dynamic>> localStats() => _delegate.localStats();
 }

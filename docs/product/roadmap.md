@@ -13,7 +13,8 @@ v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
-v0.9.1 — Main Screen UI Polish                         current
+v0.9.1 — Main Screen UI Polish                         complete
+v0.9.2 — Local Library UI & Multi-Root Selection       current
 v0.10.x — Yandex Upload                                next
 ```
 
@@ -41,12 +42,20 @@ The SQLite schema remains `1.8.4`; UI preferences are stored separately. The Yan
 
 ## v0.9.1 — Main Screen UI Polish
 
-v0.9.1 removes the duplicate permanent Yandex navigation sidebar and makes the global MusicArk sidebar the only permanent application navigation. Liked tracks and Playlists move to top-level Yandex workspace navigation, while playlist contents use a detail view with explicit back navigation.
+v0.9.1 removes the duplicate permanent Yandex navigation sidebar and makes the global MusicArk sidebar the only permanent application navigation. Liked tracks, Playlists and Albums use top-level Yandex workspace navigation, while collection contents use detail views with explicit back navigation.
 
-The Yandex workspace becomes responsive for desktop resizing: search/sort/version-label controls reflow, wide track rows use table-like album/label/time columns, compact rows retain the same actions, normal `available` status is hidden, and unavailable playback is disabled with explanatory presentation. ORIGINAL/CENSORED feature bridges remain explicit dependencies.
+The Yandex workspace becomes responsive for desktop resizing: search/sort/version-label controls reflow, wide track rows use table-like columns, compact rows retain the same actions, normal `available` status is hidden, and unavailable playback is disabled with explanatory presentation. ORIGINAL/CENSORED feature bridges remain explicit dependencies.
 
 The release also centralizes small UI layout tokens, adds a theme-aware MusicArk mark, refines light/dark presentation and makes Now Playing responsive without adding new playback semantics. SQLite remains `1.8.4` and backend music behavior is unchanged.
 
+## v0.9.2 — Local Library UI & Multi-Root Selection
+
+v0.9.2 brings Local Library onto the same desktop presentation layer and adds a true multi-root view filter. The user can show all roots, one root, any subset, or no roots without mutating the configured library sources.
+
+Filtering is executed in SQLite before count/search/sort/pagination through a typed root-ID query contract, so large libraries are not filtered from only the first Flutter page. Folder management remains independent from the display filter, and existing playback, metadata editing, content labels and read-only scan boundaries remain intact.
+
+SQLite remains `1.8.4`.
+
 ## Next — v0.10.x Yandex Upload
 
-The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.1**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.1 UI acceptance.
+The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.2**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.2 acceptance.

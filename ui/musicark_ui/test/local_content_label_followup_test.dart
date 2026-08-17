@@ -3,11 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/content_label_bridge.dart';
 import 'package:musicark_ui/folder_picker.dart';
+import 'package:musicark_ui/l10n/app_localizations.dart';
 import 'package:musicark_ui/local_library_page.dart';
 import 'package:musicark_ui/main.dart';
 
 void main() {
-  testWidgets('Local Library scans configured roots on every tab activation', (tester) async {
+  testWidgets('Local Library scans configured roots on every tab activation', (
+    tester,
+  ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await bridge.localRootAdd(r'C:\Music');
     await tester.binding.setSurfaceSize(const Size(1500, 900));
@@ -26,7 +29,9 @@ void main() {
     expect(bridge.localScanCalls, 2);
   });
 
-  testWidgets('local track ORIGINAL/CENSORED label is visible and editable', (tester) async {
+  testWidgets('local track ORIGINAL/CENSORED label is visible and editable', (
+    tester,
+  ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await bridge.localRootAdd(r'C:\Music');
     final labels = FakeContentLabelBridge()..localLabels[1] = 'original';
@@ -34,6 +39,9 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('ru'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: LocalLibraryPage(
           bridge: bridge,
           folderPicker: FakeLocalFolderPicker(null),

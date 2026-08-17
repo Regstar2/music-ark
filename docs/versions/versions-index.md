@@ -14,7 +14,8 @@
 | v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | complete |
 | v0.8.2 | Local Metadata Editor / Yandex Metadata Import | complete |
 | v0.9.0 | UI, Account & Settings | complete |
-| v0.9.1 | Main Screen UI Polish | current / Draft validation |
+| v0.9.1 | Main Screen UI Polish | complete |
+| v0.9.2 | Local Library UI & Multi-Root Selection | current / Draft validation |
 | v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
@@ -32,9 +33,10 @@ Version notes:
 - `docs/versions/v0.8.2.md`
 - `docs/versions/v0.9.0.md`
 - `docs/versions/v0.9.1.md`
+- `docs/versions/v0.9.2.md`
 
-Current package version is `0.9.1`; current schema target remains `1.8.4`. v0.9.1 removes the duplicate permanent Yandex sidebar, introduces responsive Liked/Playlists/detail presentation, table-like track rows, shared UI tokens and responsive Now Playing while preserving the v0.9.0 account/settings shell and all v0.8.2 music semantics.
+Current package version is `0.9.2`; current schema target remains `1.8.4`. v0.9.2 redesigns Local Library for the shared desktop presentation layer and adds backend-filtered all / one / arbitrary subset / empty root selection while preserving search, sort, pagination, playback, metadata editing and content labels.
 
 v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
 
-This index describes source state and does not by itself indicate that v0.9.1 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.
+This index describes source state and does not by itself indicate that v0.9.2 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

@@ -135,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--playlist-id", default=None)
     parser.add_argument("--root-id", type=int, default=None)
+    parser.add_argument("--root-ids", default=None)
     parser.add_argument("--track-id", type=int, default=None)
     parser.add_argument("--provider-id", default="yandex_music")
     parser.add_argument("--external-id", default=None)
@@ -177,6 +178,28 @@ def _required_local_file_id(value: int | None) -> int:
     return int(value)
 
 
+def _parse_root_ids(value: str | None) -> list[int] | None:
+    """Decode the optional JSON list used by the Local Library view filter."""
+    if value is None:
+        return None
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise BridgeRequestError("--root-ids must be a JSON array of positive integer IDs.") from exc
+    if not isinstance(decoded, list):
+        raise BridgeRequestError("--root-ids must be a JSON array of positive integer IDs.")
+
+    values: list[int] = []
+    seen: set[int] = set()
+    for item in decoded:
+        if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
+            raise BridgeRequestError("--root-ids must contain only positive integer IDs.")
+        if item not in seen:
+            values.append(item)
+            seen.add(item)
+    return values
+
+
 def _local_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str, Any]:
     service = LocalLibraryService(base_dir=base_dir)
     if args.command == "local_roots":
@@ -191,7 +214,16 @@ def _local_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[str,
     if args.command == "local_scan":
         return service.scan(args.root_id)
     if args.command == "local_tracks":
-        return service.tracks(limit=args.limit, offset=args.offset, search=args.search, sort=args.sort, root_id=args.root_id)
+        if args.root_id is not None and args.root_ids is not None:
+            raise BridgeRequestError("--root-id and --root-ids cannot be supplied together.")
+        return service.tracks(
+            limit=args.limit,
+            offset=args.offset,
+            search=args.search,
+            sort=args.sort,
+            root_id=args.root_id,
+            root_ids=_parse_root_ids(args.root_ids),
+        )
     if args.command == "local_track":
         return service.track(_required_track_id(args.track_id))
     if args.command == "local_stats":
@@ -206,7 +238,13 @@ def _matching_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[s
     if args.command == "matching_run":
         return service.run()
     if args.command == "matching_results":
-        return service.results(limit=args.limit, offset=args.offset, status=args.status, search=args.search, sort=args.sort)
+        return service.results(
+            limit=args.limit,
+            offset=args.offset,
+            status=args.status,
+            search=args.search,
+            sort=args.sort,
+        )
     external_id = _required_text(args.external_id, "--external-id")
     if args.command == "matching_result":
         return service.result(external_id)
@@ -259,9 +297,16 @@ def _coverage_payload(args: argparse.Namespace, base_dir: Path | None) -> dict[s
     if args.command == "coverage_collections":
         return service.collections()
     if args.command == "coverage_tracks":
-        return service.tracks(collection_id=args.collection_id, status=args.status or "missing", search=args.search,
-                              sort=args.sort, user_action=args.user_action, variant_status=args.variant_status,
-                              limit=args.limit, offset=args.offset)
+        return service.tracks(
+            collection_id=args.collection_id,
+            status=args.status or "missing",
+            search=args.search,
+            sort=args.sort,
+            user_action=args.user_action,
+            variant_status=args.variant_status,
+            limit=args.limit,
+            offset=args.offset,
+        )
     if args.command == "coverage_set_actions":
         return service.set_actions(_coverage_bulk_ids(), _required_text(args.action, "--action"))
     external_id = _required_text(args.external_id, "--external-id")

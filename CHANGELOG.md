@@ -2,9 +2,48 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.1 Draft candidate
+## Unreleased — v0.9.2 Draft candidate
 
-### v0.9.1 — Main Screen UI Polish
+### v0.9.2 — Local Library UI & Multi-Root Selection
+
+#### Added
+
+- a true Local Library multi-root view filter that can represent all configured roots, one root, an arbitrary subset, or no roots;
+- typed `rootIds` query plumbing from Flutter through `mvp_bridge` and `LocalLibraryService` into SQLite;
+- parameterized multi-root `IN (...)` filtering before `COUNT`, search, sort, `LIMIT` and `OFFSET`;
+- root-selection reconciliation for add/remove operations, including auto-selection of a newly added root only when the previous state represented all roots;
+- dedicated Local Library empty states for no configured roots, no selected roots and no search results;
+- Python regression coverage for all/one/multiple/empty root sets, combined search/sort/pagination and invalid process-boundary input;
+- Flutter regression coverage for root selection, select-all, empty selection, pagination/search/sort preservation and add/remove reconciliation.
+
+#### Changed
+
+- Local Library now uses the shared v0.9.x desktop presentation hierarchy: page header, responsive toolbar, compact root-management section and responsive track rows;
+- root management is visually and semantically separate from the root view filter;
+- wide Local track rows expose artwork, title/artist, album, year, format, ORIGINAL/CENSORED, duration and compact actions; narrower desktop layouts collapse secondary metadata without changing functionality;
+- ORIGINAL/CENSORED presentation remains editable from the status control while secondary file/details actions move into overflow;
+- routine successful scan feedback is compact, while scan errors remain explicit;
+- application/backend/Flutter package version advances to `0.9.2`; SQLite remains `1.8.4`.
+
+#### Localization
+
+- all new Local Library filter, table, folder-management, scan-status and empty-state strings are provided through existing RU/EN `gen_l10n` resources;
+- paths, filenames, track/provider metadata, codecs, IDs and backend codes remain untranslated.
+
+#### Safety / boundaries
+
+- multi-root selection is query/view state only and does not modify configured roots unless the user explicitly uses root-management actions;
+- Local Scan, Matching, Coverage and Controlled Sync remain non-mutating for existing user audio files;
+- Metadata Editor remains the explicit ordinary write boundary for an existing local file;
+- ORIGINAL/CENSORED labels remain MusicArk-local state and do not mutate Yandex Music or audio metadata;
+- no SQLite migration is introduced for v0.9.2.
+
+#### Verification state
+
+- source-level Python syntax compilation and localization-resource JSON/key-parity checks were performed while preparing the branch;
+- GitHub Actions Python/Flutter suites and Windows visual smoke must be recorded only after they actually run against the v0.9.2 PR head.
+
+## v0.9.1 — Main Screen UI Polish
 
 #### Added
 

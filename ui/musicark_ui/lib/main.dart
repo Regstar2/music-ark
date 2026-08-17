@@ -109,6 +109,31 @@ class _MusicArkShellState extends State<_MusicArkShell> {
     });
   }
 
+  Widget _buildYandexSection() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The Yandex page still contains its own fixed-width 280 px sidebar and
+        // desktop track controls. Letting the outer shell squeeze that nested
+        // layout to phone-like widths makes ListTile.trailing consume the whole
+        // row and can trigger a render exception. Until the Yandex page gets a
+        // dedicated compact layout, keep a safe desktop workspace and scroll it
+        // horizontally on unusually narrow windows instead of crashing.
+        const minimumWorkspaceWidth = 920.0;
+        final workspaceWidth = constraints.maxWidth < minimumWorkspaceWidth
+            ? minimumWorkspaceWidth
+            : constraints.maxWidth;
+        return SingleChildScrollView(
+          key: const Key('yandex-horizontal-viewport'),
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: workspaceWidth,
+            child: yandex.MusicArkHomePage(bridge: widget.bridge),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -175,7 +200,7 @@ class _MusicArkShellState extends State<_MusicArkShell> {
                               child: YandexContentLabelsButton(bridge: widget.bridge),
                             ),
                           ),
-                          Expanded(child: yandex.MusicArkHomePage(bridge: widget.bridge)),
+                          Expanded(child: _buildYandexSection()),
                         ],
                       ),
                       _localLibraryOpened

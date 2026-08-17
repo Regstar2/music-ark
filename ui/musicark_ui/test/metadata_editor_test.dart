@@ -149,11 +149,11 @@ void main() {
     await tester.tap(find.byKey(const Key('metadata-suggest-filename')));
     await tester.pump();
     final field = tester.widget<TextField>(find.byKey(const Key('metadata-field-fileName')));
-    expect(field.controller!.text, 'Новая песня.mp3');
+    expect(field.controller!.text, 'Second Artist - Новая песня.mp3');
     await tester.scrollUntilVisible(find.byKey(const Key('metadata-save')), 600);
     await tester.tap(find.byKey(const Key('metadata-save')));
     await tester.pumpAndSettle();
-    expect((bridge.updates.single['changes'] as Map)['fileName'], 'Новая песня.mp3');
+    expect((bridge.updates.single['changes'] as Map)['fileName'], 'Second Artist - Новая песня.mp3');
   });
 
   testWidgets('Apply + Bind explicitly requests exact user-confirmed identity', (tester) async {

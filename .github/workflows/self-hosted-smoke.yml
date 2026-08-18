@@ -1,9 +1,6 @@
 name: Self-hosted runner smoke test
 
 on:
-  push:
-    branches:
-      - chore/self-hosted-runner-smoke
   pull_request:
     branches:
       - main
@@ -16,7 +13,7 @@ jobs:
   smoke:
     name: Smoke test on local Windows runner
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 5
+    timeout-minutes: 3
 
     steps:
       - name: Show runner environment
@@ -40,18 +37,10 @@ jobs:
             $cmd = Get-Command $name -ErrorAction SilentlyContinue
             if ($null -eq $cmd) {
               Write-Host "NOT FOUND"
-              continue
-            }
-
-            Write-Host "Path: $($cmd.Source)"
-            switch ($name) {
-              'git'     { git --version }
-              'python'  { python --version }
-              'pip'     { pip --version }
-              'node'    { node --version }
-              'npm'     { npm --version }
-              'flutter' { flutter --version }
-              'dart'    { dart --version }
+            } else {
+              Write-Host "FOUND"
+              Write-Host "Path: $($cmd.Source)"
+              Write-Host "CommandType: $($cmd.CommandType)"
             }
           }
 

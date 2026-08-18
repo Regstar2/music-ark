@@ -7,7 +7,9 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from musicark.core.errors import StorageError
 from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.database import initialize_database
 
@@ -51,6 +53,52 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("local_track_content_labels", tables)
             self.assertIn("provider_track_content_labels", tables)
             self.assertIn("variant_user_acceptance", tables)
+
+    def test_initialize_database_retries_one_transient_locked_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "musicark.db"
+            real_connect = sqlite3.connect
+            attempts = 0
+
+            def flaky_connect(*args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise sqlite3.OperationalError("database is locked")
+                return real_connect(*args, **kwargs)
+
+            with (
+                patch(
+                    "musicark.storage.database.sqlite3.connect",
+                    side_effect=flaky_connect,
+                ),
+                patch("musicark.storage.database.time.sleep") as sleep,
+            ):
+                initialize_database(db_path)
+
+            self.assertEqual(attempts, 2)
+            sleep.assert_called_once()
+            with closing(sqlite3.connect(db_path)) as conn:
+                version = conn.execute(
+                    "SELECT value FROM app_metadata WHERE key='schema_version'"
+                ).fetchone()[0]
+            self.assertEqual(version, "1.8.4")
+
+    def test_initialize_database_does_not_retry_non_locking_sqlite_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "musicark.db"
+            with (
+                patch(
+                    "musicark.storage.database.sqlite3.connect",
+                    side_effect=sqlite3.OperationalError("disk I/O error"),
+                ) as connect,
+                patch("musicark.storage.database.time.sleep") as sleep,
+            ):
+                with self.assertRaises(StorageError):
+                    initialize_database(db_path)
+
+            self.assertEqual(connect.call_count, 1)
+            sleep.assert_not_called()
 
     def test_audit_log_insert_persists_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

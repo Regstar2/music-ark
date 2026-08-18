@@ -2,14 +2,28 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.2 — Local Library UI & Multi-Root Selection.**  
+**Current code version: 0.9.3 — Matching UI Redesign.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.2 does not change music semantics; it redesigns Local Library and adds backend filtering for an arbitrary set of local library folders.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.3 does not change music semantics; it redesigns Matching as a Yandex ↔ Local comparison workspace while preserving the existing bridge and domain boundaries.
+
+## Matching v0.9.3
+
+The `Matching` section presents results as a desktop-oriented comparison workspace:
+
+```text
+Yandex Music | Local file | Confidence | Status
+```
+
+The page starts with separate summary cards for Yandex/Local track counts, Matched, Needs review and Not found, followed by Matching/Variant actions, counted filters, Search and Sort. Confidence is presented as a compact percentage plus progress meter instead of a large circular indicator.
+
+Matching status and Variant status remain separate concepts: Matching establishes identity, while Variant checks the recording/version. Clicking a row still opens the existing detail workflow with Yandex/Local comparison, ORIGINAL/CENSORED labels, Variant verification/acceptance and manual decisions for conflict candidates.
+
+Search/Sort/filters continue to use the existing bridge query contract; pagination preserves the active query scope and reports `Shown X of Y`. On narrower desktop windows the comparison table scrolls horizontally instead of collapsing its semantic columns. v0.9.3 adds no per-row network artwork requests, no new Matching/Variant algorithm and no SQLite migration.
 
 ## Local Library v0.9.2
 
-Local Library now uses the same desktop presentation layer as the rest of MusicArk: a compact header, one toolbar, a separate source-management section and a responsive table-like track list.
+Local Library uses the same desktop presentation layer as the rest of MusicArk: a compact header, one toolbar, a separate source-management section and a responsive table-like track list.
 
 The `Folders` filter can display:
 
@@ -172,7 +186,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.2 does not bump the SQLite schema. Multi-root selection is query/view state, while theme/locale preferences remain separate from the music database. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.3 does not bump the SQLite schema. The Matching redesign is a Flutter presentation change; multi-root selection remains query/view state, while theme/locale preferences remain separate from the music database. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -201,8 +215,9 @@ v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
-v0.9.2 — Local Library UI & Multi-Root Selection       current
+v0.9.2 — Local Library UI & Multi-Root Selection       complete
+v0.9.3 — Matching UI Redesign                          current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.2. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.3. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.3.md`, `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

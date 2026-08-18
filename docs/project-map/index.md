@@ -1,6 +1,6 @@
 # MusicArk Project Map
 
-## Active desktop path — v0.9.2 Local Library UI over v0.8.2 music baseline
+## Active desktop path — v0.9.3 Matching UI over v0.8.2 music baseline
 
 ```text
 ui/musicark_ui/
@@ -16,7 +16,7 @@ ui/musicark_ui/
   lib/audio_player.dart               application-wide responsive media_kit Now Playing UI/controller
   lib/local_library_page.dart         Local Library desktop UI + multi-root view filter + scan/content marks
   lib/metadata_editor_page.dart       explicit local metadata/artwork/filename editor
-  lib/matching_page.dart              identity/variant comparison UI + labels + variant acceptance
+  lib/matching_page.dart              responsive Yandex↔Local comparison workspace + detail/manual decisions
   lib/coverage_page.dart              Coverage / Missing / wanted-ignored triage
   lib/download_page.dart              production user queue / local playback entry points
   lib/sync_page.dart                  Controlled Sync preview / blockers / confirmation / history
@@ -38,6 +38,24 @@ src/musicark/
   download/                           authorized acquisition, metadata enrichment and queue service
   sync/                               read-only planner, staleness checks and enqueue-only Apply
 ```
+
+## Matching presentation boundary
+
+v0.9.3 changes only the Flutter presentation of existing Matching/Variant results. The bridge remains authoritative for filtering, sorting, identity decisions and Variant analysis.
+
+```text
+MatchingPage
+  → matchingSummary / matchingResults
+  → existing Matching bridge
+  → persisted identity state
+
+row click
+  → matchingResult
+  → optional variantResult
+  → existing detail / manual accept-reject / content-label / variant-acceptance flows
+```
+
+The workspace keeps Matching identity and Variant recording status separate. Confidence remains the existing matcher value; the UI only changes its presentation from a large circle to a compact percentage + meter. Narrow desktop windows keep the side-by-side semantics through horizontal table scrolling rather than introducing a second mobile layout.
 
 ## Local Library root selection boundary
 
@@ -63,9 +81,9 @@ SQLite COUNT / search / sort / LIMIT / OFFSET over the same filtered set
 
 `YandexLibraryService.bootstrap()` is cache-first. It exposes cached liked tracks, playlist metadata and the explicit Yandex Music liked-album index. `library_refresh()` refreshes those indexes without eagerly fetching every playlist or album. Opening one playlist or album loads that collection lazily and caches its ordered tracks.
 
-The Albums tab is **not** derived from album tags on tracks in `Мне нравится / Liked`. It represents albums explicitly liked by the authenticated Yandex Music account through the pinned provider client. MusicArk only reads and caches this information; v0.9.2 does not like/unlike albums or otherwise mutate Yandex Music.
+The Albums tab is **not** derived from album tags on tracks in `Мне нравится / Liked`. It represents albums explicitly liked by the authenticated Yandex Music account through the pinned provider client. MusicArk only reads and caches this information; v0.9.3 does not like/unlike albums or otherwise mutate Yandex Music.
 
-The album cache and Local Library v0.9.2 query changes reuse existing schema `1.8.4`; no database migration is required.
+The album cache, Local Library root filter and Matching UI v0.9.3 all reuse existing schema `1.8.4`; no database migration is required.
 
 ## Authoritative safety boundaries
 
@@ -79,8 +97,9 @@ Metadata Editor remains the explicit ordinary write boundary. Local Scan, root s
 
 ## Documentation entry points
 
-- `docs/versions/v0.9.2.md` — current Draft milestone and verification gate;
-- `docs/architecture/ui-design-system.md` — desktop presentation and Local Library responsive rules;
+- `docs/versions/v0.9.3.md` — current Matching UI Draft milestone and verification gate;
+- `docs/versions/v0.9.2.md` — Local Library multi-root query/view semantics;
+- `docs/architecture/ui-design-system.md` — shared desktop presentation rules;
 - `docs/architecture/app-shell-settings.md` — shell/account/preferences boundaries;
 - `docs/architecture/metadata-editor.md` — explicit local write boundary;
 - `docs/architecture/content-labels.md` — ORIGINAL/CENSORED app-level marks;

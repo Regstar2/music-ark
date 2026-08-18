@@ -2,10 +2,24 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.2 — Local Library UI & Multi-Root Selection.**  
+**Текущая версия кода: 0.9.3 — Matching UI Redesign.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.2 не меняет музыкальную семантику: версия перерабатывает Local Library и добавляет backend-фильтрацию по произвольному набору локальных папок.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.3 не меняет музыкальную семантику: версия перерабатывает экран Matching в сравнительный workspace Яндекс ↔ Local и сохраняет существующие bridge/domain boundaries.
+
+## Matching v0.9.3
+
+Раздел `Сопоставление` показывает результаты как desktop-oriented comparison workspace:
+
+```text
+Яндекс Музыка | Локальный файл | Уверенность | Статус
+```
+
+Сверху расположены отдельные summary-карточки для количества Yandex/Local tracks, Matched, Needs review и Not found, затем действия Matching/Variant, counted filters, Search и Sort. Confidence отображается компактным процентом и progress meter вместо большого кругового индикатора.
+
+Matching status и Variant status остаются разными сущностями: Matching отвечает за identity, а Variant — за проверку записи/версии. Строка открывает прежний detail workflow с Yandex/Local comparison, ORIGINAL/CENSORED, Variant verification/acceptance и ручными решениями для conflict candidates.
+
+Search/Sort/filters продолжают использовать существующий bridge contract; pagination сохраняет текущий query scope и показывает `Показано X из Y`. На узком desktop window сравнительная таблица прокручивается горизонтально вместо разрушения структуры колонок. v0.9.3 не добавляет per-row network artwork, новый Matching/Variant algorithm или SQLite migration.
 
 ## Local Library v0.9.2
 
@@ -172,7 +186,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.2 не повышает SQLite schema. Multi-root selection — query/view state, а theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.3 не повышает SQLite schema. Matching redesign является Flutter presentation change; multi-root selection остаётся query/view state, а theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -201,8 +215,9 @@ v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
-v0.9.2 — Local Library UI & Multi-Root Selection       current
+v0.9.2 — Local Library UI & Multi-Root Selection       complete
+v0.9.3 — Matching UI Redesign                          current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.2 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.3 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.3.md`, `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

@@ -22,7 +22,7 @@ import yandex_upload_target_probe as target_probe
 
 DEFAULT_NAMES = ("getUploadUrl", "uploadFile")
 _SENSITIVE_RE = re.compile(
-    r"(?:authorization|cookie|token|secret|session|csrf|xsrf|passport|sign(?:ature)?|credential)",
+    r"(?:authorization|cookie|token|secret|session|csrf|xsrf|passport|credential|(?:^|[._:-])sign(?:ature)?(?:$|[._:-]))",
     re.IGNORECASE,
 )
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")

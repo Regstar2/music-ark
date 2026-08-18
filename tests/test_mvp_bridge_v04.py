@@ -16,6 +16,7 @@ class LocalLibraryBridgeV04Tests(unittest.TestCase):
         values = {
             "command": command,
             "root_id": None,
+            "root_ids": None,
             "track_id": None,
             "limit": 500,
             "offset": 0,
@@ -62,6 +63,7 @@ class LocalLibraryBridgeV04Tests(unittest.TestCase):
             search="Linkin Park",
             sort="album",
             root_id=7,
+            root_ids=None,
         )
         self.assertEqual(result["count"], 0)
 

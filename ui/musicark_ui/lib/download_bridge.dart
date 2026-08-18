@@ -6,10 +6,15 @@ abstract interface class DownloadBridgeClient {
   Future<Map<String, dynamic>> tasks({String status = '', int limit = 1000});
   Future<Map<String, dynamic>> enqueue(String externalId);
   Future<Map<String, dynamic>> enqueueWanted();
+  Future<Map<String, dynamic>> enqueueSelected(List<String> externalIds);
   Future<Map<String, dynamic>> runQueue();
   Future<Map<String, dynamic>> runTask(String taskId);
+  Future<Map<String, dynamic>> runTasks(List<String> taskIds);
   Future<Map<String, dynamic>> retry(String taskId);
+  Future<Map<String, dynamic>> retryTasks(List<String> taskIds);
   Future<Map<String, dynamic>> cancel(String taskId);
+  Future<Map<String, dynamic>> cancelTasks(List<String> taskIds);
+  Future<Map<String, dynamic>> removeTasks(List<String> taskIds);
   Future<Map<String, dynamic>> clearCompleted();
   Future<Map<String, dynamic>> settings();
   Future<Map<String, dynamic>> setTarget(String path);
@@ -19,30 +24,61 @@ abstract interface class DownloadBridgeClient {
 class DownloadBridge implements DownloadBridgeClient {
   @override
   Future<Map<String, dynamic>> summary() => _run('summary');
+
   @override
   Future<Map<String, dynamic>> tasks({String status = '', int limit = 1000}) =>
       _run('tasks', status: status, limit: limit);
+
   @override
   Future<Map<String, dynamic>> enqueue(String externalId) =>
       _run('enqueue', externalId: externalId);
+
   @override
   Future<Map<String, dynamic>> enqueueWanted() => _run('enqueue_wanted');
+
+  @override
+  Future<Map<String, dynamic>> enqueueSelected(List<String> externalIds) =>
+      _runAction('enqueue_selected', externalIds: externalIds);
+
   @override
   Future<Map<String, dynamic>> runQueue() => _run('run');
+
   @override
   Future<Map<String, dynamic>> runTask(String taskId) =>
       _run('run_task', taskId: taskId);
+
+  @override
+  Future<Map<String, dynamic>> runTasks(List<String> taskIds) =>
+      _runAction('run_tasks', taskIds: taskIds);
+
   @override
   Future<Map<String, dynamic>> retry(String taskId) => _run('retry', taskId: taskId);
+
+  @override
+  Future<Map<String, dynamic>> retryTasks(List<String> taskIds) =>
+      _runAction('retry_tasks', taskIds: taskIds);
+
   @override
   Future<Map<String, dynamic>> cancel(String taskId) => _run('cancel', taskId: taskId);
+
+  @override
+  Future<Map<String, dynamic>> cancelTasks(List<String> taskIds) =>
+      _runAction('cancel_tasks', taskIds: taskIds);
+
+  @override
+  Future<Map<String, dynamic>> removeTasks(List<String> taskIds) =>
+      _runAction('remove_tasks', taskIds: taskIds);
+
   @override
   Future<Map<String, dynamic>> clearCompleted() => _run('clear_completed');
+
   @override
   Future<Map<String, dynamic>> settings() => _run('settings');
+
   @override
   Future<Map<String, dynamic>> setTarget(String path) =>
       _run('set_target', targetPath: path);
+
   @override
   Future<Map<String, dynamic>> recover() => _run('recover');
 
@@ -87,6 +123,80 @@ class DownloadBridge implements DownloadBridgeClient {
       if (limit != null) ...['--limit', '$limit'],
     ];
 
+    return _runPython(
+      python: python,
+      args: args,
+      repoRoot: repoRoot,
+      environment: environment,
+    );
+  }
+
+  Future<Map<String, dynamic>> _runAction(
+    String command, {
+    List<String> taskIds = const [],
+    List<String> externalIds = const [],
+  }) async {
+    final repoRoot = _resolveRepoRoot();
+    final python = await _resolvePythonCommand(repoRoot);
+    final separator = Platform.pathSeparator;
+    final srcPath = '$repoRoot${separator}src';
+    final existingPythonPath = Platform.environment['PYTHONPATH'];
+    final environment = <String, String>{
+      ...Platform.environment,
+      'PYTHONPATH': existingPythonPath == null || existingPythonPath.isEmpty
+          ? srcPath
+          : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath',
+      'PYTHONIOENCODING': 'utf-8',
+      'PYTHONUTF8': '1',
+    };
+    environment.remove('YANDEX_MUSIC_TOKEN');
+
+    final cleanTaskIds = taskIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
+    final cleanExternalIds =
+        externalIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
+    final batchFile = File(
+      '${Directory.systemTemp.path}${separator}musicark-download-batch-$pid-${DateTime.now().microsecondsSinceEpoch}.json',
+    );
+    try {
+      await batchFile.writeAsString(
+        jsonEncode({
+          'taskIds': cleanTaskIds,
+          'externalIds': cleanExternalIds,
+        }),
+        encoding: utf8,
+        flush: true,
+      );
+      final args = <String>[
+        ...python.prefixArgs,
+        '-m',
+        'musicark.download.actions_bridge',
+        '--base-dir',
+        repoRoot,
+        '--batch-file',
+        batchFile.path,
+        command,
+      ];
+      return await _runPython(
+        python: python,
+        args: args,
+        repoRoot: repoRoot,
+        environment: environment,
+      );
+    } finally {
+      try {
+        await batchFile.delete();
+      } on FileSystemException {
+        // The batch file contains only task/provider IDs and can be reclaimed by the OS.
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>> _runPython({
+    required _PythonCommand python,
+    required List<String> args,
+    required String repoRoot,
+    required Map<String, String> environment,
+  }) async {
     final result = await Process.run(
       python.executable,
       args,
@@ -209,6 +319,7 @@ class DownloadBridgeException implements Exception {
 
 class FakeDownloadBridge implements DownloadBridgeClient {
   FakeDownloadBridge({this.configured = true});
+
   bool configured;
   bool runCalled = false;
   int runTaskCalls = 0;
@@ -218,6 +329,11 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   int enqueueWantedCalls = 0;
   String? lastEnqueuedId;
   String? selectedPath;
+  final List<List<String>> retryBatches = [];
+  final List<List<String>> cancelBatches = [];
+  final List<List<String>> removeBatches = [];
+  final List<List<String>> runBatches = [];
+  final List<List<String>> enqueueSelectedBatches = [];
 
   final List<Map<String, dynamic>> items = [
     {
@@ -274,7 +390,7 @@ class FakeDownloadBridge implements DownloadBridgeClient {
           'queued': items.where((e) => e['status'] == 'queued').length,
           'running': items.where((e) => e['status'] == 'running').length,
           'completed': items.where((e) => e['status'] == 'completed').length,
-          'failed': items.where((e) => e['status'] == 'failed').length,
+          'failed': items.where((e) => e['status'] == 'failed' || e['status'] == 'needs_review').length,
           'cancelled': items.where((e) => e['status'] == 'cancelled').length,
           'skipped': items.where((e) => e['status'] == 'skipped').length,
           'total': items.length,
@@ -327,6 +443,38 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   }
 
   @override
+  Future<Map<String, dynamic>> enqueueSelected(List<String> externalIds) async {
+    final clean = externalIds.toSet().toList();
+    enqueueSelectedBatches.add(clean);
+    final created = <Map<String, dynamic>>[];
+    for (final externalId in clean) {
+      final existing = items.where((item) => '${item['externalId']}' == externalId && item['status'] == 'queued').toList();
+      if (existing.isNotEmpty) {
+        created.add(existing.first);
+        continue;
+      }
+      final item = <String, dynamic>{
+        'id': 'selected-$externalId',
+        'provider': 'yandex_music',
+        'externalId': externalId,
+        'title': 'Selected $externalId',
+        'artists': ['Artist'],
+        'status': 'queued',
+        'progress': null,
+        'downloadedBytes': 0,
+        'totalBytes': null,
+        'targetPath': r'C:\Music\MusicArk\Selected.mp3',
+        'error': null,
+        'canRetry': false,
+        'canCancel': true,
+      };
+      items.add(item);
+      created.add(item);
+    }
+    return _batchResult(clean, created, const []);
+  }
+
+  @override
   Future<Map<String, dynamic>> runQueue() async {
     runCalled = true;
     return {'processed': 0, 'items': []};
@@ -361,13 +509,39 @@ class FakeDownloadBridge implements DownloadBridgeClient {
   }
 
   @override
+  Future<Map<String, dynamic>> runTasks(List<String> taskIds) async {
+    final clean = taskIds.toSet().toList();
+    runBatches.add(clean);
+    final result = <Map<String, dynamic>>[];
+    for (final taskId in clean) {
+      final payload = await runTask(taskId);
+      final raw = payload['task'];
+      if (raw is Map) result.add(Map<String, dynamic>.from(raw));
+    }
+    return _batchResult(clean, result, const []);
+  }
+
+  @override
   Future<Map<String, dynamic>> retry(String taskId) async {
     final item = items.firstWhere((e) => e['id'] == taskId);
     item['status'] = 'queued';
     item['error'] = null;
+    item['errorCode'] = null;
     item['canRetry'] = false;
     item['canCancel'] = true;
     return {'task': item};
+  }
+
+  @override
+  Future<Map<String, dynamic>> retryTasks(List<String> taskIds) async {
+    final clean = taskIds.toSet().toList();
+    retryBatches.add(clean);
+    final result = <Map<String, dynamic>>[];
+    for (final taskId in clean) {
+      final payload = await retry(taskId);
+      result.add(Map<String, dynamic>.from(payload['task'] as Map));
+    }
+    return _batchResult(clean, result, const []);
   }
 
   @override
@@ -376,6 +550,41 @@ class FakeDownloadBridge implements DownloadBridgeClient {
     item['status'] = 'cancelled';
     item['canCancel'] = false;
     return {'task': item};
+  }
+
+  @override
+  Future<Map<String, dynamic>> cancelTasks(List<String> taskIds) async {
+    final clean = taskIds.toSet().toList();
+    cancelBatches.add(clean);
+    final result = <Map<String, dynamic>>[];
+    for (final taskId in clean) {
+      final payload = await cancel(taskId);
+      result.add(Map<String, dynamic>.from(payload['task'] as Map));
+    }
+    return _batchResult(clean, result, const []);
+  }
+
+  @override
+  Future<Map<String, dynamic>> removeTasks(List<String> taskIds) async {
+    final clean = taskIds.toSet().toList();
+    removeBatches.add(clean);
+    final removed = <Map<String, dynamic>>[];
+    final errors = <Map<String, dynamic>>[];
+    for (final taskId in clean) {
+      final index = items.indexWhere((item) => item['id'] == taskId);
+      if (index < 0) {
+        errors.add({'id': taskId, 'code': 'invalid_task', 'message': 'Task not found.'});
+        continue;
+      }
+      final status = '${items[index]['status']}';
+      if (status != 'failed' && status != 'needs_review') {
+        errors.add({'id': taskId, 'code': 'not_removable', 'message': 'Task is active.'});
+        continue;
+      }
+      items.removeAt(index);
+      removed.add({'id': taskId, 'status': 'removed'});
+    }
+    return _batchResult(clean, removed, errors);
   }
 
   @override
@@ -405,4 +614,21 @@ class FakeDownloadBridge implements DownloadBridgeClient {
 
   @override
   Future<Map<String, dynamic>> recover() async => {'recovered': 0};
+
+  Map<String, dynamic> _batchResult(
+    List<String> requested,
+    List<Map<String, dynamic>> result,
+    List<Map<String, dynamic>> errors,
+  ) {
+    final skipped = result.where((item) => item['status'] == 'skipped').length;
+    return {
+      'requested': requested.length,
+      'processed': result.length + errors.length,
+      'succeeded': result.length - skipped,
+      'failed': errors.length,
+      'skipped': skipped,
+      'items': result,
+      'errors': errors,
+    };
+  }
 }

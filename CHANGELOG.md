@@ -2,9 +2,43 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.4 Draft candidate
+## Unreleased — v0.9.5 Draft candidate
 
-### v0.9.4 — Coverage / Missing UI Polish
+### v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions
+
+#### Added
+
+- compact Downloads/Wanted tabs, four queue summary metrics, search/status filters and lazy-rendered compact track rows;
+- user-friendly error messages derived from `errorCode` plus a separate technical-details dialog preserving raw backend diagnostics;
+- explicit safe task removal for `failed` / `needs_review`, with confirmation and `download_task_removed` audit evidence;
+- selection and bulk retry/cancel/remove actions in Downloads;
+- selection plus `Download selected` in Wanted;
+- one-process batch bridge commands for retry/cancel/remove/run/enqueue-selected with partial-result reporting;
+- RU/EN localization for the redesigned Downloads workspace;
+- Python and Flutter regression coverage for task removal, queue isolation, bulk actions, search, progress, technical details and localization.
+
+#### Changed
+
+- Downloads no longer builds every task as a large eager Card list; the workspace uses `CustomScrollView` / `SliverList` and denser desktop rows;
+- Download-all-Wanted runs only task IDs newly added by that action rather than waking unrelated queued work;
+- bulk retry runs only selected retryable task IDs; bulk selected download runs only task IDs returned by the selected enqueue action;
+- existing explicit `Continue queue` remains sequential and retains the stop-after-current behavior when leaving Downloads;
+- Flutter package version advances to `0.9.5+1`; SQLite remains `1.8.4`.
+
+#### Safety / boundaries
+
+- removing a download task deletes only the `download_tasks` record and never deletes the final audio file, Local Library, Matching, Coverage, Wanted state, provider cache or audit history;
+- only the expected sibling `.part` may be removed, after a safe path check;
+- queued/running tasks remain cancellation-only and cannot be directly removed;
+- user bulk actions reject internal/legacy download tasks;
+- no SQLite migration, new provider, new dependency, Yandex mutation or Metadata Editor/Controlled Sync behavior is introduced.
+
+#### Verification state
+
+- source changes and regression tests are included in the v0.9.5 branch;
+- GitHub Actions Python/Flutter results and Windows visual smoke are recorded only after they actually run against the final PR head.
+
+## v0.9.4 — Coverage / Missing UI Polish
 
 #### Added
 

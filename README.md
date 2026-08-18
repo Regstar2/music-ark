@@ -2,10 +2,18 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.4 — Coverage / Missing UI Polish.**  
+**Текущая версия кода: 0.9.5 — Downloads UI, Safe Deletion & Bulk Actions.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.4 не меняет музыкальную семантику: версия перерабатывает экран Coverage / «Недостающие» и сохраняет существующие bridge/domain boundaries.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.5 перерабатывает экран Downloads, добавляет безопасное удаление ошибочных задач и явные batch actions, не превращая удаление записи очереди в удаление музыкального файла.
+
+## Downloads v0.9.5
+
+Раздел `Загрузки` теперь использует компактные counted tabs `Загрузки` / `Нужные`, отдельные summary-метрики, поиск/status filters, компактные lazy-rendered track rows и contextual bulk actions. Ошибка показывается человекочитаемым сообщением по `errorCode`, а raw backend message, task/provider/external ID доступны отдельно в технических сведениях.
+
+Для `failed` и `needs_review` доступно явное `Удалить`. Оно удаляет только запись download task; final audio file, Local Library, Matching, Coverage, Wanted state, provider cache и audit history не удаляются. Ожидаемый sibling `.part` может быть очищен best-effort только после проверки безопасного пути. `queued`/`running` удалять напрямую нельзя — для них используется существующая отмена.
+
+Массовый выбор поддерживает retry ошибок, cancel активных задач, удаление ошибок и `Скачать выбранные` во вкладке Wanted. Batch bridge передаёт список ID одним Python process и возвращает частичный результат. `Повторить выбранные` и `Скачать выбранные` запускают только task IDs текущего действия и не будят старую unrelated queue.
 
 ## Coverage / Missing v0.9.4
 
@@ -128,7 +136,7 @@ reason     = user_confirmed
 
 ## Безопасность изменения файлов
 
-Scan, root view filtering, Matching, Coverage и Sync **не изменяют пользовательские аудиофайлы**. Существующий файл изменяется только после явного действия в Metadata Editor.
+Scan, root view filtering, Matching, Coverage и Sync **не изменяют пользовательские аудиофайлы**. Существующий файл изменяется только после явного действия в Metadata Editor. Удаление failed/needs-review download task в v0.9.5 также не удаляет final audio file.
 
 Для MP3 используется pipeline:
 
@@ -153,6 +161,8 @@ atomic os.replace()
 Local Library показывает thumbnail каждого трека. Приоритет: embedded artwork, затем уже cached Yandex artwork для подтверждённой identity, затем placeholder. Список локальной библиотеки не делает Yandex request для каждой строки.
 
 В Yandex Library доступны artwork и встроенное воспроизведение. Backend готовит или переиспользует приватный playback cache под `.musicark/playback/yandex` и передаёт Flutter только локальный путь. Yandex token, Authorization headers и protected/signed provider media URL во Flutter не передаются. Playback cache не индексируется в Local Library и не влияет на Matching или Coverage.
+
+Downloads v0.9.5 использует локальный placeholder, если текущий download payload не содержит готового artwork; отдельный сетевой запрос на каждую строку не добавляется.
 
 ## Content labels и Variant acceptance
 
@@ -194,7 +204,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.4 не повышает SQLite schema. Coverage redesign является Flutter presentation change; существующие Coverage/Matching/Variant/Download/Sync contracts и theme/locale preferences не меняются. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.5 не повышает SQLite schema. Safe task removal использует существующий `download_tasks`, а новая batch command не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -225,8 +235,9 @@ v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
-v0.9.4 — Coverage / Missing UI Polish                  current
+v0.9.4 — Coverage / Missing UI Polish                  complete
+v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.4 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.4.md`, `docs/versions/v0.9.3.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.5 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

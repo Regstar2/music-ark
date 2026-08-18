@@ -61,6 +61,63 @@ class _MatchingPageState extends State<MatchingPage> {
     super.dispose();
   }
 
+  int? _localFileId(Map<String, dynamic> row) {
+    final direct = int.tryParse('${row['localFileId'] ?? ''}');
+    if (direct != null && direct > 0) return direct;
+    final local = row['local'];
+    if (local is! Map) return null;
+    final nested = int.tryParse('${local['id'] ?? ''}');
+    return nested != null && nested > 0 ? nested : null;
+  }
+
+  Future<List<Map<String, dynamic>>> _withContentLabels(
+    List<Map<String, dynamic>> rows,
+  ) async {
+    if (rows.isEmpty) return rows;
+
+    final externalIds = <String>{};
+    final localFileIds = <int>{};
+    for (final row in rows) {
+      final externalId = '${row['externalId'] ?? ''}'.trim();
+      if (externalId.isNotEmpty) externalIds.add(externalId);
+      final localFileId = _localFileId(row);
+      if (localFileId != null) localFileIds.add(localFileId);
+    }
+
+    try {
+      final payload = await widget.contentLabelBridge.batch(
+        localFileIds: localFileIds.toList(growable: false),
+        externalIds: externalIds.toList(growable: false),
+      );
+      final providerLabels = _asMap(payload['provider']);
+      final localLabels = _asMap(payload['local']);
+      return rows.map((row) {
+        final copy = Map<String, dynamic>.from(row);
+        final externalId = '${row['externalId'] ?? ''}'.trim();
+        final providerLabel = '${providerLabels[externalId] ?? ''}'.trim();
+        if (providerLabel.isNotEmpty) {
+          copy['providerContentLabel'] = providerLabel;
+        } else {
+          copy.remove('providerContentLabel');
+        }
+
+        final localFileId = _localFileId(row);
+        final localLabel = localFileId == null
+            ? ''
+            : '${localLabels['$localFileId'] ?? ''}'.trim();
+        if (localLabel.isNotEmpty) {
+          copy['localContentLabel'] = localLabel;
+        } else {
+          copy.remove('localContentLabel');
+        }
+        return copy;
+      }).toList(growable: false);
+    } on MusicArkBridgeException {
+      // Content labels are presentation-only and must not hide matching results.
+      return rows;
+    }
+  }
+
   Future<void> _reload() async {
     setState(() {
       _loading = true;
@@ -76,11 +133,13 @@ class _MatchingPageState extends State<MatchingPage> {
         sort: _sort,
       );
       final capabilities = await widget.bridge.variantCapabilities();
+      var items = _ensureVariantRows(_mapItems(results['items']));
+      items = await _withContentLabels(items);
       if (!mounted) return;
       setState(() {
         _summary = summary;
         _variantCapabilities = capabilities;
-        _items = _ensureVariantRows(_mapItems(results['items']));
+        _items = items;
         _total = _asInt(results['count']);
       });
     } catch (error) {
@@ -140,9 +199,11 @@ class _MatchingPageState extends State<MatchingPage> {
         search: _search,
         sort: _sort,
       );
+      var nextItems = _ensureVariantRows(_mapItems(result['items']));
+      nextItems = await _withContentLabels(nextItems);
       if (!mounted) return;
       setState(() {
-        _items = [..._items, ..._ensureVariantRows(_mapItems(result['items']))];
+        _items = [..._items, ...nextItems];
         _total = _asInt(result['count']);
       });
     } catch (error) {
@@ -202,15 +263,14 @@ class _MatchingPageState extends State<MatchingPage> {
           onAccept: (localFileId) async {
             await widget.bridge.matchingAccept(externalId, localFileId);
             if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-            await _reload();
           },
           onReject: (localFileId) async {
             await widget.bridge.matchingReject(externalId, localFileId);
             if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-            await _reload();
           },
         ),
       );
+      if (mounted) await _reload();
     } catch (error) {
       if (mounted) setState(() => _error = _errorText(error));
     }

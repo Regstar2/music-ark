@@ -40,7 +40,7 @@ class LocalLibraryPage extends StatefulWidget {
 }
 
 class _LocalLibraryPageState extends State<LocalLibraryPage> {
-  static const _pageSize = 500;
+  static const _pageSize = 250;
   static const _wideTrackTable = 980.0;
 
   final _search = TextEditingController();
@@ -122,11 +122,10 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   }
 
   Future<void> _activate() async {
+    // Cache-first activation keeps switching tabs cheap for large libraries.
+    // A filesystem walk is now an explicit Scan action instead of background
+    // work repeated every time the Local Library page is opened.
     await _reload();
-    if (!mounted || _roots.isEmpty) return;
-    // Keep the existing activation contract: an opened Local Library refreshes
-    // its configured roots without allowing background pages to mutate the index.
-    await _scan();
   }
 
   Future<List<Map<String, dynamic>>> _withContentLabels(

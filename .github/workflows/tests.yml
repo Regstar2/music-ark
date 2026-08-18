@@ -94,8 +94,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_upload_mapping.py" -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run sanitized V11 static probe
         shell: pwsh

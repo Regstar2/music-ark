@@ -50,6 +50,30 @@ class YandexUploadRuntimeProfileProbeTests(unittest.TestCase):
         self.assertNotIn("SUPER_SECRET", encoded)
         self.assertNotIn("OAuth SECRET", encoded)
 
+    def test_module_anchor_sets_prove_only_allowlisted_colocation(self) -> None:
+        source = (
+            '123:(e,t,n)=>{'
+            'const ordinary="DO_NOT_EMIT";'
+            'const secret="SUPER_SECRET";'
+            'function getUploadUrl(){return "loader/upload-url"}'
+            'function getApiPrefixUrl(){}'
+            'function createHttpOptions(){}'
+            'const remote="YandexMusicDesktopApp";'
+            '},'
+            '456:(e,t,n)=>{const x="unrelated";}'
+        )
+        records = probe._module_anchor_sets(source)  # noqa: SLF001
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["module_id"], "123")
+        self.assertIn("loader/upload-url", records[0]["anchors"])
+        self.assertIn("getUploadUrl", records[0]["anchors"])
+        self.assertIn("getApiPrefixUrl", records[0]["anchors"])
+        self.assertIn("createHttpOptions", records[0]["anchors"])
+        self.assertIn("YandexMusicDesktopApp", records[0]["anchors"])
+        encoded = json.dumps(records, ensure_ascii=False)
+        self.assertNotIn("DO_NOT_EMIT", encoded)
+        self.assertNotIn("SUPER_SECRET", encoded)
+
     def test_non_yandex_urls_are_ignored(self) -> None:
         self.assertIsNone(probe._sanitize_yandex_url("https://example.com/api"))  # noqa: SLF001
         self.assertEqual(

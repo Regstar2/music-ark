@@ -2,8 +2,9 @@
 
 This probe is intentionally narrow. It looks only for upload-relevant runtime
 configuration keys serialized into packed text members and reports value
-*kinds*. Empty strings, safe public enum literals and sanitized Yandex URLs may
-be emitted structurally; sensitive/custom token values never are.
+*kinds*. Empty strings, safe public enum literals, sanitized Yandex URLs and
+safe relative prefixes may be emitted structurally; sensitive/custom token
+values never are.
 """
 
 from __future__ import annotations
@@ -33,13 +34,14 @@ _KEY_VALUE_RE = re.compile(
     r"(?:[\"']?)"
     r"(?P<key>customApiPrefixUrl|customApiToken|apiPrefixUrl|prefixUrl|clientRemoteType)"
     r"(?:[\"']?)\s*[:=]\s*"
-    r"(?P<value>null|undefined|true|false|[\"'][^\"']{0,600}[\"']|[A-Za-z_$][A-Za-z0-9_$.-]{0,120})",
+    r"(?P<value>null|undefined|true|false|[\"'](?:\\.|[^\"']){0,1000}[\"']|[A-Za-z_$][A-Za-z0-9_$.-]{0,120})",
     re.IGNORECASE,
 )
 _SENSITIVE_RE = re.compile(
     r"(?:authorization|cookie|token|secret|session|csrf|xsrf|passport|credential|password|signature)",
     re.IGNORECASE,
 )
+_SAFE_RELATIVE_PREFIX_RE = re.compile(r"^/[A-Za-z0-9_./:-]{0,200}$")
 
 
 def _is_text_member(path: str) -> bool:
@@ -70,6 +72,22 @@ def _safe_url(value: str) -> str | None:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "", "", ""))
 
 
+def _decode_quoted(value: str) -> tuple[bool, str]:
+    if len(value) < 2 or value[0] not in {"\"", "'"} or value[-1] != value[0]:
+        return False, value
+    if value[0] == '"':
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            decoded = value[1:-1]
+        return True, decoded if isinstance(decoded, str) else ""
+    # Single-quoted JS strings are not JSON. Decode only escaped slash/backslash
+    # forms needed to recognize a public prefix; do not expose the result unless
+    # it passes the URL/relative-prefix allowlist below.
+    scalar = value[1:-1].replace("\\/", "/").replace("\\\\", "\\")
+    return True, scalar
+
+
 def _classify(key: str, raw_value: str) -> dict[str, str]:
     normalized_key = next((item for item in TARGET_KEYS if item.lower() == key.lower()), key)
     value = raw_value.strip()
@@ -81,8 +99,7 @@ def _classify(key: str, raw_value: str) -> dict[str, str]:
     if lowered in {"true", "false"}:
         return {"key": normalized_key, "kind": "boolean"}
 
-    quoted = len(value) >= 2 and value[0] in {"\"", "'"} and value[-1] == value[0]
-    scalar = value[1:-1] if quoted else value
+    quoted, scalar = _decode_quoted(value)
     if quoted and scalar == "":
         return {"key": normalized_key, "kind": "empty-string"}
 
@@ -96,6 +113,8 @@ def _classify(key: str, raw_value: str) -> dict[str, str]:
         safe = _safe_url(scalar) if quoted else None
         if safe:
             return {"key": normalized_key, "kind": "public-yandex-url", "value": safe}
+        if quoted and _SAFE_RELATIVE_PREFIX_RE.fullmatch(scalar) and not _SENSITIVE_RE.search(scalar):
+            return {"key": normalized_key, "kind": "public-relative-prefix", "value": scalar}
         return {"key": normalized_key, "kind": "string" if quoted else "identifier"}
     return {"key": normalized_key, "kind": "unknown"}
 

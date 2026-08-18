@@ -19,7 +19,8 @@
 | v0.9.3 | Matching UI Redesign | complete |
 | v0.9.4 | Coverage / Missing UI Polish | complete |
 | v0.9.5 | Downloads UI, Safe Deletion & Bulk Actions | complete |
-| v0.9.6 | Sync Page UI Polish | current / Draft validation |
+| v0.9.6 | Sync Page UI Polish | complete / stacked baseline |
+| v0.9.7 | Large Library Performance | current / Draft validation |
 | v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
@@ -42,13 +43,14 @@ Version notes:
 - `docs/versions/v0.9.4.md`
 - `docs/versions/v0.9.5.md`
 - `docs/versions/v0.9.6.md`
+- `docs/versions/v0.9.7.md`
 
-Current package version is `0.9.6`; current schema target remains `1.8.4`. v0.9.6 redesigns the Controlled Sync workspace around a responsive configuration card, status/coverage summary, five primary metrics and one filterable plan list instead of multiple empty accordions.
+Current package version is `0.9.7`; current schema target remains `1.8.4`. v0.9.7 is a performance-only slice for libraries with thousands of tracks: cache-first Local Library activation, bounded 250-row pages, delta-only unchanged scan persistence, batched/negative artwork caching, memoized/debounced Yandex track filtering and bounded image decoding.
 
-The plan filters are presentation-only. Existing `createPlan`, `setAction` and confirmed `apply` boundaries remain authoritative; Sync does not gain local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement.
+v0.9.6 Controlled Sync safety remains authoritative. Existing `createPlan`, `setAction` and confirmed `apply` boundaries remain unchanged; Sync does not gain local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement.
 
 v0.9.5 safe task deletion remains unchanged: removing a failed/needs-review download task removes only the task record and does not delete the final audio file, Local Library, Matching, Coverage, Wanted state or audit history.
 
 v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
 
-This index describes source state and does not by itself indicate that v0.9.6 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.
+This index describes source state and does not by itself indicate that v0.9.7 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

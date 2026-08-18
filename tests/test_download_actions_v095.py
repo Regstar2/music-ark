@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -101,10 +102,11 @@ class DownloadActionsV095Tests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.database = self.root / "musicark.db"
-        with sqlite3.connect(self.database) as conn:
+        with closing(sqlite3.connect(self.database)) as conn:
             conn.execute(
                 "CREATE TABLE download_tasks (id TEXT PRIMARY KEY, task_type TEXT NOT NULL)"
             )
+            conn.commit()
 
     def _task(
         self,
@@ -127,15 +129,16 @@ class DownloadActionsV095Tests(unittest.TestCase):
                 "direct_request": False,
             },
         )
-        with sqlite3.connect(self.database) as conn:
+        with closing(sqlite3.connect(self.database)) as conn:
             conn.execute(
                 "INSERT INTO download_tasks(id, task_type) VALUES(?, ?)",
                 (task.id, task.task_type),
             )
+            conn.commit()
         return task
 
     def _row_exists(self, task_id: str) -> bool:
-        with sqlite3.connect(self.database) as conn:
+        with closing(sqlite3.connect(self.database)) as conn:
             row = conn.execute(
                 "SELECT 1 FROM download_tasks WHERE id=?", (task_id,)
             ).fetchone()

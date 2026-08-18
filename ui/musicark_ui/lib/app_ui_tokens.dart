@@ -25,6 +25,9 @@ class AppUiTokens {
   /// Content width where album/time columns are shown as a desktop table.
   static const yandexTableWide = 820.0;
 
+  /// Minimum width of the side-by-side Matching comparison table.
+  static const matchingTableMinimum = 980.0;
+
   static BorderRadius get smallRadius => BorderRadius.circular(radiusSmall);
   static BorderRadius get mediumRadius => BorderRadius.circular(radiusMedium);
   static BorderRadius get largeRadius => BorderRadius.circular(radiusLarge);

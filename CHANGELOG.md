@@ -2,9 +2,46 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.2 Draft candidate
+## Unreleased — v0.9.3 Draft candidate
 
-### v0.9.2 — Local Library UI & Multi-Root Selection
+### v0.9.3 — Matching UI Redesign
+
+#### Added
+
+- five responsive Matching summary cards for Yandex tracks, Local tracks, matched identities, review conflicts and unmatched identities;
+- counted status filters, explicit read-only refresh, compact Matching/Variant result banners and a shown-results counter;
+- a fixed-header side-by-side Matching workspace with Yandex, Local, confidence and status columns;
+- narrow-desktop horizontal table scrolling while retaining the comparison structure;
+- RU/EN localization for the new Matching workspace and regression coverage for localized English presentation, dark theme and narrow layouts.
+
+#### Changed
+
+- Matching results no longer use stacked `ListTile` rows with a large confidence `CircleAvatar`; confidence is now a compact percentage plus progress meter;
+- Yandex identity data and the candidate/linked local file are rendered next to each other for faster manual comparison;
+- Matching identity status and Variant recording status remain separate visible badges instead of being visually conflated;
+- Search/Sort/filters keep the existing backend query contract and pagination keeps the active query scope;
+- conflict review, content labels, Variant recheck/acceptance and manual candidate accept/reject remain in the existing detail workflow;
+- application/backend/Flutter package version advances to `0.9.3`; SQLite remains `1.8.4`.
+
+#### Localization
+
+- all new Matching header, summary, action, filter, search, table, status, empty-state and pagination strings are provided through existing RU/EN `gen_l10n` resources;
+- provider/user metadata, paths, filenames and backend error payloads remain untranslated;
+- unchanged legacy detail-dialog strings are not expanded into an unrelated full localization rewrite in this version.
+
+#### Safety / boundaries
+
+- Matching/Variant algorithms, confidence computation, candidate generation and bridge semantics are unchanged;
+- Matching and Variant analysis remain non-mutating for existing user audio files;
+- manual identity decisions, content labels and Variant acceptance continue to update MusicArk state only within their existing boundaries;
+- no per-row Yandex artwork request, new artwork cache or SQLite migration is introduced by v0.9.3.
+
+#### Verification state
+
+- source-level structural checks and RU/EN ARB JSON/key-parity checks were performed while preparing the branch;
+- Flutter analyze/tests, Python regression suite, Windows build and Windows visual smoke must be recorded only after they actually run against the v0.9.3 PR head.
+
+## v0.9.2 — Local Library UI & Multi-Root Selection
 
 #### Added
 

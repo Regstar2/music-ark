@@ -14,16 +14,17 @@ The public `yandex-music==3.0.0` client used by MusicArk has no verified own-fil
 
 The most reliable next source of evidence is therefore the normal official client behavior rather than guessed endpoint names.
 
-Two complementary inputs are supported:
+Three complementary inputs are supported:
 
-1. static scan of an official Electron `app.asar` / `yandex-music.asar` bundle;
-2. local sanitization of a HAR captured while the project owner performs one normal upload in the official UI.
+1. broad static scan of an official Electron `app.asar` / `yandex-music.asar` bundle;
+2. targeted ASAR-member scan for offsets found by the broad scan;
+3. local sanitization of a HAR captured while the project owner performs one normal upload in the official UI.
 
 Neither mode extracts browser cookies or credentials for reuse.
 
 ## Safety model
 
-The generated report contains only protocol structure:
+The generated reports contain only protocol structure:
 
 - HTTP method when available;
 - URL/path with query **values removed**;
@@ -32,9 +33,11 @@ The generated report contains only protocol structure:
 - multipart/form field names;
 - uploaded filename extension only, not the filename;
 - JSON key/type shape, not scalar values;
-- static endpoint candidates and source-context hashes.
+- static endpoint candidates and source-context hashes;
+- ASAR member path, offsets and hashes for targeted analysis;
+- selected protocol-like identifiers/literals from the targeted member, with query values redacted.
 
-The report does not include:
+The reports do not include:
 
 - `Authorization` values;
 - Cookie values;
@@ -48,7 +51,7 @@ The report does not include:
 
 A raw HAR can contain sensitive session data. **Never commit, upload, paste, or share the raw HAR.** Keep it local, sanitize it with the tool, inspect the resulting JSON, then delete the raw capture when it is no longer needed.
 
-## Mode 1 — scan an official Electron bundle
+## Mode 1 — broad scan of an official Electron bundle
 
 From the MusicArk repository root:
 
@@ -79,11 +82,47 @@ Useful evidence in the resulting report includes combinations such as:
 upload + FormData + POST + /.../upload
 playlistUuid + multipart/form-data
 api.music.yandex.* + upload-related path
+getUploadUrl + uploadFile + UgcUploadHttpClient
 ```
 
-A string hit alone is not sufficient to declare the protocol solved. The HAR path is used to confirm the real runtime request.
+A string hit alone is not sufficient to declare the protocol solved. Use the targeted ASAR mode to map promising raw offsets back to the exact bundled file before moving to runtime capture.
 
-## Mode 2 — sanitize one normal upload HAR
+## Mode 2 — targeted ASAR-member scan
+
+Use `tools/yandex_upload_target_probe.py` when the broad report has identified high-value byte offsets. The tool reads the Electron ASAR index, maps each absolute archive offset to its packed member, and extracts only protocol structure from that member and a bounded local window.
+
+Example:
+
+```powershell
+python .\tools\yandex_upload_target_probe.py `
+  "C:\path\to\Yandex Music\resources\app.asar" `
+  --offset 10113299 `
+  --offset 10113545 `
+  --offset 10176266 `
+  --offset 16146222 `
+  --offset 16146348 `
+  --offset 17782754 `
+  --offset 18726605 `
+  --radius 65536 `
+  --output .\.musicark\research\yandex-upload-target-v3.json
+```
+
+The targeted report can establish:
+
+- which bundled file contains the selected hit;
+- where the hit sits inside that member;
+- whether `getUploadUrl` and `uploadFile` occur in the same module;
+- direct `httpClient.get/post/put/patch/delete` call shapes;
+- literal or identifier-based HTTP targets;
+- `FormData.append(...)` field names such as `file`;
+- upload/playlist/processing/retry/abort identifiers;
+- protocol-like path/URL literals with query values redacted.
+
+Do not infer production support from these names alone. The goal is to recover the request builder closely enough to decide whether a minimal live PoC is justified.
+
+Only the generated sanitized JSON report should be shared for analysis. Do not share `app.asar` itself.
+
+## Mode 3 — sanitize one normal upload HAR
 
 Use the official Yandex Music website or desktop DevTools and perform a normal upload of a small audio file that you own and are willing to use as a test artifact.
 
@@ -124,6 +163,29 @@ If the runtime request is present in the HAR, the report should let the project 
 
 It deliberately does **not** answer whether MusicArk's current token value is accepted. That requires a later minimal live PoC after the request contract is understood.
 
+## Local verification
+
+The repository's `tests` directory is intentionally used through unittest discovery and is not required to be an importable Python package. Therefore commands such as:
+
+```text
+python -m unittest tests.test_yandex_upload_target_probe -v
+```
+
+may fail with `ModuleNotFoundError: No module named 'tests.test_...'` even when the test file itself is valid.
+
+Use the same discovery form as the project CI:
+
+```powershell
+python -m unittest discover -s tests -p "test_yandex_upload_target_probe.py" -v
+python -m unittest discover -s tests -p "test_yandex_upload_protocol_probe.py" -v
+```
+
+To run the whole Python suite:
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
 ## Criteria for implementing an experimental uploader
 
 Do not add a real upload request until the evidence identifies, at minimum:
@@ -145,8 +207,9 @@ If the contract is recovered, the first implementation should stay isolated from
 explicit local file
   -> experimental YandexUploadTransport
   -> one explicit user playlist
-  -> one upload request
-  -> parse server result
+  -> request upload URL / upload session if required
+  -> upload one file
+  -> wait for server-side processing when required
   -> read playlist through existing provider
   -> verify uploaded item
 ```

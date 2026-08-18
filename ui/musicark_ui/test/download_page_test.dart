@@ -79,7 +79,7 @@ void main() {
           bridge: bridge,
           coverageBridge: coverageBridge,
           active: active,
-          folderPicker: picker ?? FakeLocalFolderPicker(r'C:\\Music'),
+          folderPicker: picker ?? FakeLocalFolderPicker(r'C:\Music'),
           fileActions: fileActions ?? FakeFileActions(),
         ),
       ),
@@ -92,11 +92,14 @@ void main() {
     }
   }
 
-  testWidgets('Downloads workspace shows compact summary, filters and real progress', (tester) async {
+  testWidgets('Downloads workspace shows summary, filters and real progress', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
-    expect(find.text('Управление очередью загрузок и треками, которым нужна локальная копия'), findsOneWidget);
+    expect(
+      find.text('Управление очередью загрузок и треками, которым нужна локальная копия'),
+      findsOneWidget,
+    );
     expect(find.text('В очереди'), findsWidgets);
     expect(find.text('Загружается'), findsWidgets);
     expect(find.text('Ошибки'), findsWidgets);
@@ -124,7 +127,7 @@ void main() {
     expect(find.textContaining('4.0 KB'), findsOneWidget);
   });
 
-  testWidgets('search filters the already loaded task list', (tester) async {
+  testWidgets('search filters the loaded task list', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
@@ -141,7 +144,10 @@ void main() {
     await pumpDownloads(tester, bridge);
     await reveal(tester, const Key('download-details-failed-1'));
 
-    expect(find.textContaining('Яндекс Музыка не смогла предоставить этот трек'), findsOneWidget);
+    expect(
+      find.textContaining('Яндекс Музыка не смогла предоставить этот трек'),
+      findsOneWidget,
+    );
     expect(find.textContaining('Network error while downloading track.'), findsNothing);
 
     await tester.tap(find.byKey(const Key('download-details-failed-1')));
@@ -152,7 +158,7 @@ void main() {
     expect(find.textContaining('Network error while downloading track.'), findsOneWidget);
   });
 
-  testWidgets('failed task removal requires confirmation and removes queue record only', (tester) async {
+  testWidgets('failed task removal requires confirmation and removes only the task record', (tester) async {
     final bridge = FakeDownloadBridge();
     final fileActions = FakeFileActions();
     await pumpDownloads(tester, bridge, fileActions: fileActions);
@@ -161,7 +167,10 @@ void main() {
     await tester.tap(find.byKey(const Key('download-remove-failed-1')));
     await tester.pumpAndSettle();
     expect(find.text('Удалить задачу загрузки?'), findsOneWidget);
-    expect(find.textContaining('Музыкальные файлы и локальная библиотека не будут изменены'), findsOneWidget);
+    expect(
+      find.textContaining('Музыкальные файлы и локальная библиотека не будут изменены'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Отмена'));
     await tester.pumpAndSettle();
@@ -180,7 +189,7 @@ void main() {
     expect(fileActions.revealed, isEmpty);
   });
 
-  testWidgets('single retry runs only selected task and does not wake old queue', (tester) async {
+  testWidgets('single retry runs only selected task and leaves old queue untouched', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
     await reveal(tester, const Key('download-retry-failed-1'));
@@ -190,10 +199,13 @@ void main() {
 
     expect(bridge.runCalled, isFalse);
     expect(bridge.runTaskIds, ['failed-1']);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'], 'queued');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
+      'queued',
+    );
   });
 
-  testWidgets('bulk retry uses only selected failed tasks', (tester) async {
+  testWidgets('bulk retry runs only selected failed tasks', (tester) async {
     final bridge = FakeDownloadBridge();
     bridge.items.add({
       'id': 'failed-2',
@@ -205,7 +217,7 @@ void main() {
       'progress': null,
       'downloadedBytes': 0,
       'totalBytes': null,
-      'targetPath': r'C:\\Music\\Second Failed.mp3',
+      'targetPath': r'C:\Music\Second Failed.mp3',
       'errorCode': 'provider_request',
       'error': 'Provider failed.',
       'canRetry': true,
@@ -218,6 +230,7 @@ void main() {
     await reveal(tester, const Key('download-select-failed-2'));
     await tester.tap(find.byKey(const Key('download-select-failed-2')));
     await tester.pump();
+    await reveal(tester, const Key('downloads-bulk-retry'), delta: -350);
     await tester.tap(find.byKey(const Key('downloads-bulk-retry')));
     await tester.pumpAndSettle();
 
@@ -228,16 +241,20 @@ void main() {
       ['failed-1', 'failed-2'],
     ]);
     expect(bridge.runCalled, isFalse);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'], 'queued');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
+      'queued',
+    );
   });
 
-  testWidgets('bulk cancel confirms and cancels only selected active tasks', (tester) async {
+  testWidgets('bulk cancel confirms and affects only selected active tasks', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
     await reveal(tester, const Key('download-select-queued-1'));
     await tester.tap(find.byKey(const Key('download-select-queued-1')));
     await tester.pump();
+    await reveal(tester, const Key('downloads-bulk-cancel'), delta: -350);
     await tester.tap(find.byKey(const Key('downloads-bulk-cancel')));
     await tester.pumpAndSettle();
     expect(find.text('Отменить выбранные загрузки?'), findsOneWidget);
@@ -248,7 +265,10 @@ void main() {
     expect(bridge.cancelBatches, [
       ['queued-1'],
     ]);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'running-1')['status'], 'running');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'running-1')['status'],
+      'running',
+    );
   });
 
   testWidgets('bulk remove deletes only selected failed tasks', (tester) async {
@@ -258,6 +278,7 @@ void main() {
     await reveal(tester, const Key('download-select-failed-1'));
     await tester.tap(find.byKey(const Key('download-select-failed-1')));
     await tester.pump();
+    await reveal(tester, const Key('downloads-bulk-remove'), delta: -350);
     await tester.tap(find.byKey(const Key('downloads-bulk-remove')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Удалить 1 ошибочных задач?'), findsOneWidget);
@@ -272,22 +293,20 @@ void main() {
     expect(bridge.items.any((item) => item['id'] == 'queued-1'), isTrue);
   });
 
-  testWidgets('select all acts on current visible search results only', (tester) async {
+  testWidgets('select all selects current visible search results only', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge);
 
     await tester.enterText(find.byKey(const Key('downloads-search')), 'Failed Song');
     await tester.pump();
-    final selectAll = find.byKey(const Key('downloads-select-all'));
-    await tester.tap(selectAll);
+    await tester.tap(find.byKey(const Key('downloads-select-all')));
     await tester.pump();
 
     expect(find.byKey(const Key('downloads-bulk-retry')), findsOneWidget);
-    final queuedCheckbox = tester.widget<Checkbox>(find.byKey(const Key('download-select-queued-1')));
-    expect(queuedCheckbox.value, isFalse);
+    expect(find.byKey(const Key('downloads-bulk-cancel')), findsNothing);
   });
 
-  testWidgets('Wanted supports selected download without waking unrelated queue', (tester) async {
+  testWidgets('Wanted downloads selected tasks without waking unrelated queue', (tester) async {
     final bridge = FakeDownloadBridge();
     final coverage = FakeCoverageBridge();
     coverage.items.first['userAction'] = 'wanted';
@@ -308,10 +327,13 @@ void main() {
     expect(bridge.runBatches, [
       ['selected-203'],
     ]);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'], 'queued');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
+      'queued',
+    );
   });
 
-  testWidgets('selection is cleared when switching tabs', (tester) async {
+  testWidgets('selection clears when switching Downloads and Wanted tabs', (tester) async {
     final bridge = FakeDownloadBridge();
     final coverage = FakeCoverageBridge();
     coverage.items.first['userAction'] = 'wanted';
@@ -320,6 +342,7 @@ void main() {
     await reveal(tester, const Key('download-select-failed-1'));
     await tester.tap(find.byKey(const Key('download-select-failed-1')));
     await tester.pump();
+    await reveal(tester, const Key('downloads-bulk-bar'), delta: -350);
     expect(find.byKey(const Key('downloads-bulk-bar')), findsOneWidget);
 
     await tester.tap(find.textContaining('Нужные').last);
@@ -330,19 +353,19 @@ void main() {
     expect(find.byKey(const Key('downloads-bulk-bar')), findsNothing);
   });
 
-  testWidgets('target selection persists exact folder picked by the user', (tester) async {
+  testWidgets('target selection persists exact folder picked by user', (tester) async {
     final bridge = FakeDownloadBridge(configured: false);
     await pumpDownloads(
       tester,
       bridge,
-      picker: FakeLocalFolderPicker(r'D:\\Music'),
+      picker: FakeLocalFolderPicker(r'D:\Music'),
     );
 
     expect(find.text('Выберите папку для загрузок'), findsOneWidget);
     await tester.tap(find.byKey(const Key('downloads-select-target')));
     await tester.pumpAndSettle();
-    expect(bridge.selectedPath, r'D:\\Music');
-    expect(find.text(r'D:\\Music'), findsOneWidget);
+    expect(bridge.selectedPath, r'D:\Music');
+    expect(find.text(r'D:\Music'), findsOneWidget);
   });
 
   testWidgets('explicit cancel queue cancels waiting tasks without deleting files', (tester) async {
@@ -359,10 +382,13 @@ void main() {
     expect(bridge.cancelBatches, [
       ['queued-1'],
     ]);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'], 'cancelled');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
+      'cancelled',
+    );
   });
 
-  testWidgets('leaving Downloads stops explicit queue after current track', (tester) async {
+  testWidgets('leaving Downloads stops explicit queue after current task', (tester) async {
     final bridge = BlockingDownloadBridge();
     bridge.items.add({
       'id': 'queued-2',
@@ -374,7 +400,7 @@ void main() {
       'progress': null,
       'downloadedBytes': 0,
       'totalBytes': null,
-      'targetPath': r'C:\\Music\\Second.mp3',
+      'targetPath': r'C:\Music\Second.mp3',
       'error': null,
       'canRetry': false,
       'canCancel': true,
@@ -402,12 +428,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.runTaskIds, ['queued-1']);
-    expect(bridge.items.firstWhere((item) => item['id'] == 'queued-2')['status'], 'queued');
+    expect(
+      bridge.items.firstWhere((item) => item['id'] == 'queued-2')['status'],
+      'queued',
+    );
   });
 
-  testWidgets('completed file path is hidden and play/reveal stay available', (tester) async {
+  testWidgets('completed path stays hidden and play/reveal remain available', (tester) async {
     final bridge = FakeDownloadBridge();
-    const path = r'C:\\Music\\Finished [yandex_777].mp3';
+    const path = r'C:\Music\Finished [yandex_777].mp3';
     bridge.items.add({
       'id': 'completed-777',
       'provider': 'yandex_music',
@@ -441,11 +470,14 @@ void main() {
     expect(actions.revealed, [path]);
   });
 
-  testWidgets('Downloads user-facing labels localize to English', (tester) async {
+  testWidgets('Downloads labels localize to English', (tester) async {
     final bridge = FakeDownloadBridge();
     await pumpDownloads(tester, bridge, locale: const Locale('en'));
 
-    expect(find.text('Manage the download queue and tracks that still need a local copy'), findsOneWidget);
+    expect(
+      find.text('Manage the download queue and tracks that still need a local copy'),
+      findsOneWidget,
+    );
     expect(find.text('Queued'), findsWidgets);
     expect(find.text('Errors'), findsWidgets);
   });

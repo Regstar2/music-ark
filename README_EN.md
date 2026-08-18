@@ -2,10 +2,18 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.3 — Matching UI Redesign.**  
+**Current code version: 0.9.4 — Coverage / Missing UI Polish.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.3 does not change music semantics; it redesigns Matching as a Yandex ↔ Local comparison workspace while preserving the existing bridge and domain boundaries.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.4 does not change music semantics; it redesigns the Coverage / Missing workspace while preserving the existing bridge and domain boundaries.
+
+## Coverage / Missing v0.9.4
+
+The `Missing` section now centers the track list instead of a long technical statistics row. The page starts with a compact local-coverage card and progress meter, four primary metrics, collapsible Matching/Variant analysis details, counted status tabs and a responsive Collection/Search/Decision/Sort/Variant toolbar.
+
+Coverage rows use the already-persisted `ProviderTrack.artwork_url` with a local placeholder when artwork is missing or fails to load, followed by title, artist/album, collection membership and separate Coverage/Variant badges. Flutter does not construct provider URLs or receive the Yandex token, cookies or Authorization headers.
+
+Missing actions keep their existing semantics: `Download` runs the current direct Download workflow without changing `userAction`; `Wanted`, `Ignore` and `Reset` remain triage state. The master checkbox selects all results in the active Missing filter, and pagination is hidden when the filtered result fits on one page.
 
 ## Matching v0.9.3
 
@@ -186,7 +194,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.3 does not bump the SQLite schema. The Matching redesign is a Flutter presentation change; multi-root selection remains query/view state, while theme/locale preferences remain separate from the music database. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.4 does not bump the SQLite schema. The Coverage redesign is a Flutter presentation change; the existing Coverage/Matching/Variant/Download/Sync contracts and theme/locale preferences are unchanged. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -216,8 +224,9 @@ v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
-v0.9.3 — Matching UI Redesign                          current
+v0.9.3 — Matching UI Redesign                          complete
+v0.9.4 — Coverage / Missing UI Polish                  current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.3. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.3.md`, `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.4. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.4.md`, `docs/versions/v0.9.3.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

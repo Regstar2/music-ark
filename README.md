@@ -2,10 +2,18 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.3 — Matching UI Redesign.**  
+**Текущая версия кода: 0.9.4 — Coverage / Missing UI Polish.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.3 не меняет музыкальную семантику: версия перерабатывает экран Matching в сравнительный workspace Яндекс ↔ Local и сохраняет существующие bridge/domain boundaries.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.4 не меняет музыкальную семантику: версия перерабатывает экран Coverage / «Недостающие» и сохраняет существующие bridge/domain boundaries.
+
+## Coverage / Missing v0.9.4
+
+Раздел `Недостающие` теперь строится вокруг списка треков, а не длинной технической строки статистики. Сверху расположена компактная карточка локального покрытия с прогрессом и основными метриками, сворачиваемые детали Matching/Variant анализа, counted status tabs и responsive панель Collection/Search/Decision/Sort/Variant.
+
+Строки Coverage показывают artwork из уже сохранённого `ProviderTrack.artwork_url` с локальным placeholder при отсутствии/ошибке картинки, затем название, исполнителя/альбом, membership в коллекциях и отдельные Coverage/Variant badges. Flutter не конструирует provider URL и не получает Yandex token/cookies/Authorization headers.
+
+Для Missing сохраняются прежние действия: `Скачать` запускает существующий direct Download workflow и не меняет `userAction`; `Нужен`, `Игнорировать` и `Сбросить` остаются triage state. Master-checkbox выбирает все результаты активного Missing filter, а pagination скрывается, когда выдача помещается в одну страницу.
 
 ## Matching v0.9.3
 
@@ -186,7 +194,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.3 не повышает SQLite schema. Matching redesign является Flutter presentation change; multi-root selection остаётся query/view state, а theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.4 не повышает SQLite schema. Coverage redesign является Flutter presentation change; существующие Coverage/Matching/Variant/Download/Sync contracts и theme/locale preferences не меняются. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -216,8 +224,9 @@ v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
-v0.9.3 — Matching UI Redesign                          current
+v0.9.3 — Matching UI Redesign                          complete
+v0.9.4 — Coverage / Missing UI Polish                  current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.3 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.3.md`, `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.4 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.4.md`, `docs/versions/v0.9.3.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

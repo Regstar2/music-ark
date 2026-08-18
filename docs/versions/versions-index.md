@@ -16,7 +16,8 @@
 | v0.9.0 | UI, Account & Settings | complete |
 | v0.9.1 | Main Screen UI Polish | complete |
 | v0.9.2 | Local Library UI & Multi-Root Selection | complete |
-| v0.9.3 | Matching UI Redesign | current / Draft validation |
+| v0.9.3 | Matching UI Redesign | complete |
+| v0.9.4 | Coverage / Missing UI Polish | current / Draft validation |
 | v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
@@ -36,9 +37,10 @@ Version notes:
 - `docs/versions/v0.9.1.md`
 - `docs/versions/v0.9.2.md`
 - `docs/versions/v0.9.3.md`
+- `docs/versions/v0.9.4.md`
 
-Current package version is `0.9.3`; current schema target remains `1.8.4`. v0.9.3 redesigns Matching as a side-by-side Yandex/Local comparison workspace with summary metrics, counted filters, compact confidence presentation and separate Matching/Variant status while preserving the existing bridge semantics, detail workflow and manual decisions.
+Current package version is `0.9.4`; current schema target remains `1.8.4`. v0.9.4 redesigns Coverage/Missing around a compact coverage summary, counted status tabs, responsive filters, artwork-aware track rows, master selection and RU/EN localization while preserving the existing Coverage, Matching, Variant, Download and Sync contracts.
 
 v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
 
-This index describes source state and does not by itself indicate that v0.9.3 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.
+This index describes source state and does not by itself indicate that v0.9.4 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

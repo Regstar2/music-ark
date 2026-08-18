@@ -2,8 +2,14 @@ part of 'coverage_page.dart';
 
 extension _CoveragePageView on _CoveragePageState {
   Widget _buildView(BuildContext context) {
+    final l10n = context.l10n;
     final summary = _summary ?? const <String, dynamic>{};
-    final allSelected = _status == 'missing' && _total > 0 && _selected.length >= _total;
+    final allSelected = _status == 'missing' &&
+        _total > 0 &&
+        _selected.length >= _total;
+    final partiallySelected =
+        _status == 'missing' && _selected.isNotEmpty && !allSelected;
+
     return Column(
       key: const Key('coverage-page'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -16,15 +22,23 @@ extension _CoveragePageView on _CoveragePageState {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Недостающие треки', style: Theme.of(context).textTheme.headlineSmall),
+                    Text(
+                      l10n.coverageTitle,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
                     const SizedBox(height: 4),
-                    const Text('Покрытие Yandex-библиотеки локальной коллекцией'),
+                    Text(
+                      l10n.coverageSubtitle,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
                   ],
                 ),
               ),
               IconButton(
                 key: const Key('coverage-refresh'),
-                tooltip: 'Обновить статус',
+                tooltip: l10n.coverageRefresh,
                 onPressed: _loading ? null : () => _load(),
                 icon: const Icon(Icons.refresh),
               ),
@@ -32,53 +46,63 @@ extension _CoveragePageView on _CoveragePageState {
           ),
         ),
         if (_summary != null)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: _Summary(summary: summary),
+          _Summary(
+            summary: summary,
+            expanded: _analysisExpanded,
+            onToggleDetails: () => _updateView(
+              () => _analysisExpanded = !_analysisExpanded,
+            ),
           ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _StatusChip(
+                _StatusTab(
                   key: const Key('coverage-filter-missing'),
                   selected: _status == 'missing',
-                  label: 'Missing ${_asInt(summary['missing'])}',
-                  onSelected: () => _setStatus('missing'),
+                  label: l10n.coverageTabMissing,
+                  count: _asInt(summary['missing']),
+                  onTap: () => _setStatus('missing'),
                 ),
                 const SizedBox(width: 8),
-                _StatusChip(
+                _StatusTab(
                   key: const Key('coverage-filter-review'),
                   selected: _status == 'needs_review',
-                  label: 'Review ${_asInt(summary['needsReview'])}',
-                  onSelected: () => _setStatus('needs_review'),
+                  label: l10n.coverageTabReview,
+                  count: _asInt(summary['needsReview']),
+                  onTap: () => _setStatus('needs_review'),
                 ),
                 const SizedBox(width: 8),
-                _StatusChip(
+                _StatusTab(
                   key: const Key('coverage-filter-not-analyzed'),
                   selected: _status == 'not_analyzed',
-                  label: 'Not analyzed ${_asInt(summary['notAnalyzed'])}',
-                  onSelected: () => _setStatus('not_analyzed'),
+                  label: l10n.coverageTabNotAnalyzed,
+                  count: _asInt(summary['notAnalyzed']),
+                  onTap: () => _setStatus('not_analyzed'),
                 ),
                 const SizedBox(width: 8),
-                _StatusChip(
+                _StatusTab(
                   key: const Key('coverage-filter-covered'),
                   selected: _status == 'covered',
-                  label: 'Covered ${_asInt(summary['covered'])}',
-                  onSelected: () => _setStatus('covered'),
+                  label: l10n.coverageTabCovered,
+                  count: _asInt(summary['covered']),
+                  onTap: () => _setStatus('covered'),
                 ),
               ],
             ),
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
           child: LayoutBuilder(
             builder: (context, constraints) {
               double fieldWidth(double preferred) =>
-                  constraints.maxWidth < preferred ? constraints.maxWidth : preferred;
+                  constraints.maxWidth < preferred
+                      ? constraints.maxWidth
+                      : preferred;
+              final searchWidth = constraints.maxWidth >= 1200 ? 420.0 : 340.0;
               return Wrap(
                 spacing: 12,
                 runSpacing: 8,
@@ -90,15 +114,18 @@ extension _CoveragePageView on _CoveragePageState {
                       key: const Key('coverage-collection'),
                       initialValue: _collectionId,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Коллекция',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: l10n.coverageCollectionLabel,
+                        border: const OutlineInputBorder(),
                         isDense: true,
                       ),
                       items: [
-                        const DropdownMenuItem(
+                        DropdownMenuItem(
                           value: '',
-                          child: Text('Вся Yandex-библиотека', overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            l10n.coverageAllLibrary,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         ..._collections.map(
                           (collection) => DropdownMenuItem(
@@ -114,71 +141,105 @@ extension _CoveragePageView on _CoveragePageState {
                     ),
                   ),
                   SizedBox(
-                    width: fieldWidth(320),
+                    width: fieldWidth(searchWidth),
                     child: TextField(
                       key: const Key('coverage-search'),
                       controller: _searchController,
                       onChanged: _queueSearch,
-                      decoration: const InputDecoration(
-                        labelText: 'Поиск',
-                        hintText: 'Название, исполнитель, альбом, плейлист',
-                        prefixIcon: Icon(Icons.search),
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: l10n.coverageSearchLabel,
+                        hintText: l10n.coverageSearchHint,
+                        prefixIcon: const Icon(Icons.search),
+                        border: const OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
                   ),
+                  if (_status == 'missing')
+                    SizedBox(
+                      width: fieldWidth(180),
+                      child: DropdownButtonFormField<String>(
+                        key: const Key('coverage-action-filter'),
+                        initialValue: _userAction,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.coverageDecisionLabel,
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          DropdownMenuItem(
+                            value: '',
+                            child: Text(l10n.coverageDecisionAll),
+                          ),
+                          DropdownMenuItem(
+                            value: 'unreviewed',
+                            child: Text(l10n.coverageDecisionUnreviewed),
+                          ),
+                          DropdownMenuItem(
+                            value: 'wanted',
+                            child: Text(l10n.coverageDecisionWanted),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ignored',
+                            child: Text(l10n.coverageDecisionIgnored),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          _updateView(() {
+                            _userAction = value ?? '';
+                            _offset = 0;
+                            _selected.clear();
+                          });
+                          _reloadTracks(refreshSummary: false);
+                        },
+                      ),
+                    ),
                   SizedBox(
                     width: fieldWidth(190),
                     child: DropdownButtonFormField<String>(
                       key: const Key('coverage-sort'),
                       initialValue: _sort,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Сортировка',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: l10n.coverageSortLabel,
+                        border: const OutlineInputBorder(),
                         isDense: true,
                       ),
                       items: [
                         if (_collectionId.startsWith('playlist:'))
-                          const DropdownMenuItem(value: 'position', child: Text('Порядок плейлиста', overflow: TextOverflow.ellipsis)),
-                        const DropdownMenuItem(value: 'artist', child: Text('Исполнитель')),
-                        const DropdownMenuItem(value: 'title', child: Text('Название')),
-                        const DropdownMenuItem(value: 'album', child: Text('Альбом')),
-                        const DropdownMenuItem(value: 'collection', child: Text('Коллекция')),
-                        const DropdownMenuItem(value: 'status', child: Text('Статус')),
+                          DropdownMenuItem(
+                            value: 'position',
+                            child: Text(
+                              l10n.coverageSortPlaylistPosition,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        DropdownMenuItem(
+                          value: 'artist',
+                          child: Text(l10n.coverageSortArtist),
+                        ),
+                        DropdownMenuItem(
+                          value: 'title',
+                          child: Text(l10n.coverageSortTitle),
+                        ),
+                        DropdownMenuItem(
+                          value: 'album',
+                          child: Text(l10n.coverageSortAlbum),
+                        ),
+                        DropdownMenuItem(
+                          value: 'collection',
+                          child: Text(l10n.coverageSortCollection),
+                        ),
+                        DropdownMenuItem(
+                          value: 'status',
+                          child: Text(l10n.coverageSortStatus),
+                        ),
                       ],
                       onChanged: (value) {
                         if (value == null) return;
                         _updateView(() {
                           _sort = value;
-                          _offset = 0;
-                          _selected.clear();
-                        });
-                        _reloadTracks(refreshSummary: false);
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldWidth(180),
-                    child: DropdownButtonFormField<String>(
-                      key: const Key('coverage-action-filter'),
-                      initialValue: _userAction,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Решение',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: '', child: Text('Все')),
-                        DropdownMenuItem(value: 'unreviewed', child: Text('Не решено')),
-                        DropdownMenuItem(value: 'wanted', child: Text('Нужен')),
-                        DropdownMenuItem(value: 'ignored', child: Text('Игнорировать')),
-                      ],
-                      onChanged: (value) {
-                        _updateView(() {
-                          _userAction = value ?? '';
                           _offset = 0;
                           _selected.clear();
                         });
@@ -193,18 +254,36 @@ extension _CoveragePageView on _CoveragePageState {
                         key: const Key('coverage-variant-filter'),
                         initialValue: _variantStatus,
                         isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Variant',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: l10n.coverageVariantFilterLabel,
+                          border: const OutlineInputBorder(),
                           isDense: true,
                         ),
-                        items: const [
-                          DropdownMenuItem(value: '', child: Text('Все версии')),
-                          DropdownMenuItem(value: 'same', child: Text('Same')),
-                          DropdownMenuItem(value: 'altered', child: Text('Altered')),
-                          DropdownMenuItem(value: 'different_version', child: Text('Другая версия')),
-                          DropdownMenuItem(value: 'uncertain', child: Text('Uncertain')),
-                          DropdownMenuItem(value: 'not_checked', child: Text('Not checked')),
+                        items: [
+                          DropdownMenuItem(
+                            value: '',
+                            child: Text(l10n.coverageVariantAll),
+                          ),
+                          DropdownMenuItem(
+                            value: 'same',
+                            child: Text(l10n.matchingVariantSame),
+                          ),
+                          DropdownMenuItem(
+                            value: 'altered',
+                            child: Text(l10n.matchingVariantAltered),
+                          ),
+                          DropdownMenuItem(
+                            value: 'different_version',
+                            child: Text(l10n.matchingVariantDifferent),
+                          ),
+                          DropdownMenuItem(
+                            value: 'uncertain',
+                            child: Text(l10n.matchingVariantUncertain),
+                          ),
+                          DropdownMenuItem(
+                            value: 'not_checked',
+                            child: Text(l10n.matchingVariantNotChecked),
+                          ),
                         ],
                         onChanged: (value) {
                           _updateView(() {
@@ -224,23 +303,36 @@ extension _CoveragePageView on _CoveragePageState {
         if (_status == 'missing' && _total > 0)
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            child: Row(
               children: [
-                OutlinedButton.icon(
+                Checkbox(
                   key: const Key('coverage-select-all'),
-                  onPressed: _loading
+                  value: allSelected ? true : partiallySelected ? null : false,
+                  tristate: true,
+                  onChanged: _loading
                       ? null
-                      : allSelected
-                          ? _clearSelection
-                          : _selectAllFiltered,
-                  icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
-                  label: Text(allSelected ? 'Снять выделение' : 'Выбрать всё'),
+                      : (_) {
+                          if (_selected.isNotEmpty) {
+                            _clearSelection();
+                          } else {
+                            _selectAllFiltered();
+                          }
+                        },
                 ),
-                if (_selected.isNotEmpty)
-                  Text('${_selected.length} из $_total выбрано'),
+                Text(l10n.coverageTrackCount(_total)),
+                const Spacer(),
+                if (_selected.isEmpty)
+                  Text(
+                    l10n.coverageSelectAll,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                  )
+                else
+                  Text(
+                    l10n.coverageSelectedCount(_selected.length, _total),
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
               ],
             ),
           ),
@@ -262,53 +354,65 @@ extension _CoveragePageView on _CoveragePageState {
                 child: Text(
                   _error!,
                   key: const Key('coverage-error'),
-                  style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
                 ),
               ),
             ),
           ),
         Expanded(child: _body(summary)),
-        _Pagination(
-          offset: _offset,
-          limit: _pageLimit,
-          total: _total,
-          onPrevious: _offset <= 0 || _loading
-              ? null
-              : () {
-                  _updateView(() => _offset = _offset > _pageLimit ? _offset - _pageLimit : 0);
-                  _reloadTracks(refreshSummary: false);
-                },
-          onNext: _offset + _pageLimit >= _total || _loading
-              ? null
-              : () {
-                  _updateView(() => _offset += _pageLimit);
-                  _reloadTracks(refreshSummary: false);
-                },
-        ),
+        if (_total > _pageLimit)
+          _Pagination(
+            offset: _offset,
+            limit: _pageLimit,
+            total: _total,
+            onPrevious: _offset <= 0 || _loading
+                ? null
+                : () {
+                    _updateView(
+                      () => _offset = _offset > _pageLimit
+                          ? _offset - _pageLimit
+                          : 0,
+                    );
+                    _reloadTracks(refreshSummary: false);
+                  },
+            onNext: _offset + _pageLimit >= _total || _loading
+                ? null
+                : () {
+                    _updateView(() => _offset += _pageLimit);
+                    _reloadTracks(refreshSummary: false);
+                  },
+          ),
       ],
     );
   }
 
   Widget _body(Map<String, dynamic> summary) {
-    if (_loading && _items.isEmpty) return const Center(child: CircularProgressIndicator());
+    final l10n = context.l10n;
+    if (_loading && _items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (_items.isEmpty) {
       final total = _asInt(summary['total']);
       final notAnalyzed = _asInt(summary['notAnalyzed']);
       if (total > 0 && notAnalyzed == total) {
         return _EmptyState(
-          title: 'Сначала выполните сопоставление библиотеки.',
-          actionLabel: _matching ? 'Сопоставление…' : 'Запустить сопоставление',
+          title: l10n.coverageEmptyRunMatching,
+          actionLabel: _matching
+              ? l10n.coverageMatchingRunning
+              : l10n.coverageRunMatching,
           onAction: _matching ? null : _runMatching,
           secondaryAction: widget.onOpenMatching,
         );
       }
       if (_status == 'missing' && _asInt(summary['missing']) == 0) {
-        return const _EmptyState(
-          title: 'Нет треков, доказанно отсутствующих локально.',
-          subtitle: 'Конфликты и неанализированные треки остаются отдельными состояниями.',
+        return _EmptyState(
+          title: l10n.coverageEmptyMissingTitle,
+          subtitle: l10n.coverageEmptyMissingBody,
         );
       }
-      return const _EmptyState(title: 'Нет треков для выбранных фильтров.');
+      return _EmptyState(title: l10n.coverageEmptyFiltered);
     }
     return ListView.builder(
       key: const Key('coverage-list'),
@@ -338,7 +442,8 @@ extension _CoveragePageView on _CoveragePageState {
           onDownload: isMissing && widget.downloadBridge != null
               ? () => _enqueueDownload(id)
               : null,
-          onOpenMatching: item['coverageStatus'] == 'needs_review' || item['coverageStatus'] == 'not_analyzed'
+          onOpenMatching: item['coverageStatus'] == 'needs_review' ||
+                  item['coverageStatus'] == 'not_analyzed'
               ? widget.onOpenMatching
               : null,
         );

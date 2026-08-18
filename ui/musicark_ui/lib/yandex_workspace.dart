@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -70,6 +72,8 @@ class MusicArkHomePage extends StatefulWidget {
 }
 
 class _MusicArkHomePageState extends State<MusicArkHomePage> {
+  static const _trackSearchDelay = Duration(milliseconds: 180);
+
   final _tokenController = TextEditingController();
   final _searchController = TextEditingController();
 
@@ -98,6 +102,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   LibrarySort _trackSort = LibrarySort.original;
   PlaylistSort _playlistSort = PlaylistSort.original;
   _PageKind _page = _PageKind.liked;
+  Timer? _trackSearchDebounce;
+  String _trackSearchQuery = '';
+  List<Map<String, dynamic>>? _visibleTrackCache;
+  List<Map<String, dynamic>>? _visibleTrackCacheSource;
+  String _visibleTrackCacheQuery = '';
+  LibrarySort? _visibleTrackCacheSort;
 
   @override
   void initState() {
@@ -107,6 +117,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
   @override
   void dispose() {
+    _trackSearchDebounce?.cancel();
     _tokenController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -141,6 +152,42 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     }
     final value = '${raw ?? ''}'.trim();
     return value.isEmpty ? context.l10n.yandexUnknownArtist : value;
+  }
+
+  void _invalidateVisibleTracks() {
+    _visibleTrackCache = null;
+    _visibleTrackCacheSource = null;
+    _visibleTrackCacheQuery = '';
+    _visibleTrackCacheSort = null;
+  }
+
+  void _resetTrackSearch() {
+    _trackSearchDebounce?.cancel();
+    _searchController.clear();
+    _trackSearchQuery = '';
+    _invalidateVisibleTracks();
+  }
+
+  void _scheduleTrackSearch(String value) {
+    final query = value.trim().toLowerCase();
+    _trackSearchDebounce?.cancel();
+    _trackSearchDebounce = Timer(_trackSearchDelay, () {
+      if (!mounted || query == _trackSearchQuery) return;
+      setState(() {
+        _trackSearchQuery = query;
+        _invalidateVisibleTracks();
+      });
+    });
+  }
+
+  void _submitTrackSearch(String value) {
+    final query = value.trim().toLowerCase();
+    _trackSearchDebounce?.cancel();
+    if (query == _trackSearchQuery) return;
+    setState(() {
+      _trackSearchQuery = query;
+      _invalidateVisibleTracks();
+    });
   }
 
   Future<void> _initialize() async {
@@ -184,6 +231,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       _likedLastUpdated = liked['lastUpdated']?.toString();
       _playlistsLastUpdated = playlists['lastUpdated']?.toString();
       _albumsLastUpdated = albums['lastUpdated']?.toString();
+      _invalidateVisibleTracks();
       _errorMessage = null;
       _errorDetails = null;
     });
@@ -280,7 +328,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       _detailSource = 'none';
       _detailLastUpdated = null;
       _page = _PageKind.playlist;
-      _searchController.clear();
+      _resetTrackSearch();
       _trackSort = LibrarySort.original;
     });
     try {
@@ -308,7 +356,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       _detailSource = 'none';
       _detailLastUpdated = null;
       _page = _PageKind.album;
-      _searchController.clear();
+      _resetTrackSearch();
       _trackSort = LibrarySort.original;
     });
     try {
@@ -345,6 +393,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
       _detailTracks = _maps(collection['tracks']);
       _detailSource = '${collection['source'] ?? 'none'}';
       _detailLastUpdated = collection['lastUpdated']?.toString();
+      _invalidateVisibleTracks();
       _errorMessage = null;
       _errorDetails = null;
     });
@@ -454,34 +503,56 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     }
   }
 
-  void _showLiked() => setState(() {
-        _page = _PageKind.liked;
-        _searchController.clear();
-        _trackSort = LibrarySort.original;
-      });
+  void _showLiked() {
+    setState(() {
+      _page = _PageKind.liked;
+      _resetTrackSearch();
+      _trackSort = LibrarySort.original;
+    });
+  }
 
-  void _showPlaylists() => setState(() {
-        _page = _PageKind.playlists;
-        _searchController.clear();
-        _playlistSort = PlaylistSort.original;
-      });
+  void _showPlaylists() {
+    _trackSearchDebounce?.cancel();
+    setState(() {
+      _page = _PageKind.playlists;
+      _searchController.clear();
+      _trackSearchQuery = '';
+      _invalidateVisibleTracks();
+      _playlistSort = PlaylistSort.original;
+    });
+  }
 
-  void _showAlbums() => setState(() {
-        _page = _PageKind.albums;
-        _searchController.clear();
-      });
+  void _showAlbums() {
+    _trackSearchDebounce?.cancel();
+    setState(() {
+      _page = _PageKind.albums;
+      _searchController.clear();
+      _trackSearchQuery = '';
+      _invalidateVisibleTracks();
+    });
+  }
 
   List<Map<String, dynamic>> get _trackSource =>
       _page == _PageKind.liked ? _likedTracks : _detailTracks;
 
   List<Map<String, dynamic>> get _visibleTracks {
-    final query = _searchController.text.trim().toLowerCase();
-    final filtered = _trackSource.where((track) {
-      if (query.isEmpty) return true;
-      return '${track['title'] ?? ''} ${_artists(track)} ${track['album_title'] ?? ''}'
-          .toLowerCase()
-          .contains(query);
-    }).toList(growable: false);
+    final source = _trackSource;
+    final query = _trackSearchQuery;
+    if (query.isEmpty && _trackSort == LibrarySort.original) return source;
+    if (identical(_visibleTrackCacheSource, source) &&
+        _visibleTrackCacheQuery == query &&
+        _visibleTrackCacheSort == _trackSort &&
+        _visibleTrackCache != null) {
+      return _visibleTrackCache!;
+    }
+
+    final filtered = query.isEmpty
+        ? source.toList(growable: false)
+        : source.where((track) {
+            return '${track['title'] ?? ''} ${_artists(track)} ${track['album_title'] ?? ''}'
+                .toLowerCase()
+                .contains(query);
+          }).toList(growable: false);
     final indexed = filtered.asMap().entries.toList();
     switch (_trackSort) {
       case LibrarySort.original:
@@ -510,7 +581,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
           return a.key.compareTo(b.key);
         });
     }
-    return indexed.map((entry) => entry.value).toList(growable: false);
+    final result = indexed.map((entry) => entry.value).toList(growable: false);
+    _visibleTrackCacheSource = source;
+    _visibleTrackCacheQuery = query;
+    _visibleTrackCacheSort = _trackSort;
+    _visibleTrackCache = result;
+    return result;
   }
 
   List<Map<String, dynamic>> get _visiblePlaylists {
@@ -839,6 +915,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                         Expanded(
                           child: ListView.builder(
                             key: const Key('track-list'),
+                            itemExtent: 72,
                             itemCount: visible.length,
                             itemBuilder: (context, index) {
                               final track = visible[index];
@@ -878,7 +955,8 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
             final search = TextField(
               key: const Key('track-search'),
               controller: _searchController,
-              onChanged: (_) => setState(() {}),
+              onChanged: _scheduleTrackSearch,
+              onSubmitted: _submitTrackSearch,
               decoration: InputDecoration(
                 hintText: context.l10n.yandexSearchTracks,
                 prefixIcon: const Icon(Icons.search),
@@ -912,7 +990,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
               onChanged: _busy
                   ? null
                   : (value) {
-                      if (value != null) setState(() => _trackSort = value);
+                      if (value != null) {
+                        setState(() {
+                          _trackSort = value;
+                          _invalidateVisibleTracks();
+                        });
+                      }
                     },
             );
             final labels = widget.contentLabelBridge == null
@@ -1161,6 +1244,8 @@ class _AlbumCard extends StatelessWidget {
                         : Image.network(
                             artwork,
                             fit: BoxFit.cover,
+                            cacheWidth: 512,
+                            cacheHeight: 512,
                             errorBuilder: (_, _, _) => ColoredBox(
                               color: Theme.of(context)
                                   .colorScheme
@@ -1346,6 +1431,8 @@ class _TrackRow extends StatelessWidget {
                       : Image.network(
                           artwork,
                           fit: BoxFit.cover,
+                          cacheWidth: 96,
+                          cacheHeight: 96,
                           errorBuilder: (_, _, _) => ColoredBox(
                             color: Theme.of(context)
                                 .colorScheme

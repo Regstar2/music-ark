@@ -19,6 +19,15 @@ class AppUiTokens {
   static const radiusMedium = 12.0;
   static const radiusLarge = 16.0;
 
+  /// Maximum width for Settings, Help and About content on large desktops.
+  static const utilityContentMaxWidth = 1180.0;
+
+  /// Utility-page rows keep controls side by side above this content width.
+  static const utilityRowWide = 820.0;
+
+  /// About information uses two columns above this content width.
+  static const utilityGridWide = 760.0;
+
   /// Content width where the Yandex toolbar can remain on a single row.
   static const yandexToolbarWide = 900.0;
 

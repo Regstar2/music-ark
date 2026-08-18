@@ -2,14 +2,22 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.6 — Sync Page UI Polish.**  
+**Current code version: 0.9.7 — Settings, Help & About UI Polish.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.6 redesigns Controlled Sync as a compact responsive workflow without changing planner, Apply semantics or safety boundaries.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.7 completes the current v0.9.x UI polish with redesigned Settings, expanded offline Help and a diagnostic About page without changing music-domain behavior.
+
+## Settings / Help / About v0.9.7
+
+`Settings`, `Help` and `About` use a constrained responsive desktop composition instead of stretching sparse utility content across the whole workspace. Settings keeps the current System/Light/Dark and System/Russian/English preferences, places them in compact responsive cards, shows an auto-save status and renders a separate provider/account card from the existing `AccountSessionController`.
+
+Help remains fully local and now contains 11 topics grouped into `Library / Collection analysis / Recovery and actions / Application`. It separately explains Identity/Metadata/Variant, Missing vs Different Version, ORIGINAL/CENSORED, Download states, Controlled Sync safety, the Metadata Editor write boundary, artwork/playback cache and diagnostic-data safety.
+
+About reuses the existing `MusicArkMark`, presents version/environment data in a responsive grid, keeps safe diagnostic copy and standard Flutter dependency licenses, and exposes the GitHub repository. No URL-launch dependency is added: the repository remains selectable and has an explicit copy-link action. Help/About return to Settings inside the existing shell, so the Yandex workspace, account session and Now Playing are not recreated.
 
 ## Sync v0.9.6
 
-`Sync` is now presented as one sequential desktop workflow: scope and download-folder selection, status/summary, current and projected coverage, five primary metrics and one `Sync plan` with counted filters instead of several large `ExpansionTile` sections.
+`Sync` is presented as one sequential desktop workflow: scope and download-folder selection, status/summary, current and projected coverage, five primary metrics and one `Sync plan` with counted filters instead of several large `ExpansionTile` sections.
 
 `All / Download / Decision / Matching / Version check / Local Library` filters operate only on operations already returned to Flutter and do not rebuild the backend plan. Wide layouts render operations as a table; narrow layouts use stacked rows. When the Sync payload has no artwork, a theme-aware local placeholder is used without an additional provider request.
 
@@ -212,7 +220,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.6 does not bump the SQLite schema. The Sync UI reuses the existing plan/operation payload and adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.7 does not bump the SQLite schema. Utility UI reuses the existing settings/session/version contracts and adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -245,8 +253,9 @@ v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
-v0.9.6 — Sync Page UI Polish                           current
+v0.9.6 — Sync Page UI Polish                           complete
+v0.9.7 — Settings, Help & About UI Polish              current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.6. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.6.md`, `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.7. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.7.md`, `docs/versions/v0.9.6.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

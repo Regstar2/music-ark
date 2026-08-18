@@ -2,14 +2,22 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.6 — Sync Page UI Polish.**  
+**Текущая версия кода: 0.9.7 — Settings, Help & About UI Polish.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.6 перерабатывает экран Controlled Sync в компактный responsive workflow, не меняя planner, Apply semantics или safety boundaries.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.7 завершает текущую v0.9.x UI-полировку переработкой Settings, расширенной offline Help и диагностического About без изменения музыкальной бизнес-логики.
+
+## Settings / Help / About v0.9.7
+
+`Настройки`, `Помощь` и `О приложении` используют ограниченную по ширине responsive desktop-компоновку вместо растягивания редкого utility-контента на всю рабочую область. Settings сохраняет текущие System/Light/Dark и System/Russian/English preferences, но размещает их в компактных responsive карточках, показывает status автосохранения и отдельную provider/account card на существующем `AccountSessionController`.
+
+Help остаётся полностью локальной и теперь содержит 11 тем в группах `Библиотека / Анализ коллекции / Восстановление и действия / Приложение`. Она отдельно объясняет Identity/Metadata/Variant, Missing vs Different Version, ORIGINAL/CENSORED, Download states, Controlled Sync safety, Metadata Editor write boundary, artwork/playback cache и безопасность diagnostics.
+
+About переиспользует существующий `MusicArkMark`, показывает версию/среду в responsive grid, безопасную diagnostics copy, стандартные Flutter dependency licenses и GitHub repository. Новая URL-launch dependency не добавляется: ссылка на GitHub доступна как selectable text и явное copy-link действие. Help/About имеют понятный возврат в Settings внутри существующего shell, поэтому Yandex workspace, account session и Now Playing не пересоздаются.
 
 ## Sync v0.9.6
 
-Раздел `Синхронизация` теперь строится как один последовательный desktop workflow: выбор области и папки загрузок, status/summary, текущее и прогнозируемое покрытие, пять основных метрик и единый `План синхронизации` с counted filters вместо нескольких больших `ExpansionTile`.
+Раздел `Синхронизация` строится как один последовательный desktop workflow: выбор области и папки загрузок, status/summary, текущее и прогнозируемое покрытие, пять основных метрик и единый `План синхронизации` с counted filters вместо нескольких больших `ExpansionTile`.
 
 Фильтры `Все / Скачать / Решение / Сопоставление / Проверка версии / Локальная библиотека` работают только над уже полученными operations во Flutter и не пересоздают backend plan. На широкой области операции отображаются таблицей; на узкой — stacked rows. Если Sync payload не содержит artwork, используется theme-aware локальный placeholder без дополнительного provider request.
 
@@ -25,7 +33,7 @@ Apply по-прежнему пересчитывает актуальный diff
 
 ## Coverage / Missing v0.9.4
 
-Раздел `Недостающие` теперь строится вокруг списка треков, а не длинной технической строки статистики. Сверху расположена компактная карточка локального покрытия с прогрессом и основными метриками, сворачиваемые детали Matching/Variant анализа, counted status tabs и responsive панель Collection/Search/Decision/Sort/Variant.
+Раздел `Недостающие` строится вокруг списка треков, а не длинной технической строки статистики. Сверху расположена компактная карточка локального покрытия с прогрессом и основными метриками, сворачиваемые детали Matching/Variant анализа, counted status tabs и responsive панель Collection/Search/Decision/Sort/Variant.
 
 Строки Coverage показывают artwork из уже сохранённого `ProviderTrack.artwork_url` с локальным placeholder при отсутствии/ошибке картинки, затем название, исполнителя/альбом, membership в коллекциях и отдельные Coverage/Variant badges. Flutter не конструирует provider URL и не получает Yandex token/cookies/Authorization headers.
 
@@ -212,7 +220,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.6 не повышает SQLite schema. Sync UI использует существующий plan/operation payload и не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.7 не повышает SQLite schema. Utility UI использует существующие settings/session/version contracts и не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -245,8 +253,9 @@ v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
-v0.9.6 — Sync Page UI Polish                           current
+v0.9.6 — Sync Page UI Polish                           complete
+v0.9.7 — Settings, Help & About UI Polish              current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.6 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.6.md`, `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.7 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.7.md`, `docs/versions/v0.9.6.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

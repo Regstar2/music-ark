@@ -128,19 +128,24 @@ class LocalLibraryStorageRepository:
         seen_normalized_paths: set[str],
         scanned_at: str,
         allow_removals: bool,
+        missing_normalized_paths: Iterable[str] | None = None,
     ) -> int:
+        """Persist scan deltas without rewriting every unchanged library row.
+
+        New scanners pass the already-known missing path set so an unchanged
+        large library only updates the root scan timestamp. ``None`` preserves
+        the legacy temp-table path for callers that cannot provide that delta.
+        """
         rows = [self._record_tuple(item, scanned_at) for item in upserts]
+        missing = (
+            None
+            if missing_normalized_paths is None
+            else list(dict.fromkeys(str(path) for path in missing_normalized_paths))
+        )
         removed = 0
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 with conn:
-                    conn.execute("CREATE TEMP TABLE IF NOT EXISTS local_scan_seen(path TEXT PRIMARY KEY)")
-                    conn.execute("DELETE FROM local_scan_seen")
-                    if seen_normalized_paths:
-                        conn.executemany(
-                            "INSERT OR IGNORE INTO local_scan_seen(path) VALUES (?)",
-                            ((path,) for path in seen_normalized_paths),
-                        )
                     if rows:
                         conn.executemany(
                             """
@@ -178,25 +183,50 @@ class LocalLibraryStorageRepository:
                             """,
                             rows,
                         )
-                    conn.execute(
-                        """
-                        UPDATE local_audio_files
-                        SET last_seen_at=?
-                        WHERE library_root_id=?
-                          AND normalized_path IN (SELECT path FROM local_scan_seen)
-                        """,
-                        (scanned_at, int(root_id)),
-                    )
-                    if allow_removals:
-                        cursor = conn.execute(
-                            """
-                            DELETE FROM local_audio_files
-                            WHERE library_root_id=?
-                              AND normalized_path NOT IN (SELECT path FROM local_scan_seen)
-                            """,
-                            (int(root_id),),
+
+                    if missing is None:
+                        conn.execute(
+                            "CREATE TEMP TABLE IF NOT EXISTS local_scan_seen(path TEXT PRIMARY KEY)"
                         )
-                        removed = max(0, int(cursor.rowcount))
+                        conn.execute("DELETE FROM local_scan_seen")
+                        if seen_normalized_paths:
+                            conn.executemany(
+                                "INSERT OR IGNORE INTO local_scan_seen(path) VALUES (?)",
+                                ((path,) for path in seen_normalized_paths),
+                            )
+                        conn.execute(
+                            """
+                            UPDATE local_audio_files
+                            SET last_seen_at=?
+                            WHERE library_root_id=?
+                              AND normalized_path IN (SELECT path FROM local_scan_seen)
+                            """,
+                            (scanned_at, int(root_id)),
+                        )
+                        if allow_removals:
+                            cursor = conn.execute(
+                                """
+                                DELETE FROM local_audio_files
+                                WHERE library_root_id=?
+                                  AND normalized_path NOT IN (SELECT path FROM local_scan_seen)
+                                """,
+                                (int(root_id),),
+                            )
+                            removed = max(0, int(cursor.rowcount))
+                    elif allow_removals and missing:
+                        for offset in range(0, len(missing), 400):
+                            batch = missing[offset : offset + 400]
+                            placeholders = ",".join("?" for _ in batch)
+                            cursor = conn.execute(
+                                f"""
+                                DELETE FROM local_audio_files
+                                WHERE library_root_id=?
+                                  AND normalized_path IN ({placeholders})
+                                """,
+                                [int(root_id), *batch],
+                            )
+                            removed += max(0, int(cursor.rowcount))
+
                     conn.execute(
                         "UPDATE local_library_roots SET last_scanned_at=? WHERE id=?",
                         (scanned_at, int(root_id)),
@@ -260,7 +290,7 @@ class LocalLibraryStorageRepository:
         """List tracks, optionally limiting the query to one or more roots.
 
         ``root_ids`` deliberately distinguishes ``None`` (all roots) from an
-        empty iterable (no roots).  The root predicate is applied before COUNT,
+        empty iterable (no roots). The root predicate is applied before COUNT,
         ORDER BY, LIMIT and OFFSET so pagination always reflects the selected
         library subset.
         """

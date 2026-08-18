@@ -14,7 +14,11 @@ v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
-v0.9.2 — Local Library UI & Multi-Root Selection       current
+v0.9.2 — Local Library UI & Multi-Root Selection       complete
+v0.9.3 — Matching UI Redesign                          complete
+v0.9.4 — Coverage / Missing UI Polish                  complete
+v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
+v0.9.6 — Sync Page UI Polish                           current
 v0.10.x — Yandex Upload                                next
 ```
 
@@ -56,6 +60,24 @@ Filtering is executed in SQLite before count/search/sort/pagination through a ty
 
 SQLite remains `1.8.4`.
 
+## v0.9.3 — Matching UI Redesign
+
+v0.9.3 turns Matching into a desktop comparison workspace with five summary metrics, counted filters, Search/Sort and side-by-side Yandex/local columns. Matching identity and Variant recording status stay separate, and narrow desktop layouts preserve comparison semantics through horizontal scrolling instead of changing the matching model.
+
+## v0.9.4 — Coverage / Missing UI Polish
+
+v0.9.4 makes Coverage track-first: compact local-coverage summary, counted status tabs, responsive filters, artwork from already persisted provider metadata and explicit Missing triage/download actions. Coverage semantics and the existing direct Download boundary remain unchanged.
+
+## v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions
+
+v0.9.5 redesigns Downloads around compact task rows, search/status filters, lazy rendering and explicit bulk actions. Failed/needs-review task removal deletes only the task record, while retry/download-selected run only IDs produced by the current user action and do not wake unrelated queued work.
+
+## v0.9.6 — Sync Page UI Polish
+
+v0.9.6 presents Controlled Sync as one readable desktop workflow: responsive scope/folder controls, state summary, current/projected coverage, five primary metrics and a single counted/filterable plan list. Empty operation classes no longer consume large accordion sections, while narrow windows switch plan rows to a stacked presentation.
+
+The underlying Controlled Sync contract does not change: filters are Flutter presentation state, Apply still requires confirmation and delegates only the existing safe operations. There is no local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement. SQLite remains `1.8.4`.
+
 ## Next — v0.10.x Yandex Upload
 
-The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.2**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.2 acceptance.
+The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.6**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.6 acceptance.

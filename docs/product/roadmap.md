@@ -18,8 +18,11 @@ v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
-v0.9.6 — Sync Page UI Polish                           current
-v0.10.x — Yandex Upload                                next
+v0.9.6 — Sync Page UI Polish                           complete
+v0.9.7 — Settings, Help & About UI Polish              complete
+v0.9.x — UI improvement line                           complete
+v0.10.0 — Yandex Upload Feasibility                    complete / blocked
+next — upload architecture decision                    decision required
 ```
 
 ## v0.8.0 — Controlled Sync
@@ -78,6 +81,20 @@ v0.9.6 presents Controlled Sync as one readable desktop workflow: responsive sco
 
 The underlying Controlled Sync contract does not change: filters are Flutter presentation state, Apply still requires confirmation and delegates only the existing safe operations. There is no local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement. SQLite remains `1.8.4`.
 
-## Next — v0.10.x Yandex Upload
+## v0.9.7 — Settings, Help & About UI Polish
 
-The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.6**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.6 acceptance.
+v0.9.7 completes the v0.9.x UI-improvement line with responsive Settings, expanded offline Help and diagnostic About while preserving all existing music-domain and mutation boundaries.
+
+## v0.10.0 — Yandex Upload Feasibility
+
+The feasibility spike confirms that Yandex Music exposes an own-track upload workflow through its website/desktop application, but it does **not** establish a reproducible programmatic upload contract usable through MusicArk's existing credential boundary.
+
+The pinned `yandex-music==3.0.0` client has no verified own-file upload API for this workflow, while endpoint/method/body/authentication/response identity remain undocumented by the inspected primary sources. The milestone therefore ends as `BLOCKED` instead of adding guessed transport code or a user-visible Upload capability.
+
+Production provider capabilities remain disabled, SQLite remains `1.8.4`, no Upload UI/queue/Sync integration is added, and the obsolete experimental compatibility path fails closed without reading a local file or sending a Yandex request.
+
+See `docs/versions/v0.10.0.md` for the evidence table and security constraints.
+
+## Next — decision required
+
+Do not schedule production Single Track Upload solely from this milestone. Reopen the upload architecture when a supported API becomes available or when an explicit account-owned, sanitized capture of the normal Yandex upload workflow provides a reproducible protocol without browser-cookie theft or security-challenge bypass.

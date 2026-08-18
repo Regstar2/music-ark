@@ -2,10 +2,18 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.7 — Settings, Help & About UI Polish.**  
+**Current code version: 0.10.0 — Yandex Upload Feasibility (BLOCKED).**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.7 completes the current v0.9.x UI polish with redesigned Settings, expanded offline Help and a diagnostic About page without changing music-domain behavior.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. The v0.9.x line is complete. v0.10.0 investigates uploading one user-owned local file to Yandex Music and records a `BLOCKED` result: no reproducible programmatic upload protocol through MusicArk's existing authentication boundary has been confirmed.
+
+## Yandex Upload Feasibility v0.10.0
+
+Official Yandex Music Help confirms an own-track workflow through the website or desktop application: the user selects/creates a personal playlist and uploads local files. Direct upload into `Liked`, another user's playlist or an editorial playlist is not supported; artwork, title and artist are read from the file.
+
+However, the inspected primary sources and pinned `yandex-music==3.0.0` dependency do not provide MusicArk with a verified HTTP upload contract. Endpoint, method, request body/content type, sufficiency of the existing token, additional cookies/session artifacts and response identity remain unknown. Therefore v0.10.0 adds no production Upload UI, queue, reverse Sync, Matching/Coverage integration or guessed transport implementation.
+
+`YandexMusicProvider.can_upload_tracks` and `supports_user_uploads` remain `false`. The old experimental compatibility path is now fail-closed: it does not read the candidate file, log its path or send an upload request. The full evidence table is in `docs/versions/v0.10.0.md`.
 
 ## Settings / Help / About v0.9.7
 
@@ -220,7 +228,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.7 does not bump the SQLite schema. Utility UI reuses the existing settings/session/version contracts and adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.10.0 does not bump the SQLite schema. The feasibility milestone adds no upload-history or upload-task persistence. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -254,8 +262,10 @@ v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
 v0.9.6 — Sync Page UI Polish                           complete
-v0.9.7 — Settings, Help & About UI Polish              current
-v0.10.x — Yandex Upload                                next
+v0.9.7 — Settings, Help & About UI Polish              complete
+v0.9.x — UI improvement line                           complete
+v0.10.0 — Yandex Upload Feasibility                    complete / blocked
+next — upload architecture decision                    decision required
 ```
 
-Yandex Upload is not implemented in v0.9.7. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.7.md`, `docs/versions/v0.9.6.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Production Yandex Upload is not implemented in v0.10.0. The milestone confirms only the existence of Yandex's user-facing upload workflow and documents the lack of a verified programmatic protocol for MusicArk. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.10.0.md`.

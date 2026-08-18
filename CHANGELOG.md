@@ -2,7 +2,34 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.7 Draft candidate
+## Unreleased — after v0.10.0
+
+### v0.10.0 — Yandex Upload Feasibility Spike
+
+#### Added
+
+- factual feasibility documentation with primary-source evidence for Yandex Music own-track upload;
+- an explicit `BLOCKED` outcome and evidence table covering authentication, protocol, collection, response, format, retry and idempotency unknowns;
+- regression coverage that keeps production Yandex upload capabilities disabled and verifies the obsolete experimental entry point fails closed.
+
+#### Changed
+
+- application/backend/Flutter package version advances to `0.10.0`; SQLite remains `1.8.4`;
+- v0.9.x is marked complete and the roadmap now requires an upload architecture decision before production Single Track Upload is scheduled;
+- the old experimental upload compatibility path no longer reads a local-library candidate file, writes its path/payload into audit, probes provider auth or sends any Yandex request; it now fails closed with the documented v0.10.0 `BLOCKED` result.
+
+#### Safety / boundaries
+
+- `can_upload_tracks` and `supports_user_uploads` remain `false` for the production Yandex provider;
+- no Upload UI, upload queue, reverse Sync, Matching/Coverage integration, new credential storage, browser automation or guessed HTTP transport is introduced;
+- no live Yandex upload runs in CI and no live upload command is provided while feasibility is blocked;
+- no SQLite migration is introduced.
+
+#### Verification state
+
+- source/version/docs changes and fail-closed regression coverage are included in the v0.10.0 branch;
+- GitHub Actions Python/Flutter results and Windows smoke are recorded only after they actually run against the final PR head;
+- live upload validation is `BLOCKED` because no reproducible upload protocol was established.
 
 ### v0.9.7 — Settings, Help & About UI Polish
 

@@ -18,7 +18,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import yandex_upload_target_probe as target_probe
@@ -84,18 +84,28 @@ def _is_text_member(path: str) -> bool:
 
 def _is_yandex_host(host: str) -> bool:
     clean = host.lower().split(":", 1)[0].rstrip(".")
-    return clean == "yandex.ru" or clean.endswith(".yandex.ru") or clean == "yandex.net" or clean.endswith(".yandex.net") or clean == "yandex.com" or clean.endswith(".yandex.com")
+    return (
+        clean == "yandex.ru"
+        or clean.endswith(".yandex.ru")
+        or clean == "yandex.net"
+        or clean.endswith(".yandex.net")
+        or clean == "yandex.com"
+        or clean.endswith(".yandex.com")
+    )
 
 
 def _sanitize_yandex_url(value: str) -> str | None:
     clean = value.strip().rstrip(",;)}]")
-    if _SENSITIVE_RE.search(clean):
-        return None
     try:
         parsed = urlsplit(clean)
     except ValueError:
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or not _is_yandex_host(parsed.netloc):
+        return None
+    # Query/fragment values are intentionally discarded before any output.
+    # Sensitive words in query values therefore do not make the public host/path
+    # unusable as structural evidence; sensitive host/path text still rejects it.
+    if _SENSITIVE_RE.search(f"{parsed.netloc}{parsed.path}"):
         return None
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "", "", ""))
 
@@ -148,14 +158,15 @@ def _anchor_records(text: str, urls: list[tuple[int, str]], radius: int) -> list
                 if left <= position <= right
             ]
             candidates.sort(key=lambda item: (item["distance"], item["url"]))
-            record = {
-                "anchor": anchor,
-                "member_relative_offset": match.start(),
-                "nearby_urls": candidates[:20],
-                "public_clients": _public_clients(window),
-                "header_names": _safe_header_names(window),
-            }
-            records.append(record)
+            records.append(
+                {
+                    "anchor": anchor,
+                    "member_relative_offset": match.start(),
+                    "nearby_urls": candidates[:20],
+                    "public_clients": _public_clients(window),
+                    "header_names": _safe_header_names(window),
+                }
+            )
     return records[:400]
 
 
@@ -179,7 +190,8 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
             continue
         raw = _read_member(path, entry)
         text = raw.decode("utf-8", errors="replace")
-        present_anchors = [anchor for anchor in ANCHORS if anchor.lower() in text.lower()]
+        lowered = text.lower()
+        present_anchors = [anchor for anchor in ANCHORS if anchor.lower() in lowered]
         direct_bindings = _direct_bindings(text)
         urls = _url_occurrences(text)
         if not present_anchors and not direct_bindings:
@@ -208,17 +220,13 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
                 url = candidate["url"]
                 current = candidate_urls.get(url)
                 evidence = {
+                    "url": url,
+                    "best_distance": candidate["distance"],
                     "member_path": entry["path"],
-                    "anchor": record["anchor"],
-                    "distance": candidate["distance"],
+                    "nearest_anchor": record["anchor"],
                 }
-                if current is None or evidence["distance"] < current["best_distance"]:
-                    candidate_urls[url] = {
-                        "url": url,
-                        "best_distance": evidence["distance"],
-                        "member_path": evidence["member_path"],
-                        "nearest_anchor": evidence["anchor"],
-                    }
+                if current is None or evidence["best_distance"] < current["best_distance"]:
+                    candidate_urls[url] = evidence
 
         for binding in direct_bindings:
             url = binding["url"]
@@ -232,10 +240,7 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
             if current is None or current["best_distance"] > 0:
                 candidate_urls[url] = direct
 
-    ranked = sorted(
-        candidate_urls.values(),
-        key=lambda item: (item["best_distance"], item["url"]),
-    )
+    ranked = sorted(candidate_urls.values(), key=lambda item: (item["best_distance"], item["url"]))
     return {
         "format": "musicark-yandex-upload-runtime-profile-report-v1",
         "source": "asar-public-runtime-profile-static-scan",

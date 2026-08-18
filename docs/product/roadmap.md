@@ -18,7 +18,8 @@ v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
-v0.9.6 — Sync Page UI Polish                           current
+v0.9.6 — Sync Page UI Polish                           complete
+v0.9.7 — Large Library Performance                     current
 v0.10.x — Yandex Upload                                next
 ```
 
@@ -78,6 +79,12 @@ v0.9.6 presents Controlled Sync as one readable desktop workflow: responsive sco
 
 The underlying Controlled Sync contract does not change: filters are Flutter presentation state, Apply still requires confirmation and delegates only the existing safe operations. There is no local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement. SQLite remains `1.8.4`.
 
+## v0.9.7 — Large Library Performance
+
+v0.9.7 removes repeated large-library work from normal navigation. Local Library activation becomes cache-first and keeps recursive scanning explicit; track materialization is limited to 250-row pages; incremental scan persistence writes actual deltas rather than touching every unchanged row; local artwork lookup is batched and caches negative cover results.
+
+The Yandex workspace avoids copying the complete track collection in the default view, memoizes filtered/sorted results, debounces track search, uses fixed-extent list rows and bounds network-image decode sizes. SQLite remains `1.8.4` and no music-domain semantics change.
+
 ## Next — v0.10.x Yandex Upload
 
-The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.6**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.6 acceptance.
+The next product slice is intended for explicit upload of user-owned local music into the user's Yandex Music collection. It is intentionally **not implemented in v0.9.7**. Its API, queue semantics, provider capabilities, matching rules and safety boundaries must be designed as a separate version after v0.9.7 acceptance.

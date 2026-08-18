@@ -15,6 +15,9 @@ from .models import LocalLibraryRoot
 from .scanner import LocalLibraryScanner
 
 
+_MAX_TRACK_PAGE_SIZE = 250
+
+
 def _root_payload(root: LocalLibraryRoot) -> dict[str, Any]:
     return {
         "id": root.id,
@@ -140,7 +143,7 @@ class LocalLibraryService:
         root_id: int | None = None,
         root_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Return a page of local tracks for all, one, or several roots."""
+        """Return a bounded page of local tracks for all, one, or several roots."""
         if root_id is not None and root_ids is not None:
             raise ValueError("root_id and root_ids cannot be supplied together.")
 
@@ -149,7 +152,11 @@ class LocalLibraryService:
             if root_ids is None
             else list(dict.fromkeys(int(value) for value in root_ids))
         )
-        page_limit = max(1, min(int(limit), 5000))
+        # The desktop bridge may request a larger page for historical reasons,
+        # but materializing hundreds of artwork descriptors at once is expensive.
+        # Keep the storage query paginated and let the existing Load More contract
+        # request subsequent pages instead of front-loading a large library.
+        page_limit = max(1, min(int(limit), _MAX_TRACK_PAGE_SIZE))
         page_offset = max(0, int(offset))
         items, total = self._repository.list_tracks(
             limit=page_limit,

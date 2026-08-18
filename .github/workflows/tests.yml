@@ -37,17 +37,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
+      - name: Verify Flutter
+        shell: pwsh
+        run: |
+          Get-Command flutter -ErrorAction Stop | Out-Null
+          flutter --version
 
       - name: Resolve Flutter dependencies
+        shell: pwsh
         run: flutter pub get
 
       - name: Flutter analyze
+        shell: pwsh
         run: flutter analyze
 
       - name: Flutter tests
+        shell: pwsh
         run: flutter test

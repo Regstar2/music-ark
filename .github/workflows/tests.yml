@@ -52,6 +52,93 @@ jobs:
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
 
+  yandex-upload-research:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select healthy Python
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $selectedVersion = $null
+
+          if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+            throw "Windows Python launcher 'py' is required on the self-hosted runner."
+          }
+
+          foreach ($version in @("3.13", "3.12", "3.11", "3.10")) {
+            & py "-$version" -c "import ctypes, pip" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $selectedVersion = $version
+              break
+            }
+          }
+
+          if (-not $selectedVersion) {
+            throw "No healthy Python installation with ctypes and pip was found on the self-hosted runner."
+          }
+
+          "MUSICARK_PYTHON_VERSION=$selectedVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+          & py "-$selectedVersion" --version
+
+      - name: Install package
+        shell: pwsh
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install -e .'
+
+      - name: Run upload feasibility tests
+        shell: pwsh
+        run: |
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_*.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_upload_mapping.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run sanitized V11 static probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $asar = Join-Path $env:LOCALAPPDATA "Programs\YandexMusic\resources\app.asar"
+          if (-not (Test-Path -LiteralPath $asar -PathType Leaf)) {
+            throw "Official Yandex Music app.asar is not available on the self-hosted runner."
+          }
+
+          $expected = "8e7f4cec0776c39f194dee0a94086548d13f1465d46aa05d3e00a21624cbe80a"
+          $actual = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Yandex Music app.asar SHA-256 does not match the researched desktop build."
+          }
+
+          $output = ".musicark\research\yandex-upload-symbol-role-v11-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_symbol_role_probe.py `
+            $asar `
+            --offset 10176266 `
+            --offset 16146222 `
+            --offset 17782754 `
+            --offset 18726605 `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($report.input_sha256 -ne $expected) { throw "V11 report input hash mismatch." }
+          if ($report.safety.network_requests_sent -ne $false) { throw "V11 safety gate failed: network activity." }
+          if ($report.safety.credential_values_included -ne $false) { throw "V11 safety gate failed: credentials." }
+          if ($report.safety.header_values_included -ne $false) { throw "V11 safety gate failed: header values." }
+          if ($report.safety.ordinary_string_values_included -ne $false) { throw "V11 safety gate failed: ordinary strings." }
+          if ($report.safety.source_code_contexts_included -ne $false) { throw "V11 safety gate failed: source contexts." }
+          if ($report.safety.raw_file_contents_included -ne $false) { throw "V11 safety gate failed: raw file contents." }
+
+      - name: Upload sanitized V11 report
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-upload-v11-sanitized
+          path: .musicark/research/yandex-upload-symbol-role-v11-ci.json
+          if-no-files-found: error
+          retention-days: 7
+
   flutter-tests:
     runs-on: self-hosted
     defaults:

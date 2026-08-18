@@ -2,14 +2,22 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.5 — Downloads UI, Safe Deletion & Bulk Actions.**  
+**Current code version: 0.9.6 — Sync Page UI Polish.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.5 redesigns the Downloads workspace, adds safe removal of failed task records and explicit batch actions without turning queue-history removal into audio-file deletion.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.6 redesigns Controlled Sync as a compact responsive workflow without changing planner, Apply semantics or safety boundaries.
+
+## Sync v0.9.6
+
+`Sync` is now presented as one sequential desktop workflow: scope and download-folder selection, status/summary, current and projected coverage, five primary metrics and one `Sync plan` with counted filters instead of several large `ExpansionTile` sections.
+
+`All / Download / Decision / Matching / Version check / Local Library` filters operate only on operations already returned to Flutter and do not rebuild the backend plan. Wide layouts render operations as a table; narrow layouts use stacked rows. When the Sync payload has no artwork, a theme-aware local placeholder is used without an additional provider request.
+
+Apply still rebuilds the current diff, requires explicit confirmation and uses the existing Sync bridge/DownloadService boundary. v0.9.6 adds no local-file deletion/move, metadata write, Yandex mutation, reverse sync or automatic Different Version replacement.
 
 ## Downloads v0.9.5
 
-`Downloads` now uses compact counted `Downloads` / `Wanted` tabs, separate summary metrics, search/status filters, compact lazy-rendered track rows and contextual bulk actions. User-facing failures are mapped from `errorCode`; the raw backend message plus task/provider/external IDs remain available separately in Technical details.
+`Downloads` uses compact counted `Downloads` / `Wanted` tabs, separate summary metrics, search/status filters, compact lazy-rendered track rows and contextual bulk actions. User-facing failures are mapped from `errorCode`; the raw backend message plus task/provider/external IDs remain available separately in Technical details.
 
 `failed` and `needs_review` tasks have an explicit `Remove` action. It deletes only the persisted download-task record; the final audio file, Local Library, Matching, Coverage, Wanted state, provider cache and audit history are not deleted. The expected sibling `.part` may be cleaned best-effort only after a safe-path check. `queued`/`running` tasks cannot be removed directly and continue to use cancellation.
 
@@ -17,7 +25,7 @@ Multi-selection supports retrying failed tasks, cancelling active tasks, removin
 
 ## Coverage / Missing v0.9.4
 
-The `Missing` section now centers the track list instead of a long technical statistics row. The page starts with a compact local-coverage card and progress meter, four primary metrics, collapsible Matching/Variant analysis details, counted status tabs and a responsive Collection/Search/Decision/Sort/Variant toolbar.
+The `Missing` section centers the track list instead of a long technical statistics row. The page starts with a compact local-coverage card and progress meter, four primary metrics, collapsible Matching/Variant analysis details, counted status tabs and a responsive Collection/Search/Decision/Sort/Variant toolbar.
 
 Coverage rows use the already-persisted `ProviderTrack.artwork_url` with a local placeholder when artwork is missing or fails to load, followed by title, artist/album, collection membership and separate Coverage/Variant badges. Flutter does not construct provider URLs or receive the Yandex token, cookies or Authorization headers.
 
@@ -162,7 +170,7 @@ Local Library displays a thumbnail for each track. Priority is embedded artwork,
 
 Yandex Library provides artwork and built-in playback. The backend prepares or reuses a private cache under `.musicark/playback/yandex` and passes only the local path to Flutter. The Yandex token, Authorization headers and protected/signed provider media URLs are never passed to Flutter. Playback-cache files are not indexed into Local Library and do not affect Matching or Coverage.
 
-Downloads v0.9.5 uses a local placeholder when the current download payload has no ready artwork; it adds no per-row network artwork request.
+Downloads v0.9.5 and Sync v0.9.6 use a local placeholder when the current payload has no ready artwork; they add no per-row network artwork request.
 
 ## Content labels and Variant acceptance
 
@@ -185,7 +193,7 @@ modified existing local files/tags = 0
 Yandex mutations = 0
 ```
 
-Metadata Editor is a separate explicit-write workflow and is never called automatically by Scan/Matching/Coverage/Sync.
+v0.9.6 changes presentation only: plan filters operate on the already returned operation snapshot, while Apply still requires confirmation. Metadata Editor is a separate explicit-write workflow and is never called automatically by Scan/Matching/Coverage/Sync.
 
 ## SQLite
 
@@ -204,7 +212,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.5 does not bump the SQLite schema. Safe task removal reuses the existing `download_tasks` storage, and the batch command adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.6 does not bump the SQLite schema. The Sync UI reuses the existing plan/operation payload and adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -236,8 +244,9 @@ v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
-v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    current
+v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
+v0.9.6 — Sync Page UI Polish                           current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.5. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.6. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.6.md`, `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

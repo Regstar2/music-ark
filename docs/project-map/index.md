@@ -1,6 +1,6 @@
 # MusicArk Project Map
 
-## Active desktop path — v0.9.3 Matching UI over v0.8.2 music baseline
+## Active desktop path — v0.9.6 Sync UI over v0.8.2 music baseline
 
 ```text
 ui/musicark_ui/
@@ -18,8 +18,9 @@ ui/musicark_ui/
   lib/metadata_editor_page.dart       explicit local metadata/artwork/filename editor
   lib/matching_page.dart              responsive Yandex↔Local comparison workspace + detail/manual decisions
   lib/coverage_page.dart              Coverage / Missing / wanted-ignored triage
-  lib/download_page.dart              production user queue / local playback entry points
-  lib/sync_page.dart                  Controlled Sync preview / blockers / confirmation / history
+  lib/download_page.dart              production queue / safe task removal / bulk actions / local playback
+  lib/sync_page.dart                  responsive Controlled Sync status / coverage / filtered operation plan
+  lib/sync_localizations_ext.dart     Sync presentation adapter over the existing generated RU/EN catalog
 
 src/musicark/
   mvp_bridge.py                       desktop process boundary, including typed Local root-ID filters
@@ -38,6 +39,33 @@ src/musicark/
   download/                           authorized acquisition, metadata enrichment and queue service
   sync/                               read-only planner, staleness checks and enqueue-only Apply
 ```
+
+## Sync presentation boundary
+
+v0.9.6 changes only Flutter presentation around the existing Controlled Sync bridge. Scope/folder changes still create a fresh plan through the existing application boundary; Apply still rebuilds/revalidates the current diff and requires explicit confirmation.
+
+```text
+SyncPage
+  → scopes / target / current
+  → createPlan(scope)
+  → summary + operations
+
+local plan filter
+  → filters already returned operations only
+  → no bridge call / no persisted state change
+
+explicit user decision
+  → setAction(externalId, wanted|ignored)
+  → createPlan(scope)
+
+confirmed Sync
+  → createPlan(scope)
+  → confirmation dialog
+  → apply(planId, confirm: true)
+  → existing DownloadService enqueue boundary
+```
+
+The v0.9.6 plan filters are presentation state only. They do not create a second planner, change Coverage/Matching/Variant truth or add filesystem/provider mutations. Missing artwork in Sync operations uses a local placeholder rather than extending the backend contract for decoration.
 
 ## Matching presentation boundary
 
@@ -81,15 +109,15 @@ SQLite COUNT / search / sort / LIMIT / OFFSET over the same filtered set
 
 `YandexLibraryService.bootstrap()` is cache-first. It exposes cached liked tracks, playlist metadata and the explicit Yandex Music liked-album index. `library_refresh()` refreshes those indexes without eagerly fetching every playlist or album. Opening one playlist or album loads that collection lazily and caches its ordered tracks.
 
-The Albums tab is **not** derived from album tags on tracks in `Мне нравится / Liked`. It represents albums explicitly liked by the authenticated Yandex Music account through the pinned provider client. MusicArk only reads and caches this information; v0.9.3 does not like/unlike albums or otherwise mutate Yandex Music.
+The Albums tab is **not** derived from album tags on tracks in `Мне нравится / Liked`. It represents albums explicitly liked by the authenticated Yandex Music account through the pinned provider client. MusicArk only reads and caches this information; v0.9.x UI milestones do not like/unlike albums or otherwise mutate Yandex Music.
 
-The album cache, Local Library root filter and Matching UI v0.9.3 all reuse existing schema `1.8.4`; no database migration is required.
+The album cache, Local Library root filter, Matching/Coverage/Downloads UI milestones and Sync UI v0.9.6 all reuse existing schema `1.8.4`; no database migration is required.
 
 ## Authoritative safety boundaries
 
 The v0.9.x shell observes existing Yandex `session` payloads; it does not create another credential store or authentication API. Theme/locale preferences remain UI-only.
 
-Controlled Sync does not implement another matcher, Coverage engine, downloader or Local indexer. It reads current state from those layers and delegates acquisition to Downloads.
+Controlled Sync does not implement another matcher, Coverage engine, downloader or Local indexer. It reads current state from those layers and delegates acquisition to Downloads. v0.9.6 keeps the existing confirmation and enqueue-only Apply boundaries.
 
 Yandex playback is a user-initiated preview path. It creates/reuses a private file under `.musicark/playback/yandex`; that file is not inserted into Local Library, Matching or Coverage. Flutter receives the local playback path, never protected provider media URLs or credentials.
 
@@ -97,7 +125,10 @@ Metadata Editor remains the explicit ordinary write boundary. Local Scan, root s
 
 ## Documentation entry points
 
-- `docs/versions/v0.9.3.md` — current Matching UI Draft milestone and verification gate;
+- `docs/versions/v0.9.6.md` — current Sync UI Draft milestone and verification gate;
+- `docs/versions/v0.9.5.md` — Downloads safe deletion / bulk-action semantics;
+- `docs/versions/v0.9.4.md` — Coverage / Missing UI presentation;
+- `docs/versions/v0.9.3.md` — Matching UI presentation;
 - `docs/versions/v0.9.2.md` — Local Library multi-root query/view semantics;
 - `docs/architecture/ui-design-system.md` — shared desktop presentation rules;
 - `docs/architecture/app-shell-settings.md` — shell/account/preferences boundaries;

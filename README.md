@@ -2,14 +2,22 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.5 — Downloads UI, Safe Deletion & Bulk Actions.**  
+**Текущая версия кода: 0.9.6 — Sync Page UI Polish.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.5 перерабатывает экран Downloads, добавляет безопасное удаление ошибочных задач и явные batch actions, не превращая удаление записи очереди в удаление музыкального файла.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.6 перерабатывает экран Controlled Sync в компактный responsive workflow, не меняя planner, Apply semantics или safety boundaries.
+
+## Sync v0.9.6
+
+Раздел `Синхронизация` теперь строится как один последовательный desktop workflow: выбор области и папки загрузок, status/summary, текущее и прогнозируемое покрытие, пять основных метрик и единый `План синхронизации` с counted filters вместо нескольких больших `ExpansionTile`.
+
+Фильтры `Все / Скачать / Решение / Сопоставление / Проверка версии / Локальная библиотека` работают только над уже полученными operations во Flutter и не пересоздают backend plan. На широкой области операции отображаются таблицей; на узкой — stacked rows. Если Sync payload не содержит artwork, используется theme-aware локальный placeholder без дополнительного provider request.
+
+Apply по-прежнему пересчитывает актуальный diff, требует явного подтверждения и использует существующий Sync bridge/DownloadService boundary. v0.9.6 не добавляет удаление/перемещение локальных файлов, запись метаданных, Yandex mutation, reverse sync или автоматическую замену Different Version.
 
 ## Downloads v0.9.5
 
-Раздел `Загрузки` теперь использует компактные counted tabs `Загрузки` / `Нужные`, отдельные summary-метрики, поиск/status filters, компактные lazy-rendered track rows и contextual bulk actions. Ошибка показывается человекочитаемым сообщением по `errorCode`, а raw backend message, task/provider/external ID доступны отдельно в технических сведениях.
+Раздел `Загрузки` использует компактные counted tabs `Загрузки` / `Нужные`, отдельные summary-метрики, поиск/status filters, компактные lazy-rendered track rows и contextual bulk actions. Ошибка показывается человекочитаемым сообщением по `errorCode`, а raw backend message, task/provider/external ID доступны отдельно в технических сведениях.
 
 Для `failed` и `needs_review` доступно явное `Удалить`. Оно удаляет только запись download task; final audio file, Local Library, Matching, Coverage, Wanted state, provider cache и audit history не удаляются. Ожидаемый sibling `.part` может быть очищен best-effort только после проверки безопасного пути. `queued`/`running` удалять напрямую нельзя — для них используется существующая отмена.
 
@@ -162,7 +170,7 @@ Local Library показывает thumbnail каждого трека. Прио
 
 В Yandex Library доступны artwork и встроенное воспроизведение. Backend готовит или переиспользует приватный playback cache под `.musicark/playback/yandex` и передаёт Flutter только локальный путь. Yandex token, Authorization headers и protected/signed provider media URL во Flutter не передаются. Playback cache не индексируется в Local Library и не влияет на Matching или Coverage.
 
-Downloads v0.9.5 использует локальный placeholder, если текущий download payload не содержит готового artwork; отдельный сетевой запрос на каждую строку не добавляется.
+Downloads v0.9.5 и Sync v0.9.6 используют локальный placeholder, если текущий payload не содержит готового artwork; отдельный сетевой запрос на каждую строку не добавляется.
 
 ## Content labels и Variant acceptance
 
@@ -185,7 +193,7 @@ modified existing local files/tags = 0
 Yandex mutations = 0
 ```
 
-Metadata Editor — отдельный explicit-write workflow и не вызывается Scan/Matching/Coverage/Sync автоматически.
+v0.9.6 меняет только presentation: plan filters работают над уже полученным operation snapshot, а Apply по-прежнему требует confirmation. Metadata Editor — отдельный explicit-write workflow и не вызывается Scan/Matching/Coverage/Sync автоматически.
 
 ## SQLite
 
@@ -204,7 +212,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.5 не повышает SQLite schema. Safe task removal использует существующий `download_tasks`, а новая batch command не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.6 не повышает SQLite schema. Sync UI использует существующий plan/operation payload и не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -236,8 +244,9 @@ v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
-v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    current
+v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
+v0.9.6 — Sync Page UI Polish                           current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.5 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.6 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.6.md`, `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

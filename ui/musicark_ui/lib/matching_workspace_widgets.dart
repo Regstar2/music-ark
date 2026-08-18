@@ -283,6 +283,8 @@ class _MatchingResultRow extends StatelessWidget {
     final variant = row['variant'] is Map
         ? _asMap(row['variant'])
         : const <String, dynamic>{};
+    final providerContentLabel = '${row['providerContentLabel'] ?? ''}';
+    final localContentLabel = '${row['localContentLabel'] ?? ''}';
     final confidence =
         (_asDouble(row['confidence']) * 100).round().clamp(0, 100).toInt();
 
@@ -310,6 +312,13 @@ class _MatchingResultRow extends StatelessWidget {
                     secondary:
                         '${provider['album_title'] ?? provider['album'] ?? ''}'
                             .trim(),
+                    contentLabel: providerContentLabel == 'original'
+                        ? l10n.original
+                        : providerContentLabel == 'censored'
+                            ? l10n.censored
+                            : '',
+                    contentLabelKey:
+                        Key('matching-provider-content-label-${row['externalId']}'),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -324,6 +333,13 @@ class _MatchingResultRow extends StatelessWidget {
                               '${local['title'] ?? l10n.localUnknownTrack}',
                           secondary: '${local['path'] ?? ''}',
                           tooltip: '${local['path'] ?? ''}',
+                          contentLabel: localContentLabel == 'original'
+                              ? l10n.original
+                              : localContentLabel == 'censored'
+                                  ? l10n.censored
+                                  : '',
+                          contentLabelKey:
+                              Key('matching-local-content-label-${row['externalId']}'),
                         ),
                 ),
                 const SizedBox(width: 12),
@@ -379,12 +395,16 @@ class _TrackCell extends StatelessWidget {
     required this.title,
     required this.secondary,
     this.tooltip,
+    this.contentLabel = '',
+    this.contentLabelKey,
   });
 
   final IconData icon;
   final String title;
   final String secondary;
   final String? tooltip;
+  final String contentLabel;
+  final Key? contentLabelKey;
 
   @override
   Widget build(BuildContext context) {
@@ -418,13 +438,26 @@ class _TrackCell extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
+                  ),
+                  if (contentLabel.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    _ContentLabelBadge(
+                      key: contentLabelKey,
+                      label: contentLabel,
+                    ),
+                  ],
+                ],
               ),
               const SizedBox(height: 4),
               if (tooltip != null && tooltip!.isNotEmpty)
@@ -435,6 +468,36 @@ class _TrackCell extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ContentLabelBadge extends StatelessWidget {
+  const _ContentLabelBadge({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.fade,
+          softWrap: false,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+      ),
     );
   }
 }

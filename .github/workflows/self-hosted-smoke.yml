@@ -40,3 +40,5 @@ jobs:
           "self-hosted runner is working" | Set-Content -Path $path -Encoding utf8
           Get-Content $path
           Remove-Item $path -Force
+
+# Intentionally isolated smoke workflow for the local self-hosted runner.

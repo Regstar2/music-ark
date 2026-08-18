@@ -3,6 +3,10 @@
 The runner is intentionally separate from MusicArk Sync/UI. It never accepts a
 Yandex token on the command line, never prints the token or the dynamic upload
 URL, and requires explicit opt-in before any network mutation.
+
+Current state: stage one is deliberately fail-closed before account/network
+access because no legitimate public desktop runtime prefix/authorization
+profile has been established.
 """
 
 from __future__ import annotations
@@ -87,15 +91,10 @@ def _playlist_track_ids(playlist: Any) -> set[str]:
 
 
 def _upload_playlist_id(playlist: Any, source: str) -> str:
-    if source == "kind":
-        value = getattr(playlist, "kind", None)
-    else:
-        value = getattr(playlist, "playlist_uuid", None)
+    value = getattr(playlist, "kind", None) if source == "kind" else getattr(playlist, "playlist_uuid", None)
     clean = str(value or "").strip()
     if not clean:
-        raise YandexUploadProtocolError(
-            f"Playlist has no usable {source} identifier for the upload request."
-        )
+        raise YandexUploadProtocolError(f"Playlist has no usable {source} identifier for the upload request.")
     return clean
 
 
@@ -110,11 +109,7 @@ def _refresh_playlist(client: Any, kind: str, uid: str) -> Any:
 
 
 def _file_summary(path: Path) -> dict[str, Any]:
-    return {
-        "name": path.name,
-        "extension": path.suffix.lower(),
-        "size": path.stat().st_size,
-    }
+    return {"name": path.name, "extension": path.suffix.lower(), "size": path.stat().st_size}
 
 
 def _classify_readback_identity(
@@ -187,16 +182,23 @@ def _prepare_context(args: argparse.Namespace) -> tuple[Any, Any, Path, str, str
 
 
 def _stage1_path(file_path: Path, mode: str) -> str:
-    if mode == "name":
-        return file_path.name
-    return str(file_path)
+    return file_path.name if mode == "name" else str(file_path)
+
+
+def _live_transport() -> YandexUploadTransport:
+    """Return the CLI transport; no private desktop requester is ever injected."""
+    return YandexUploadTransport()
 
 
 def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
     if not args.confirm_prepare:
         raise YandexUploadProtocolError("prepare mode requires --confirm-prepare.")
+
+    # Fail before credential resolution, playlist reads, or any upload request.
+    transport = _live_transport()
+    transport.require_stage1_profile()
+
     client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
-    transport = YandexUploadTransport(client)
     slot = transport.prepare_upload(
         uid=uid,
         playlist_id=playlist_id,
@@ -213,10 +215,7 @@ def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
             "visibility": visibility,
         },
         "file": _file_summary(file_path),
-        "stage1": {
-            "uploadUrlPresent": bool(slot.upload_url),
-            "responseShape": slot.response_shape,
-        },
+        "stage1": {"uploadUrlPresent": bool(slot.upload_url), "responseShape": slot.response_shape},
     }
 
 
@@ -228,9 +227,12 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "Live mutation is disabled. Set MUSICARK_YANDEX_UPLOAD_LIVE=1 for this explicit local PoC."
         )
 
+    # Even with the live flag, do not reach credentials/network without a verified stage-one profile.
+    transport = _live_transport()
+    transport.require_stage1_profile()
+
     client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
     before_ids = _playlist_track_ids(playlist)
-    transport = YandexUploadTransport(client)
     slot = transport.prepare_upload(
         uid=uid,
         playlist_id=playlist_id,
@@ -262,19 +264,13 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "visibility": visibility,
         },
         "file": _file_summary(file_path),
-        "stage1": {
-            "uploadUrlPresent": bool(slot.upload_url),
-            "responseShape": slot.response_shape,
-        },
+        "stage1": {"uploadUrlPresent": bool(slot.upload_url), "responseShape": slot.response_shape},
         "stage2": {
             "httpStatus": transfer.status_code,
             "responseShape": transfer.response_shape,
             "trackIdPresent": transfer.track_id is not None,
         },
-        "readBack": {
-            **readback,
-            "attemptsUsed": attempts_used,
-        },
+        "readBack": {**readback, "attemptsUsed": attempts_used},
     }
     return payload, (0 if verified else 3)
 

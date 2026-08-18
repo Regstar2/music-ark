@@ -18,11 +18,12 @@ extension SyncLocalizations on AppLocalizations {
   String get syncNothingNewAttention => helpSyncBody;
   String get syncNothingNewComplete => downloadsNoNewTasks;
   String get syncConfirmTitle => navSync;
-  String syncConfirmQueueCount(int count) => downloadsAddedTasks(count);
+  String syncConfirmQueueCount(int count) => downloadsWantedCount(count);
   String get syncSafetyNote => helpSyncBody;
   String get syncConfirmAction => navSync;
   String syncApplyResult(int enqueued, int skipped, int failed) =>
-      downloadsBatchResult(enqueued, enqueued + skipped + failed, failed);
+      '${downloadsAddedTasks(enqueued)} · $downloadsStatusSkipped: $skipped · '
+      '$downloadsSummaryErrors: $failed';
   String get syncHideError => close;
   String get syncCalculating => matchingRunning;
 

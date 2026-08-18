@@ -95,7 +95,7 @@ jobs:
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Run sanitized V11 static probe
+      - name: Run sanitized V12 static probe
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -110,8 +110,8 @@ jobs:
             throw "Yandex Music app.asar SHA-256 does not match the researched desktop build."
           }
 
-          $output = ".musicark\research\yandex-upload-symbol-role-v11-ci.json"
-          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_symbol_role_probe.py `
+          $output = ".musicark\research\yandex-upload-symbol-graph-v12-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_symbol_graph_probe.py `
             $asar `
             --offset 10176266 `
             --offset 16146222 `
@@ -121,19 +121,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($report.input_sha256 -ne $expected) { throw "V11 report input hash mismatch." }
-          if ($report.safety.network_requests_sent -ne $false) { throw "V11 safety gate failed: network activity." }
-          if ($report.safety.credential_values_included -ne $false) { throw "V11 safety gate failed: credentials." }
-          if ($report.safety.header_values_included -ne $false) { throw "V11 safety gate failed: header values." }
-          if ($report.safety.ordinary_string_values_included -ne $false) { throw "V11 safety gate failed: ordinary strings." }
-          if ($report.safety.source_code_contexts_included -ne $false) { throw "V11 safety gate failed: source contexts." }
-          if ($report.safety.raw_file_contents_included -ne $false) { throw "V11 safety gate failed: raw file contents." }
+          if ($report.input_sha256 -ne $expected) { throw "V12 report input hash mismatch." }
+          if ($report.safety.network_requests_sent -ne $false) { throw "V12 safety gate failed: network activity." }
+          if ($report.safety.credential_values_included -ne $false) { throw "V12 safety gate failed: credentials." }
+          if ($report.safety.header_values_included -ne $false) { throw "V12 safety gate failed: header values." }
+          if ($report.safety.ordinary_string_values_included -ne $false) { throw "V12 safety gate failed: ordinary strings." }
+          if ($report.safety.source_code_contexts_included -ne $false) { throw "V12 safety gate failed: source contexts." }
+          if ($report.safety.raw_file_contents_included -ne $false) { throw "V12 safety gate failed: raw file contents." }
 
-      - name: Upload sanitized V11 report
+      - name: Upload sanitized V12 report
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-upload-v11-sanitized
-          path: .musicark/research/yandex-upload-symbol-role-v11-ci.json
+          name: yandex-upload-v12-sanitized
+          path: .musicark/research/yandex-upload-symbol-graph-v12-ci.json
           if-no-files-found: error
           retention-days: 7
 

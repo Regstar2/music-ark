@@ -17,7 +17,8 @@
 | v0.9.1 | Main Screen UI Polish | complete |
 | v0.9.2 | Local Library UI & Multi-Root Selection | complete |
 | v0.9.3 | Matching UI Redesign | complete |
-| v0.9.4 | Coverage / Missing UI Polish | current / Draft validation |
+| v0.9.4 | Coverage / Missing UI Polish | complete |
+| v0.9.5 | Downloads UI, Safe Deletion & Bulk Actions | current / Draft validation |
 | v0.10.x | Yandex Upload | planned next; not implemented |
 
 Version notes:
@@ -38,9 +39,12 @@ Version notes:
 - `docs/versions/v0.9.2.md`
 - `docs/versions/v0.9.3.md`
 - `docs/versions/v0.9.4.md`
+- `docs/versions/v0.9.5.md`
 
-Current package version is `0.9.4`; current schema target remains `1.8.4`. v0.9.4 redesigns Coverage/Missing around a compact coverage summary, counted status tabs, responsive filters, artwork-aware track rows, master selection and RU/EN localization while preserving the existing Coverage, Matching, Variant, Download and Sync contracts.
+Current package version is `0.9.5`; current schema target remains `1.8.4`. v0.9.5 redesigns Downloads around compact task rows, search/status filters, lazy rendering, safe failed-task removal and explicit batch actions. Retry/download-selected run only task IDs produced by the current user action and do not wake unrelated queued work.
+
+Removing a failed/needs-review download task removes only the task record. Final audio files, Local Library, Matching, Coverage, Wanted state and audit history remain separate and are not deleted by this action.
 
 v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
 
-This index describes source state and does not by itself indicate that v0.9.4 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.
+This index describes source state and does not by itself indicate that v0.9.5 has been published as a GitHub Release. Yandex Upload belongs to a separate future v0.10.x milestone.

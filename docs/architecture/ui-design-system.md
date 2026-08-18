@@ -1,6 +1,6 @@
 # MusicArk Desktop UI System
 
-This document describes the small presentation layer introduced for v0.9.1 and extended to Local Library in v0.9.2. It is not a separate framework and does not own music-domain state.
+This document describes the small presentation layer introduced for v0.9.1 and extended through the v0.9.x Local Library, Matching, Coverage, Downloads and Sync UI slices. It is not a separate framework and does not own music-domain state.
 
 ## Principles
 
@@ -12,6 +12,7 @@ This document describes the small presentation layer introduced for v0.9.1 and e
 6. Desktop resizing is responsive without pretending the application is a mobile UI.
 7. Feature bridges remain explicit application dependencies; presentation must not infer capabilities from wrapper runtime types.
 8. View filters change presentation/query scope only; source-management actions remain separate explicit controls.
+9. Presentation-only filters over already loaded snapshots must not silently create new backend/domain state.
 
 ## Shared tokens
 
@@ -71,23 +72,49 @@ The persistent selector dialog uses Material `CheckboxListTile` controls with a 
 
 Configured roots are managed separately in a compact source section with per-root scan and remove actions. Removing a root still uses the existing explicit index-only confirmation.
 
+## Sync workspace
+
+v0.9.6 applies the same hierarchy to Controlled Sync without changing the Sync domain model:
+
+```text
+page header + refresh
+        ↓
+responsive scope + target-folder configuration
+        ↓
+status + primary action
+        ↓
+current/projected coverage + five primary metrics
+        ↓
+counted presentation filters
+        ↓
+responsive operation table/list
+```
+
+The plan filters are local Flutter state over the operations returned by the current plan. Switching `All / Download / Decision / Matching / Variant / Local-only` does **not** call `createPlan`, persist a new plan or modify user actions.
+
+Scope/folder changes, explicit `wanted`/`ignored` decisions and Apply keep using the existing bridge/application boundary. Apply still rebuilds the current diff and requires explicit confirmation before enqueueing valid downloads.
+
+Sync operation metadata does not gain an artwork dependency for v0.9.6. If artwork is absent, the row uses a theme-aware local music placeholder. A decorative image is not a reason to add provider requests or expose credentials.
+
 ## Track rows
 
 Wide workspace:
 
 ```text
-artwork | title + artist | album | year | format | label | duration | actions
+artwork | title + artist | album/secondary data | status | actions
 ```
 
 Compact workspace:
 
 ```text
-artwork | title + artist/album/year/format/duration | optional label | actions
+artwork | title + artist/secondary data | optional status | actions
 ```
 
 Normal provider/local metadata is quiet. ORIGINAL/CENSORED remains visible as a compact editable chip when set. Stored values remain `original` / `censored`; localization affects presentation only.
 
 Local Library primary row actions are Play and Metadata Editor where available. Details and reveal-in-filesystem remain accessible through the secondary overflow menu and row detail view.
+
+Sync uses a similar visual density but preserves its own operation semantics: action/category, reason and status/contextual action remain visible; no destructive row action is introduced.
 
 ## Responsive rules
 
@@ -98,9 +125,12 @@ The target validation sizes are:
 - 1920×1080;
 - 1600×900;
 - 1366×768;
-- a narrow desktop application window around 900 px wide.
+- a narrow desktop application window around 900 px wide;
+- focused feature-widget tests may use narrower surfaces to guard against `RenderFlex` overflow.
 
 Text that can grow from provider/user data uses ellipsis. Paths keep their full value available through tooltips/detail surfaces.
+
+The v0.9.6 Sync plan uses a wide table when enough content width is available and stacked operation rows below that threshold. Counted plan filters remain horizontally scrollable rather than shrinking text/actions into invalid constraints.
 
 ## Now Playing
 
@@ -108,17 +138,19 @@ The application-wide player remains below the shell page stack. v0.9.1 only chan
 
 ## Localization
 
-All strings introduced by v0.9.1/v0.9.2 UI slices use `gen_l10n` RU/EN resources. Provider data, local paths, filenames, track metadata and technical IDs are not translated.
+UI presentation strings use the existing generated RU/EN `gen_l10n` resources. Provider data, local paths, filenames, track metadata and technical IDs are not translated.
+
+v0.9.6 keeps `SyncPage` free of hard-coded user-facing Russian text through a small `SyncLocalizations` adapter over the existing generated catalog. This adapter is presentation-only and is not a second localization store.
 
 ## Non-goals
 
 This presentation layer does not change:
 
-- Matching;
-- Variant analysis;
-- Coverage;
-- Download;
-- Controlled Sync;
+- Matching algorithms or confidence;
+- Variant analysis/classification;
+- Coverage truth;
+- Download execution semantics;
+- Controlled Sync planner/Apply semantics;
 - Metadata Editor write semantics;
 - authentication/credential storage;
 - SQLite schema;

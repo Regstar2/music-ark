@@ -9,24 +9,20 @@ from unittest.mock import patch
 
 from musicark.providers.yandex_upload_transport import (
     YandexUploadProtocolError,
+    YandexUploadSlot,
+    YandexUploadStage1UnavailableError,
     YandexUploadTransport,
 )
 
 
-class _FakeRequest:
+class _FakeStage1Requester:
     def __init__(self, payload):
         self.payload = payload
         self.calls = []
 
-    def post(self, url, **kwargs):
-        self.calls.append((url, kwargs))
+    def post_upload_url(self, params):
+        self.calls.append(dict(params))
         return self.payload
-
-
-class _FakeClient:
-    def __init__(self, payload):
-        self.base_url = "https://api.music.yandex.net"
-        self.request = _FakeRequest(payload)
 
 
 class _FakeResponse:
@@ -40,23 +36,21 @@ class _FakeResponse:
 
 
 class YandexUploadTransportTests(unittest.TestCase):
-    def test_prepare_upload_uses_recovered_query_bindings(self) -> None:
-        client = _FakeClient({"url": "https://upload.example.test/signed?opaque=value"})
-        transport = YandexUploadTransport(client)
+    def test_default_stage1_fails_closed_before_request(self) -> None:
+        transport = YandexUploadTransport()
+        self.assertFalse(transport.stage1_available)
+        with self.assertRaisesRegex(YandexUploadStage1UnavailableError, "BLOCKED"):
+            transport.prepare_upload(uid=1, playlist_id=2, visibility=None, path="owned.mp3")
 
-        slot = transport.prepare_upload(
+    def test_prepare_params_keep_recovered_query_bindings(self) -> None:
+        params = YandexUploadTransport.build_prepare_params(
             uid="100",
             playlist_id="playlist-uuid",
             visibility="private",
             path=r"C:\Music\owned.mp3",
         )
-
-        self.assertTrue(slot.upload_url.startswith("https://upload.example.test/"))
-        self.assertEqual(len(client.request.calls), 1)
-        url, kwargs = client.request.calls[0]
-        self.assertEqual(url, "https://api.music.yandex.net/loader/upload-url")
         self.assertEqual(
-            kwargs["params"],
+            params,
             {
                 "uid": "100",
                 "playlist-id": "playlist-uuid",
@@ -64,20 +58,40 @@ class YandexUploadTransportTests(unittest.TestCase):
                 "path": r"C:\Music\owned.mp3",
             },
         )
-        # Sanitized output describes types only and must not retain a signed URL value.
+
+    def test_injected_stage1_requester_can_validate_recovered_contract_offline(self) -> None:
+        requester = _FakeStage1Requester({"url": "https://upload.example.test/signed?opaque=value"})
+        transport = YandexUploadTransport(requester)
+        slot = transport.prepare_upload(
+            uid="100",
+            playlist_id="playlist-uuid",
+            visibility="private",
+            path=r"C:\Music\owned.mp3",
+        )
+        self.assertTrue(slot.upload_url.startswith("https://upload.example.test/"))
+        self.assertEqual(
+            requester.calls,
+            [{
+                "uid": "100",
+                "playlist-id": "playlist-uuid",
+                "visibility": "private",
+                "path": r"C:\Music\owned.mp3",
+            }],
+        )
         self.assertNotIn("upload.example.test", str(slot.response_shape))
         self.assertNotIn("opaque", str(slot.response_shape))
 
     def test_prepare_upload_rejects_missing_url_contract(self) -> None:
-        transport = YandexUploadTransport(_FakeClient({"unexpected": True}))
+        transport = YandexUploadTransport(_FakeStage1Requester({"unexpected": True}))
         with self.assertRaisesRegex(YandexUploadProtocolError, "no usable HTTP"):
             transport.prepare_upload(uid=1, playlist_id=2, visibility=None, path="owned.mp3")
 
     def test_dynamic_upload_posts_only_multipart_file_without_yandex_headers(self) -> None:
-        client = _FakeClient({"url": "https://upload.example.test/signed"})
-        transport = YandexUploadTransport(client)
-        slot = transport.prepare_upload(uid=1, playlist_id=2, visibility=None, path="owned.mp3")
-
+        transport = YandexUploadTransport()
+        slot = YandexUploadSlot(
+            upload_url="https://upload.example.test/signed",
+            response_shape={"type": "object"},
+        )
         observed = {}
 
         def fake_post(url, **kwargs):
@@ -103,10 +117,11 @@ class YandexUploadTransportTests(unittest.TestCase):
         self.assertEqual(result.track_id, "ugc-123")
 
     def test_dynamic_upload_rejects_non_success_status(self) -> None:
-        client = _FakeClient({"url": "https://upload.example.test/signed"})
-        transport = YandexUploadTransport(client)
-        slot = transport.prepare_upload(uid=1, playlist_id=2, visibility=None, path="owned.mp3")
-
+        transport = YandexUploadTransport()
+        slot = YandexUploadSlot(
+            upload_url="https://upload.example.test/signed",
+            response_shape={"type": "object"},
+        )
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "owned.mp3"
             file_path.write_bytes(b"audio")

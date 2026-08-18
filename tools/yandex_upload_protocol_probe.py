@@ -6,8 +6,8 @@ owner performs a normal upload in the official Yandex Music UI.
 
 Reports intentionally contain protocol structure only: methods, redacted URLs,
 header names, content types, request field names, JSON key/type shapes and
-static endpoint candidates. Credential values, cookies, authorization values,
-raw request/response bodies, source-code contexts and file contents are never
+static structural hints. Credential values, cookies, authorization values, raw
+request/response bodies, source-code contexts and file contents are never
 copied to the report.
 """
 
@@ -50,12 +50,25 @@ _FORM_FIELD_RE = re.compile(
     r"content-disposition:\s*form-data;[^\r\n]*?name=\"([^\"]+)\"(?:;[^\r\n]*?filename=\"([^\"]*)\")?",
     re.IGNORECASE,
 )
-_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
-_PATH_RE = re.compile(
-    r"[\"'](\/[^\"'\s]{0,220}(?:upload|playlist|ugc|track)[^\"'\s]{0,220})[\"']",
+_FORM_APPEND_RE = re.compile(
+    r"\.append\(\s*[\"']([A-Za-z0-9_.:-]{1,80})[\"']\s*,",
     re.IGNORECASE,
 )
-_HTTP_METHOD_RE = re.compile(r"(?:httpClient\.|\bfetch\b[^\r\n]{0,80}\b)(get|post|put|patch|delete)\b", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+_PATH_RE = re.compile(
+    r"[\"'](\/[^\"'\s]{0,320}(?:upload|playlist|ugc|track)[^\"'\s]{0,320})[\"']",
+    re.IGNORECASE,
+)
+_HTTP_METHOD_RE = re.compile(
+    r"(?:httpClient\.|\bfetch\b[^\r\n]{0,120}\b)(get|post|put|patch|delete)\b",
+    re.IGNORECASE,
+)
+_MIME_RE = re.compile(
+    r"\b(?:multipart/form-data|application/octet-stream|audio/(?:mpeg|mp4|ogg|opus|wav|x-wav|flac|aac))\b",
+    re.IGNORECASE,
+)
+_AUDIO_EXTENSION_RE = re.compile(r"\.(?:mp3|flac|m4a|ogg|opus|wav|aac)\b", re.IGNORECASE)
+_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]{1,100}\b")
 _STATIC_SIGNAL_NAMES = (
     "upload",
     "FormData",
@@ -66,6 +79,7 @@ _STATIC_SIGNAL_NAMES = (
     "httpClient.put",
     "httpClient.patch",
 )
+_IDENTIFIER_TERMS = ("upload", "track", "playlist", "ugc", "audio", "file", "cover")
 
 
 def sanitize_url(url: str) -> str:
@@ -257,7 +271,7 @@ def sanitize_har(path: Path) -> dict[str, Any]:
         )
 
     return {
-        "format": "musicark-yandex-upload-protocol-report-v1",
+        "format": "musicark-yandex-upload-protocol-report-v2",
         "source": "sanitized-har",
         "entry_count": len(report_entries),
         "entries": report_entries,
@@ -278,77 +292,116 @@ def _candidate_endpoints(context: str) -> list[str]:
         if any(
             term in url.lower()
             for term in ("upload", "playlist", "ugc", "track", "api.music.yandex")
-        ):
+        ) and url not in endpoints:
             endpoints.append(url)
     for match in _PATH_RE.finditer(context):
         path = match.group(1)
         if path not in endpoints:
             endpoints.append(path)
-    return endpoints[:20]
+    return endpoints[:40]
 
 
-def _static_signals(context: str) -> dict[str, Any]:
+def _structural_hints(context: str) -> dict[str, Any]:
     lower = context.lower()
     signals = [name for name in _STATIC_SIGNAL_NAMES if name.lower() in lower]
     methods = sorted({match.group(1).upper() for match in _HTTP_METHOD_RE.finditer(context)})
-    return {"signals": signals, "http_methods": methods}
+    form_fields = sorted({match.group(1) for match in _FORM_APPEND_RE.finditer(context)})
+    mime_types = sorted({match.group(0).lower() for match in _MIME_RE.finditer(context)})
+    audio_extensions = sorted({match.group(0).lower() for match in _AUDIO_EXTENSION_RE.finditer(context)})
+    identifiers = sorted(
+        {
+            identifier
+            for identifier in _IDENTIFIER_RE.findall(context)
+            if any(term in identifier.lower() for term in _IDENTIFIER_TERMS)
+            and not _SENSITIVE_KEY_RE.search(identifier)
+        }
+    )[:120]
+    return {
+        "signals": signals,
+        "http_methods": methods,
+        "form_fields": form_fields,
+        "mime_types": mime_types,
+        "audio_extensions": audio_extensions,
+        "related_identifiers": identifiers,
+    }
 
 
 def scan_binary(
     path: Path,
     *,
     keywords: Iterable[str] = DEFAULT_KEYWORDS,
-    max_hits: int = 200,
+    max_hits: int = 1000,
+    max_hits_per_keyword: int = 80,
+    context_radius: int = 4096,
 ) -> dict[str, Any]:
-    """Search ASAR/bundle bytes and emit structure only, never source contexts."""
+    """Search ASAR/bundle bytes while keeping source code and values private."""
     data = path.read_bytes()
     lowered = data.lower()
-    keyword_list = list(keywords)
+    keyword_list = list(dict.fromkeys(keywords))
     hits: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    keyword_counts: dict[str, int] = {}
+    truncated_keywords: list[str] = []
 
     for keyword in keyword_list:
+        if len(hits) >= max_hits:
+            break
         needle = keyword.encode("utf-8").lower()
         start = 0
-        while len(hits) < max_hits:
+        per_keyword_seen: set[str] = set()
+        count = 0
+        found_more = False
+
+        while len(hits) < max_hits and count < max_hits_per_keyword:
             offset = lowered.find(needle, start)
             if offset < 0:
                 break
-            left = max(0, offset - 420)
-            right = min(len(data), offset + len(needle) + 720)
+            left = max(0, offset - context_radius)
+            right = min(len(data), offset + len(needle) + context_radius)
             context_bytes = data[left:right]
             digest = hashlib.sha256(context_bytes).hexdigest()[:16]
-            if digest not in seen:
-                seen.add(digest)
+            if digest not in per_keyword_seen:
+                per_keyword_seen.add(digest)
                 context = context_bytes.decode("utf-8", errors="replace")
-                structure = _static_signals(context)
+                hints = _structural_hints(context)
                 hits.append(
                     {
                         "keyword": keyword,
                         "offset": offset,
                         "context_sha256_16": digest,
                         "candidate_endpoints": _candidate_endpoints(context),
-                        "signals": structure["signals"],
-                        "http_methods": structure["http_methods"],
+                        **hints,
                     }
                 )
+                count += 1
             start = offset + max(1, len(needle))
-        if len(hits) >= max_hits:
-            break
+
+        keyword_counts[keyword] = count
+        if count >= max_hits_per_keyword and lowered.find(needle, start) >= 0:
+            found_more = True
+        if found_more:
+            truncated_keywords.append(keyword)
 
     return {
-        "format": "musicark-yandex-upload-protocol-report-v1",
+        "format": "musicark-yandex-upload-protocol-report-v2",
         "source": "binary-static-scan",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(data).hexdigest(),
         "keywords": keyword_list,
+        "keyword_counts": keyword_counts,
+        "truncated_keywords": truncated_keywords,
         "hit_count": len(hits),
+        "scan": {
+            "max_hits": max_hits,
+            "max_hits_per_keyword": max_hits_per_keyword,
+            "context_radius": context_radius,
+        },
         "hits": hits,
         "safety": {
             "network_requests_sent": False,
             "credential_values_included": False,
             "source_code_contexts_included": False,
             "raw_file_contents_included": False,
+            "ordinary_string_values_included": False,
         },
     }
 
@@ -377,7 +430,26 @@ def build_parser() -> argparse.ArgumentParser:
         "input", type=Path, help="Path to app.asar, yandex-music.asar or another official bundle."
     )
     scan.add_argument("--output", type=Path, default=None, help="Write JSON report instead of stdout.")
-    scan.add_argument("--max-hits", type=int, default=200, help="Maximum distinct contexts to inspect.")
+    scan.add_argument(
+        "--keyword",
+        action="append",
+        dest="keywords",
+        default=None,
+        help="Search only this keyword; repeat for multiple keywords. Defaults to the built-in research set.",
+    )
+    scan.add_argument("--max-hits", type=int, default=1000, help="Maximum total distinct contexts.")
+    scan.add_argument(
+        "--max-hits-per-keyword",
+        type=int,
+        default=80,
+        help="Maximum contexts per keyword so one noisy term cannot starve the rest.",
+    )
+    scan.add_argument(
+        "--context-radius",
+        type=int,
+        default=4096,
+        help="Bytes inspected before and after each match; source text is never emitted.",
+    )
 
     har = sub.add_parser(
         "sanitize-har",
@@ -393,7 +465,17 @@ def main() -> int:
     if args.command == "scan-binary":
         if not args.input.is_file():
             raise SystemExit(f"Input file does not exist: {args.input}")
-        _write_report(scan_binary(args.input, max_hits=max(1, args.max_hits)), args.output)
+        keywords = args.keywords if args.keywords else DEFAULT_KEYWORDS
+        _write_report(
+            scan_binary(
+                args.input,
+                keywords=keywords,
+                max_hits=max(1, args.max_hits),
+                max_hits_per_keyword=max(1, args.max_hits_per_keyword),
+                context_radius=max(256, args.context_radius),
+            ),
+            args.output,
+        )
         return 0
     if args.command == "sanitize-har":
         if not args.input.is_file():

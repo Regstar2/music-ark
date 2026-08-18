@@ -95,7 +95,7 @@ jobs:
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Run sanitized V14 static probe
+      - name: Run sanitized runtime profile probe
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -110,30 +110,27 @@ jobs:
             throw "Yandex Music app.asar SHA-256 does not match the researched desktop build."
           }
 
-          $output = ".musicark\research\yandex-upload-binding-form-v14-ci.json"
-          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_binding_form_probe.py `
+          $output = ".musicark\research\yandex-upload-runtime-profile-v15-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_profile_probe.py `
             $asar `
-            --offset 10176266 `
-            --offset 16146222 `
-            --offset 17782754 `
-            --offset 18726605 `
             --output $output
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($report.input_sha256 -ne $expected) { throw "V14 report input hash mismatch." }
-          if ($report.safety.network_requests_sent -ne $false) { throw "V14 safety gate failed: network activity." }
-          if ($report.safety.credential_values_included -ne $false) { throw "V14 safety gate failed: credentials." }
-          if ($report.safety.header_values_included -ne $false) { throw "V14 safety gate failed: header values." }
-          if ($report.safety.ordinary_string_values_included -ne $false) { throw "V14 safety gate failed: ordinary strings." }
-          if ($report.safety.source_code_contexts_included -ne $false) { throw "V14 safety gate failed: source contexts." }
-          if ($report.safety.raw_file_contents_included -ne $false) { throw "V14 safety gate failed: raw file contents." }
+          if ($report.input_sha256 -ne $expected) { throw "Runtime profile report input hash mismatch." }
+          if ($report.safety.network_requests_sent -ne $false) { throw "Runtime profile safety gate failed: network activity." }
+          if ($report.safety.credential_values_included -ne $false) { throw "Runtime profile safety gate failed: credentials." }
+          if ($report.safety.header_values_included -ne $false) { throw "Runtime profile safety gate failed: header values." }
+          if ($report.safety.query_values_included -ne $false) { throw "Runtime profile safety gate failed: query values." }
+          if ($report.safety.ordinary_string_values_included -ne $false) { throw "Runtime profile safety gate failed: ordinary strings." }
+          if ($report.safety.source_code_contexts_included -ne $false) { throw "Runtime profile safety gate failed: source contexts." }
+          if ($report.safety.raw_file_contents_included -ne $false) { throw "Runtime profile safety gate failed: raw file contents." }
 
-      - name: Upload sanitized V14 report
+      - name: Upload sanitized runtime profile report
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-upload-v14-sanitized
-          path: .musicark/research/yandex-upload-binding-form-v14-ci.json
+          name: yandex-upload-runtime-profile-v15-sanitized
+          path: .musicark/research/yandex-upload-runtime-profile-v15-ci.json
           if-no-files-found: error
           retention-days: 7
 

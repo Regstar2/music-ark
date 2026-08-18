@@ -2,12 +2,51 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.1 — Main Screen UI Polish.**  
+**Текущая версия кода: 0.9.2 — Local Library UI & Multi-Root Selection.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.1 не меняет музыкальную семантику и посвящена единому desktop UI главного экрана и Яндекс Музыки.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.2 не меняет музыкальную семантику: версия перерабатывает Local Library и добавляет backend-фильтрацию по произвольному набору локальных папок.
 
-## Desktop shell и Yandex UI v0.9.1
+## Local Library v0.9.2
+
+Local Library использует тот же desktop presentation layer, что и остальной интерфейс MusicArk: компактный header, единый toolbar, отдельный блок управления источниками и responsive table-like список треков.
+
+Фильтр `Папки` позволяет отображать:
+
+```text
+Все папки
+одну папку
+произвольный набор нескольких папок
+ни одной папки
+```
+
+Выбор папок — это **только область просмотра**, а не изменение конфигурации библиотеки. Добавление, сканирование и удаление source-root остаются отдельными явными действиями.
+
+Фильтрация выполняется не по первым загруженным Flutter-строкам, а в SQLite до count/search/sort/pagination:
+
+```text
+Local Library UI
+  → rootIds
+  → Flutter process bridge
+  → LocalLibraryService
+  → SQLite library_root_id IN (?, ...)
+  → COUNT / search / sort / LIMIT / OFFSET
+```
+
+Семантика query contract:
+
+```text
+rootIds = null    → все настроенные roots
+rootIds = []      → 0 треков
+rootIds = [1]     → только root 1
+rootIds = [1,3]   → union roots 1 и 3
+```
+
+При первом открытии выбраны все roots. Если новый root добавляется, когда пользователь просматривает все roots, он автоматически входит в текущий просмотр; при пользовательском subset новый root не подключается сам. Удалённый root удаляется из selection.
+
+Search, Sort и Load More всегда используют тот же выбранный root subset. Artwork, playback, Metadata Editor, подробности, открытие расположения файла и ORIGINAL/CENSORED сохраняются.
+
+## Desktop shell и Yandex UI v0.9.1+
 
 MusicArk использует одну постоянную глобальную левую панель. Второй постоянный sidebar Яндекс Музыки удалён: `Треки`, `Плейлисты` и `Альбомы` доступны через верхнюю навигацию внутри основной рабочей области.
 
@@ -15,9 +54,9 @@ MusicArk использует одну постоянную глобальную
 
 Yandex workspace использует доступную ширину окна без прежнего обязательного `~920 px` horizontal-scroll layout. Search, sort и `Пометки версий` перестраиваются на узком desktop window; список треков использует table-like layout на широкой области и компактный row layout на меньшей ширине. В сортировке треков доступен вариант `Недоступные сначала`.
 
-Обычный технический статус `available` не отображается у каждого трека. Недоступный трек визуально приглушён, playback отключён, а причина доступна через tooltip. ORIGINAL/CENSORED остаются app-level пометками: компактный chip показывается в строке, inline-редактирование и общий менеджер пометок сохранены.
+Обычный технический статус `available` не отображается у каждого трека. Недоступный трек визуально приглушён, playback отключён, а причина доступна через tooltip. ORIGINAL/CENSORED остаются app-level пометками.
 
-В глобальной панели используются единые layout tokens и небольшой векторный MusicArk mark. `System / Light / Dark`, `System / Russian / English`, account control, Settings, Help и About сохраняются. Now Playing остаётся application-wide и получил responsive presentation без добавления queue/next/previous/shuffle/repeat.
+В глобальной панели используются единые layout tokens и небольшой векторный MusicArk mark. `System / Light / Dark`, `System / Russian / English`, account control, Settings, Help и About сохраняются. Now Playing остаётся application-wide и responsive без добавления queue/next/previous/shuffle/repeat.
 
 ## Основной цикл
 
@@ -67,7 +106,7 @@ reason     = user_confirmed
 
 ## Безопасность изменения файлов
 
-Scan, Matching, Coverage и Sync **не изменяют пользовательские аудиофайлы**. Существующий файл изменяется только после явного действия в Metadata Editor.
+Scan, root view filtering, Matching, Coverage и Sync **не изменяют пользовательские аудиофайлы**. Существующий файл изменяется только после явного действия в Metadata Editor.
 
 Для MP3 используется pipeline:
 
@@ -133,7 +172,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.1 не повышает SQLite schema. Theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.9.2 не повышает SQLite schema. Multi-root selection — query/view state, а theme/locale preferences по-прежнему хранятся отдельно от музыкальной БД. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -161,8 +200,9 @@ v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
 v0.9.0 — UI, Account & Settings                        complete
-v0.9.1 — Main Screen UI Polish                         current
+v0.9.1 — Main Screen UI Polish                         complete
+v0.9.2 — Local Library UI & Multi-Root Selection       current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload в v0.9.1 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.1.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Yandex Upload в v0.9.2 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.2.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.

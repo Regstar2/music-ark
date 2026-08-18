@@ -73,7 +73,14 @@ class LocalLibraryService:
                 raise ValueError(f"Local library root {root_id} was not found.")
         roots = [root for root in roots if root.enabled]
 
-        total = {"added": 0, "updated": 0, "removed": 0, "unchanged": 0, "errors": 0, "scanned": 0}
+        total = {
+            "added": 0,
+            "updated": 0,
+            "removed": 0,
+            "unchanged": 0,
+            "errors": 0,
+            "scanned": 0,
+        }
         errors: list[dict[str, str]] = []
         per_root: list[dict[str, Any]] = []
         for root in roots:
@@ -106,11 +113,19 @@ class LocalLibraryService:
             for item in data.get("errorItems", []):
                 if len(errors) < 100:
                     errors.append(dict(item))
-        return {**total, "errorItems": errors, "roots": per_root, "stats": self.stats()}
+        return {
+            **total,
+            "errorItems": errors,
+            "roots": per_root,
+            "stats": self.stats(),
+        }
 
     def index_file(self, path: str | Path, root_id: int) -> dict[str, Any]:
-        """Index one known file through the v0.4 metadata/storage pipeline."""
-        root = next((item for item in self._repository.list_roots() if item.id == int(root_id)), None)
+        """Index one known file through the metadata/storage pipeline."""
+        root = next(
+            (item for item in self._repository.list_roots() if item.id == int(root_id)),
+            None,
+        )
         if root is None:
             raise ValueError(f"Local library root {root_id} was not found.")
         return {"track": self._indexer.index_file(Path(path), root)}
@@ -123,7 +138,17 @@ class LocalLibraryService:
         search: str = "",
         sort: str = "artist",
         root_id: int | None = None,
+        root_ids: list[int] | None = None,
     ) -> dict[str, Any]:
+        """Return a page of local tracks for all, one, or several roots."""
+        if root_id is not None and root_ids is not None:
+            raise ValueError("root_id and root_ids cannot be supplied together.")
+
+        normalized_root_ids = (
+            None
+            if root_ids is None
+            else list(dict.fromkeys(int(value) for value in root_ids))
+        )
         page_limit = max(1, min(int(limit), 5000))
         page_offset = max(0, int(offset))
         items, total = self._repository.list_tracks(
@@ -132,6 +157,7 @@ class LocalLibraryService:
             search=search,
             sort=sort,
             root_id=root_id,
+            root_ids=normalized_root_ids,
         )
         self._attach_origins(items)
         return {

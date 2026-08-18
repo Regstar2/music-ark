@@ -1,4 +1,4 @@
-"""SQLite repository for MusicArk v0.4 local library roots and audio index."""
+"""SQLite repository for MusicArk local library roots and audio index."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from musicark.providers.models import LocalAudioFile, TrackSource
 
 
 def normalize_local_path(path: str | Path) -> str:
-    """Canonical comparison key tuned for Windows case-insensitive semantics."""
+    """Return the canonical local path key used for case-insensitive comparisons."""
     resolved = Path(path).expanduser().resolve(strict=False)
     text = str(resolved).replace("\\", "/").rstrip("/")
     return text.casefold()
@@ -255,7 +255,18 @@ class LocalLibraryStorageRepository:
         search: str = "",
         sort: str = "artist",
         root_id: int | None = None,
+        root_ids: Iterable[int] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        """List tracks, optionally limiting the query to one or more roots.
+
+        ``root_ids`` deliberately distinguishes ``None`` (all roots) from an
+        empty iterable (no roots).  The root predicate is applied before COUNT,
+        ORDER BY, LIMIT and OFFSET so pagination always reflects the selected
+        library subset.
+        """
+        if root_id is not None and root_ids is not None:
+            raise ValueError("root_id and root_ids cannot be supplied together.")
+
         order_by = {
             "artist": "COALESCE(artists_json, '[]') COLLATE NOCASE, title COLLATE NOCASE",
             "title": "title COLLATE NOCASE, path COLLATE NOCASE",
@@ -266,9 +277,19 @@ class LocalLibraryStorageRepository:
         }.get(sort, "COALESCE(artists_json, '[]') COLLATE NOCASE, title COLLATE NOCASE")
         where = ["availability='available'", "library_root_id IS NOT NULL"]
         params: list[Any] = []
-        if root_id is not None:
+
+        if root_ids is not None:
+            normalized_root_ids = list(dict.fromkeys(int(value) for value in root_ids))
+            if normalized_root_ids:
+                placeholders = ",".join("?" for _ in normalized_root_ids)
+                where.append(f"library_root_id IN ({placeholders})")
+                params.extend(normalized_root_ids)
+            else:
+                where.append("1=0")
+        elif root_id is not None:
             where.append("library_root_id=?")
             params.append(int(root_id))
+
         query = search.strip()
         if query:
             where.append(
@@ -280,7 +301,12 @@ class LocalLibraryStorageRepository:
         where_sql = " AND ".join(where)
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
-                total = int(conn.execute(f"SELECT COUNT(*) FROM local_audio_files WHERE {where_sql}", params).fetchone()[0])
+                total = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM local_audio_files WHERE {where_sql}",
+                        params,
+                    ).fetchone()[0]
+                )
                 rows = conn.execute(
                     f"""
                     SELECT id, library_root_id, path, file_name, extension, file_size, modified_ns,
@@ -362,9 +388,15 @@ class LocalLibraryStorageRepository:
                             availability='available', updated_at=datetime('now')
                         """,
                         (
-                            path, normalized, Path(path).name, Path(path).suffix.lower(),
-                            audio_file.sha256, audio_file.file_size, audio_file.duration_seconds,
-                            audio_file.codec, metadata_json,
+                            path,
+                            normalized,
+                            Path(path).name,
+                            Path(path).suffix.lower(),
+                            audio_file.sha256,
+                            audio_file.file_size,
+                            audio_file.duration_seconds,
+                            audio_file.codec,
+                            metadata_json,
                         ),
                     )
         except sqlite3.Error as exc:
@@ -375,7 +407,10 @@ class LocalLibraryStorageRepository:
         normalized = normalize_local_path(audio_file.path)
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
-                row = conn.execute("SELECT id FROM local_audio_files WHERE normalized_path=?", (normalized,)).fetchone()
+                row = conn.execute(
+                    "SELECT id FROM local_audio_files WHERE normalized_path=?",
+                    (normalized,),
+                ).fetchone()
         except sqlite3.Error as exc:
             raise StorageError("Failed to fetch local audio file id.") from exc
         if row is None:
@@ -397,8 +432,12 @@ class LocalLibraryStorageRepository:
                             raw_data_json=excluded.raw_data_json, last_seen_at=datetime('now')
                         """,
                         (
-                            track_source.track_id, track_source.source_type, track_source.provider_id,
-                            track_source.external_id, track_source.url, track_source.availability,
+                            track_source.track_id,
+                            track_source.source_type,
+                            track_source.provider_id,
+                            track_source.external_id,
+                            track_source.url,
+                            track_source.availability,
                             raw_data_json,
                         ),
                     )
@@ -414,7 +453,13 @@ class LocalLibraryStorageRepository:
         except sqlite3.Error as exc:
             raise StorageError("Failed to list local audio files.") from exc
         return [
-            {"path": r[0], "sha256": r[1], "file_size": r[2], "duration_seconds": r[3], "codec": r[4]}
+            {
+                "path": r[0],
+                "sha256": r[1],
+                "file_size": r[2],
+                "duration_seconds": r[3],
+                "codec": r[4],
+            }
             for r in rows
         ]
 
@@ -430,18 +475,35 @@ class LocalLibraryStorageRepository:
         if row is None:
             return None
         return {
-            "id": row[0], "path": row[1], "sha256": row[2], "file_size": row[3],
-            "duration_seconds": row[4], "codec": row[5], "metadata_json": json.loads(row[6] or "{}"),
+            "id": row[0],
+            "path": row[1],
+            "sha256": row[2],
+            "file_size": row[3],
+            "duration_seconds": row[4],
+            "codec": row[5],
+            "metadata_json": json.loads(row[6] or "{}"),
         }
 
     def local_stats(self) -> dict:
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
-                total = int(conn.execute("SELECT COUNT(*) FROM local_audio_files WHERE availability='available'").fetchone()[0])
+                total = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM local_audio_files WHERE availability='available'"
+                    ).fetchone()[0]
+                )
                 by_codec_rows = conn.execute(
                     "SELECT codec, COUNT(*) FROM local_audio_files WHERE availability='available' GROUP BY codec ORDER BY codec"
                 ).fetchall()
-                roots = int(conn.execute("SELECT COUNT(*) FROM local_library_roots WHERE enabled=1").fetchone()[0])
+                roots = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM local_library_roots WHERE enabled=1"
+                    ).fetchone()[0]
+                )
         except sqlite3.Error as exc:
             raise StorageError("Failed to compute local audio stats.") from exc
-        return {"total_files": total, "enabled_roots": roots, "by_codec": {row[0]: row[1] for row in by_codec_rows}}
+        return {
+            "total_files": total,
+            "enabled_roots": roots,
+            "by_codec": {row[0]: row[1] for row in by_codec_rows},
+        }

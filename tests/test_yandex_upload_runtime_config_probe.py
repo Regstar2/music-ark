@@ -52,6 +52,20 @@ class YandexUploadRuntimeConfigProbeTests(unittest.TestCase):
             [{"key": "prefixUrl", "kind": "public-yandex-url", "value": "https://api.music.yandex.net/root"}],
         )
 
+    def test_json_escaped_yandex_prefix_is_decoded_and_sanitized(self) -> None:
+        records = probe._records(r'customApiPrefixUrl:"https:\/\/api.music.yandex.net\/root?x=1"')  # noqa: SLF001
+        self.assertEqual(
+            records,
+            [{"key": "customApiPrefixUrl", "kind": "public-yandex-url", "value": "https://api.music.yandex.net/root"}],
+        )
+
+    def test_safe_relative_prefix_is_allowlisted(self) -> None:
+        records = probe._records('customApiPrefixUrl:"/api/music"')  # noqa: SLF001
+        self.assertEqual(
+            records,
+            [{"key": "customApiPrefixUrl", "kind": "public-relative-prefix", "value": "/api/music"}],
+        )
+
     def test_ordinary_string_is_classified_but_not_emitted(self) -> None:
         records = probe._records('customApiPrefixUrl:"DO_NOT_EMIT"')  # noqa: SLF001
         encoded = json.dumps(records, ensure_ascii=False)

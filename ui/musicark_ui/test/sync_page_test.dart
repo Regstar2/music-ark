@@ -47,6 +47,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     expect(bridge.createCalls, 1);
+    expect(_syncScrollable(), findsOneWidget);
     expect(find.byKey(const Key('sync-summary')), findsOneWidget);
     expect(find.byKey(const Key('sync-coverage')), findsOneWidget);
     expect(find.byKey(const Key('sync-metric-yandex')), findsOneWidget);

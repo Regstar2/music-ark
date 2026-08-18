@@ -85,6 +85,7 @@ class YandexUploadTargetProbeTests(unittest.TestCase):
         self.assertNotIn(secret, encoded)
         self.assertNotIn("Authorization", encoded)
         self.assertNotIn("private-value", encoded)
+        self.assertNotIn("sign=", encoded)
 
         member = report["targets"][0]["members"][0]
         self.assertEqual(member["path"], "app/upload-client.js")
@@ -92,7 +93,6 @@ class YandexUploadTargetProbeTests(unittest.TestCase):
         self.assertIn("file", structure["form_fields"])
         self.assertIn("getUploadUrl", structure["named_calls"])
         self.assertIn("uploadFile", structure["named_calls"])
-        self.assertIn("/ugc/upload/url?sign=<redacted>", structure["protocol_literals"])
         self.assertIn(
             {"method": "POST", "target_kind": "identifier", "target": "uploadUrl"},
             structure["http_calls"],

@@ -1,10 +1,9 @@
 """Classify serialized Yandex desktop upload runtime config without values.
 
-This probe is intentionally narrower than the previous source scanners. It
-looks only for upload-relevant runtime configuration keys that are serialized
-into packed text members and reports value *kinds*. Safe public enum literals
-and sanitized Yandex URLs may be emitted; sensitive/custom token values never
-are.
+This probe is intentionally narrow. It looks only for upload-relevant runtime
+configuration keys serialized into packed text members and reports value
+*kinds*. Empty strings, safe public enum literals and sanitized Yandex URLs may
+be emitted structurally; sensitive/custom token values never are.
 """
 
 from __future__ import annotations
@@ -84,6 +83,8 @@ def _classify(key: str, raw_value: str) -> dict[str, str]:
 
     quoted = len(value) >= 2 and value[0] in {"\"", "'"} and value[-1] == value[0]
     scalar = value[1:-1] if quoted else value
+    if quoted and scalar == "":
+        return {"key": normalized_key, "kind": "empty-string"}
 
     if normalized_key == "customApiToken":
         return {"key": normalized_key, "kind": "redacted-sensitive-value"}
@@ -146,7 +147,9 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
 
     summary = [
         {"key": key, "kind": kind, **({"value": value} if value is not None else {}), "member_count": count}
-        for (key, kind, value), count in sorted(aggregate.items(), key=lambda item: (item[0][0], item[0][1], str(item[0][2])))
+        for (key, kind, value), count in sorted(
+            aggregate.items(), key=lambda item: (item[0][0], item[0][1], str(item[0][2]))
+        )
     ]
     return {
         "format": "musicark-yandex-upload-runtime-config-report-v1",

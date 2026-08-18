@@ -85,6 +85,22 @@ class YandexUploadRuntimeProfileProbeTests(unittest.TestCase):
         self.assertNotIn("source", encoded)
         self.assertNotIn("secret", encoded.lower())
 
+    def test_module_properties_emit_names_without_values(self) -> None:
+        source = (
+            'const cfg={prefixUrl:"DO_NOT_EMIT",token:"SUPER_SECRET",clientRemoteType:"PRIVATE"};'
+            'this.headers=makeHeaders();this.authorization="SECRET";'
+        )
+        properties = probe._module_properties(source)  # noqa: SLF001
+        self.assertIn("prefixUrl", properties)
+        self.assertIn("token", properties)
+        self.assertIn("clientRemoteType", properties)
+        self.assertIn("headers", properties)
+        self.assertIn("authorization", properties)
+        encoded = json.dumps(properties, ensure_ascii=False)
+        self.assertNotIn("DO_NOT_EMIT", encoded)
+        self.assertNotIn("SUPER_SECRET", encoded)
+        self.assertNotIn("PRIVATE", encoded)
+
     def test_non_yandex_urls_are_ignored(self) -> None:
         self.assertIsNone(probe._sanitize_yandex_url("https://example.com/api"))  # noqa: SLF001
         self.assertEqual(

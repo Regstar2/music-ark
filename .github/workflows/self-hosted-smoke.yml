@@ -1,4 +1,4 @@
-name: Self-hosted runner smoke test
+name: Self-hosted runner validation
 
 on:
   pull_request:
@@ -10,11 +10,10 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: Smoke test on local Windows runner
+  environment:
+    name: Validate local runner environment
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 3
-
     steps:
       - name: Show runner environment
         shell: pwsh
@@ -23,9 +22,7 @@ jobs:
           Write-Host "Runner OS: $env:RUNNER_OS"
           Write-Host "Runner arch: $env:RUNNER_ARCH"
           Write-Host "Computer: $env:COMPUTERNAME"
-          Write-Host "User:"
           whoami
-          Write-Host "PowerShell:"
           $PSVersionTable.PSVersion
 
       - name: Inspect development toolchain
@@ -40,16 +37,51 @@ jobs:
             } else {
               Write-Host "FOUND"
               Write-Host "Path: $($cmd.Source)"
-              Write-Host "CommandType: $($cmd.CommandType)"
             }
           }
 
-      - name: Verify writable workspace
+  python-tests:
+    name: Python tests on local runner
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create isolated Python environment
         shell: pwsh
         run: |
-          $path = Join-Path $env:RUNNER_TEMP "chatgpt-runner-smoke.txt"
-          "self-hosted runner is working" | Set-Content -Path $path -Encoding utf8
-          Get-Content $path
-          Remove-Item $path -Force
+          $venv = Join-Path $env:RUNNER_TEMP "musicark-ci-venv"
+          if (Test-Path $venv) { Remove-Item $venv -Recurse -Force }
+          python -m venv $venv
+          & "$venv\Scripts\python.exe" -m pip install --upgrade pip
+          & "$venv\Scripts\python.exe" -m pip install -e .
+          "MUSICARK_CI_PYTHON=$venv\Scripts\python.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-# Intentionally isolated smoke workflow for the local self-hosted runner.
+      - name: Run Python unit tests
+        shell: pwsh
+        run: |
+          & $env:MUSICARK_CI_PYTHON -m unittest discover -s tests -p "test_*.py" -v
+
+  flutter-tests:
+    name: Flutter tests on local runner
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui/musicark_ui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Flutter dependencies
+        shell: pwsh
+        run: flutter pub get
+
+      - name: Flutter analyze
+        shell: pwsh
+        run: flutter analyze
+
+      - name: Flutter tests
+        shell: pwsh
+        run: flutter test

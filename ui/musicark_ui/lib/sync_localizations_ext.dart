@@ -22,8 +22,7 @@ extension SyncLocalizations on AppLocalizations {
   String get syncSafetyNote => helpSyncBody;
   String get syncConfirmAction => navSync;
   String syncApplyResult(int enqueued, int skipped, int failed) =>
-      '${downloadsAddedTasks(enqueued)} · $downloadsStatusSkipped: $skipped · '
-      '$downloadsSummaryErrors: $failed';
+      downloadsBatchResult(enqueued, enqueued + skipped + failed, failed);
   String get syncHideError => close;
   String get syncCalculating => matchingRunning;
 

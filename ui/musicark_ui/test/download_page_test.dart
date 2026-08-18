@@ -434,9 +434,10 @@ void main() {
     );
   });
 
-  testWidgets('completed path stays hidden and play/reveal remain available', (tester) async {
+  testWidgets('completed row shows local completion time and keeps file actions', (tester) async {
     final bridge = FakeDownloadBridge();
     const path = r'C:\Music\Finished [yandex_777].mp3';
+    const finishedAt = '2026-08-18T07:42:00+00:00';
     bridge.items.add({
       'id': 'completed-777',
       'provider': 'yandex_music',
@@ -448,6 +449,7 @@ void main() {
       'downloadedBytes': 100,
       'totalBytes': 100,
       'targetPath': path,
+      'finishedAt': finishedAt,
       'error': null,
       'canRetry': false,
       'canCancel': false,
@@ -457,6 +459,15 @@ void main() {
     await tester.tap(find.byKey(const Key('downloads-filter-completed')));
     await tester.pumpAndSettle();
     await reveal(tester, const Key('download-play-completed-777'));
+
+    final timestampFinder = find.byKey(const Key('download-finished-at-completed-777'));
+    expect(timestampFinder, findsOneWidget);
+    final timestampContext = tester.element(timestampFinder);
+    final material = MaterialLocalizations.of(timestampContext);
+    final localFinishedAt = DateTime.parse(finishedAt).toLocal();
+    final expectedTimestamp =
+        '${material.formatCompactDate(localFinishedAt)} · ${material.formatTimeOfDay(TimeOfDay.fromDateTime(localFinishedAt))}';
+    expect(find.text(expectedTimestamp), findsOneWidget);
 
     expect(find.text(path), findsNothing);
     await tester.tap(find.byKey(const Key('download-toggle-path-completed-777')));

@@ -317,11 +317,15 @@ class _DownloadPageState extends State<DownloadPage> {
     setState(() => _bulkBusy = true);
     try {
       final enqueued = await widget.bridge.enqueueSelected(ids);
-      final taskIds = _idsFromPayload(enqueued)
+      final runnable = (enqueued['items'] as List? ?? const [])
+          .whereType<Map>()
+          .where((item) => '${item['status']}' == 'queued')
+          .map((item) => '${item['id']}')
           .where((id) => id.isNotEmpty)
           .toList(growable: false);
-      if (taskIds.isNotEmpty) await widget.bridge.runTasks(taskIds);
-      if (mounted) _showBatchResult(enqueued);
+      Map<String, dynamic>? runResult;
+      if (runnable.isNotEmpty) runResult = await widget.bridge.runTasks(runnable);
+      if (mounted) _showBatchResult(runResult ?? enqueued);
       await _load();
       await _loadWanted();
     } catch (error) {
@@ -405,8 +409,9 @@ class _DownloadPageState extends State<DownloadPage> {
           .map((item) => '${item['id']}')
           .where((id) => id.isNotEmpty)
           .toList(growable: false);
-      if (runnable.isNotEmpty) await widget.bridge.runTasks(runnable);
-      if (mounted) _showBatchResult(retried);
+      Map<String, dynamic>? runResult;
+      if (runnable.isNotEmpty) runResult = await widget.bridge.runTasks(runnable);
+      if (mounted) _showBatchResult(runResult ?? retried);
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -654,6 +659,7 @@ class _DownloadPageState extends State<DownloadPage> {
               onRefresh: _refreshCurrent,
               child: CustomScrollView(
                 key: const Key('downloads-page'),
+                physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
@@ -722,6 +728,7 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Widget _downloadsHeader() {
+    final visibleIds = _visibleTaskItems.map((item) => '${item['id']}').toList(growable: false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -730,6 +737,16 @@ class _DownloadPageState extends State<DownloadPage> {
         _targetCard(),
         const SizedBox(height: 12),
         _toolbar(),
+        const SizedBox(height: 8),
+        _selectionToggle(
+          selected: _selectedTasks,
+          visibleIds: visibleIds,
+          onChanged: (ids) => setState(() {
+            _selectedTasks
+              ..clear()
+              ..addAll(ids);
+          }),
+        ),
         if (_selectedTasks.isNotEmpty) ...[
           const SizedBox(height: 10),
           _taskBulkBar(),
@@ -1122,7 +1139,7 @@ class _DownloadPageState extends State<DownloadPage> {
                 value == true ? _selectedTasks.add(id) : _selectedTasks.remove(id);
               }),
             ),
-            _artworkPlaceholder(title),
+            _artworkPlaceholder(),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1274,7 +1291,7 @@ class _DownloadPageState extends State<DownloadPage> {
                 value == true ? _selectedWanted.add(id) : _selectedWanted.remove(id);
               }),
             ),
-            _artworkPlaceholder(title),
+            _artworkPlaceholder(),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1318,7 +1335,7 @@ class _DownloadPageState extends State<DownloadPage> {
     );
   }
 
-  Widget _artworkPlaceholder(String title) {
+  Widget _artworkPlaceholder() {
     return Container(
       width: 52,
       height: 52,

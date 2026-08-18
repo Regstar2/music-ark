@@ -1121,6 +1121,7 @@ class _DownloadPageState extends State<DownloadPage> {
     final path = '${task['targetPath'] ?? ''}';
     final showPath = _visiblePaths.contains(id);
     final completed = status == 'completed' && path.isNotEmpty;
+    final finishedAt = status == 'completed' ? _formatFinishedAt(task['finishedAt']) : null;
     final removable = status == 'failed' || status == 'needs_review';
     final busy = _busyTasks.contains(id);
 
@@ -1159,6 +1160,27 @@ class _DownloadPageState extends State<DownloadPage> {
                     '${task['provider'] ?? ''} • ID ${task['externalId'] ?? ''}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  if (finishedAt != null) ...[
+                    const SizedBox(height: 5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.schedule_outlined,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          finishedAt,
+                          key: Key('download-finished-at-$id'),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ],
                   if (status == 'running') ...[
                     const SizedBox(height: 8),
                     LinearProgressIndicator(key: Key('download-progress-$id'), value: progressValue),
@@ -1346,6 +1368,18 @@ class _DownloadPageState extends State<DownloadPage> {
       alignment: Alignment.center,
       child: const Icon(Icons.music_note_outlined),
     );
+  }
+
+  String? _formatFinishedAt(Object? rawValue) {
+    final raw = rawValue?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    final local = parsed.toLocal();
+    final material = MaterialLocalizations.of(context);
+    final date = material.formatCompactDate(local);
+    final time = material.formatTimeOfDay(TimeOfDay.fromDateTime(local));
+    return '$date · $time';
   }
 
   String _friendlyError(String code) => switch (code) {

@@ -176,6 +176,17 @@ void main() {
     expect(find.text('Не найдено 1'), findsOneWidget);
   });
 
+  testWidgets('refresh only reloads current read state', (tester) async {
+    final bridge = FakeMatchingBridge();
+    await desktop(tester, MatchingPage(bridge: bridge));
+    final resultCallsBeforeRefresh = bridge.resultCalls;
+    await tester.tap(find.byKey(const Key('matching-refresh')));
+    await tester.pumpAndSettle();
+    expect(bridge.runCalls, 0);
+    expect(bridge.variantRunAllCalls, 0);
+    expect(bridge.resultCalls, resultCallsBeforeRefresh + 1);
+  });
+
   testWidgets('matching and variant runs keep independent result banners', (
     tester,
   ) async {
@@ -285,6 +296,17 @@ void main() {
     await tester.tap(find.text('ОРИГИНАЛ').last);
     await tester.pumpAndSettle();
     expect(labels.providerLabels['201'], 'original');
+  });
+
+  testWidgets('conflict detail preserves manual accept workflow', (tester) async {
+    final bridge = FakeMatchingBridge();
+    await desktop(tester, MatchingPage(bridge: bridge));
+    await tester.tap(find.byKey(const Key('matching-row-202')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('matching-accept-2')));
+    await tester.pumpAndSettle();
+    expect(bridge.acceptCalls, 1);
+    expect(find.byKey(const Key('matching-detail')), findsNothing);
   });
 
   testWidgets('conflict detail preserves manual accept and reject workflows', (

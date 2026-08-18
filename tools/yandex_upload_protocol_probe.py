@@ -4,10 +4,11 @@ The tool never sends network requests. It can inspect an Electron ASAR/bundle as
 raw bytes and sanitize a browser/desktop HAR capture produced while the project
 owner performs a normal upload in the official Yandex Music UI.
 
-Only protocol structure is emitted: methods, redacted URLs, header names,
-content types, request field names and JSON key/type shapes. Credential values,
-cookies, authorization values, raw file contents and ordinary form values are
-never copied to the report.
+Reports intentionally contain protocol structure only: methods, redacted URLs,
+header names, content types, request field names, JSON key/type shapes and
+static endpoint candidates. Credential values, cookies, authorization values,
+raw request/response bodies, source-code contexts and file contents are never
+copied to the report.
 """
 
 from __future__ import annotations
@@ -45,10 +46,6 @@ _SENSITIVE_KEY_RE = re.compile(
     r"(?:authorization|cookie|token|secret|session|csrf|xsrf|passport|sign(?:ature)?|credential)",
     re.IGNORECASE,
 )
-_BEARER_RE = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-_OAUTH_RE = re.compile(r"(?i)(oauth\s+)[A-Za-z0-9._~+/=-]{8,}")
-_COOKIE_VALUE_RE = re.compile(r"(?i)(cookie\s*[:=]\s*)[^\r\n\"']+")
-_LONG_SECRET_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{40,}(?![A-Za-z0-9])")
 _FORM_FIELD_RE = re.compile(
     r"content-disposition:\s*form-data;[^\r\n]*?name=\"([^\"]+)\"(?:;[^\r\n]*?filename=\"([^\"]*)\")?",
     re.IGNORECASE,
@@ -58,14 +55,17 @@ _PATH_RE = re.compile(
     r"[\"'](\/[^\"'\s]{0,220}(?:upload|playlist|ugc|track)[^\"'\s]{0,220})[\"']",
     re.IGNORECASE,
 )
-
-
-def _redact_text(value: str) -> str:
-    value = _BEARER_RE.sub(r"\1<redacted>", value)
-    value = _OAUTH_RE.sub(r"\1<redacted>", value)
-    value = _COOKIE_VALUE_RE.sub(r"\1<redacted>", value)
-    value = _LONG_SECRET_RE.sub("<redacted>", value)
-    return value
+_HTTP_METHOD_RE = re.compile(r"(?:httpClient\.|\bfetch\b[^\r\n]{0,80}\b)(get|post|put|patch|delete)\b", re.IGNORECASE)
+_STATIC_SIGNAL_NAMES = (
+    "upload",
+    "FormData",
+    "multipart/form-data",
+    "playlistUuid",
+    "api.music.yandex",
+    "httpClient.post",
+    "httpClient.put",
+    "httpClient.patch",
+)
 
 
 def sanitize_url(url: str) -> str:
@@ -74,8 +74,10 @@ def sanitize_url(url: str) -> str:
         parts = urlsplit(url)
     except ValueError:
         return "<invalid-url>"
-    redacted_query = urlencode([(name, "<redacted>") for name, _ in parse_qsl(parts.query, keep_blank_values=True)])
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, redacted_query, ""))
+    query = urlencode(
+        [(name, "<redacted>") for name, _ in parse_qsl(parts.query, keep_blank_values=True)]
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
 
 
 def _shape(value: Any, *, depth: int = 0) -> Any:
@@ -93,22 +95,22 @@ def _shape(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, str):
         return "string"
     if isinstance(value, list):
-        if not value:
-            return []
-        return [_shape(value[0], depth=depth + 1)]
+        return [] if not value else [_shape(value[0], depth=depth + 1)]
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, child in value.items():
             safe_key = str(key)
-            if _SENSITIVE_KEY_RE.search(safe_key):
-                result[safe_key] = "<redacted-field>"
-            else:
-                result[safe_key] = _shape(child, depth=depth + 1)
+            result[safe_key] = (
+                "<redacted-field>"
+                if _SENSITIVE_KEY_RE.search(safe_key)
+                else _shape(child, depth=depth + 1)
+            )
         return result
     return type(value).__name__
 
 
 def _safe_header_summary(headers: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Keep header names and media type only; discard every other value."""
     names: list[str] = []
     content_type: str | None = None
     for item in headers:
@@ -129,7 +131,7 @@ def _json_shape_from_text(text: str | None) -> Any | None:
         return None
     try:
         return _shape(json.loads(text))
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return None
 
 
@@ -145,7 +147,9 @@ def _multipart_summary(text: str | None) -> dict[str, Any] | None:
             fields.append(field)
         if filename:
             suffix = Path(filename).suffix.lower()
-            files.append({"field": field, "filename": f"<redacted>{suffix}" if suffix else "<redacted>"})
+            files.append(
+                {"field": field, "filename": f"<redacted>{suffix}" if suffix else "<redacted>"}
+            )
     if not fields and not files:
         return None
     return {"field_names": sorted(fields), "files": files}
@@ -155,10 +159,9 @@ def _request_body_summary(post_data: dict[str, Any] | None) -> dict[str, Any] | 
     if not post_data:
         return None
     mime_type = str(post_data.get("mimeType") or "").strip() or None
-    params = post_data.get("params") or []
     field_names: list[str] = []
     file_fields: list[dict[str, str]] = []
-    for item in params:
+    for item in post_data.get("params") or []:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
@@ -167,21 +170,21 @@ def _request_body_summary(post_data: dict[str, Any] | None) -> dict[str, Any] | 
         file_name = str(item.get("fileName") or "").strip()
         if file_name:
             suffix = Path(file_name).suffix.lower()
-            file_fields.append({"field": name, "filename": f"<redacted>{suffix}" if suffix else "<redacted>"})
+            file_fields.append(
+                {"field": name, "filename": f"<redacted>{suffix}" if suffix else "<redacted>"}
+            )
 
     text = post_data.get("text")
-    json_shape = None
-    if mime_type and "json" in mime_type.lower():
-        json_shape = _json_shape_from_text(text)
-    multipart = _multipart_summary(text)
-
     result: dict[str, Any] = {"mime_type": mime_type}
     if field_names:
         result["field_names"] = sorted(field_names)
     if file_fields:
         result["files"] = file_fields
-    if json_shape is not None:
-        result["json_shape"] = json_shape
+    if mime_type and "json" in mime_type.lower():
+        json_shape = _json_shape_from_text(text)
+        if json_shape is not None:
+            result["json_shape"] = json_shape
+    multipart = _multipart_summary(text)
     if multipart:
         result["multipart"] = multipart
     return result
@@ -194,7 +197,7 @@ def _decode_response_text(content: dict[str, Any]) -> str | None:
     if str(content.get("encoding") or "").lower() == "base64":
         try:
             return base64.b64decode(text, validate=True).decode("utf-8", errors="replace")
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeError):
             return None
     return text
 
@@ -216,10 +219,9 @@ def _looks_relevant(method: str, url: str, body: dict[str, Any] | None) -> bool:
 def sanitize_har(path: Path) -> dict[str, Any]:
     """Create a secret-free protocol report from a HAR capture."""
     raw = json.loads(path.read_text(encoding="utf-8-sig"))
-    entries = raw.get("log", {}).get("entries", [])
     report_entries: list[dict[str, Any]] = []
 
-    for entry in entries:
+    for entry in raw.get("log", {}).get("entries", []):
         if not isinstance(entry, dict):
             continue
         request = entry.get("request") or {}
@@ -232,24 +234,27 @@ def sanitize_har(path: Path) -> dict[str, Any]:
 
         response_content = response.get("content") or {}
         response_text = _decode_response_text(response_content)
-        response_shape = None
         response_mime = str(response_content.get("mimeType") or "")
-        if "json" in response_mime.lower() or (response_text and response_text.lstrip().startswith(("{", "["))):
+        response_shape = None
+        if "json" in response_mime.lower() or (
+            response_text and response_text.lstrip().startswith(("{", "["))
+        ):
             response_shape = _json_shape_from_text(response_text)
 
-        item: dict[str, Any] = {
-            "method": method,
-            "url": sanitize_url(url),
-            "request_headers": _safe_header_summary(request.get("headers") or []),
-            "request_body": body,
-            "response": {
-                "status": response.get("status"),
-                "headers": _safe_header_summary(response.get("headers") or []),
-                "mime_type": response_mime or None,
-                "json_shape": response_shape,
-            },
-        }
-        report_entries.append(item)
+        report_entries.append(
+            {
+                "method": method,
+                "url": sanitize_url(url),
+                "request_headers": _safe_header_summary(request.get("headers") or []),
+                "request_body": body,
+                "response": {
+                    "status": response.get("status"),
+                    "headers": _safe_header_summary(response.get("headers") or []),
+                    "mime_type": response_mime or None,
+                    "json_shape": response_shape,
+                },
+            }
+        )
 
     return {
         "format": "musicark-yandex-upload-protocol-report-v1",
@@ -270,7 +275,10 @@ def _candidate_endpoints(context: str) -> list[str]:
     endpoints: list[str] = []
     for match in _URL_RE.finditer(context):
         url = sanitize_url(match.group(0).rstrip("),;"))
-        if any(term in url.lower() for term in ("upload", "playlist", "ugc", "track", "api.music.yandex")):
+        if any(
+            term in url.lower()
+            for term in ("upload", "playlist", "ugc", "track", "api.music.yandex")
+        ):
             endpoints.append(url)
     for match in _PATH_RE.finditer(context):
         path = match.group(1)
@@ -279,14 +287,27 @@ def _candidate_endpoints(context: str) -> list[str]:
     return endpoints[:20]
 
 
-def scan_binary(path: Path, *, keywords: Iterable[str] = DEFAULT_KEYWORDS, max_hits: int = 200) -> dict[str, Any]:
-    """Search an ASAR/bundle as raw bytes for upload-related source fragments."""
+def _static_signals(context: str) -> dict[str, Any]:
+    lower = context.lower()
+    signals = [name for name in _STATIC_SIGNAL_NAMES if name.lower() in lower]
+    methods = sorted({match.group(1).upper() for match in _HTTP_METHOD_RE.finditer(context)})
+    return {"signals": signals, "http_methods": methods}
+
+
+def scan_binary(
+    path: Path,
+    *,
+    keywords: Iterable[str] = DEFAULT_KEYWORDS,
+    max_hits: int = 200,
+) -> dict[str, Any]:
+    """Search ASAR/bundle bytes and emit structure only, never source contexts."""
     data = path.read_bytes()
     lowered = data.lower()
+    keyword_list = list(keywords)
     hits: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    for keyword in keywords:
+    for keyword in keyword_list:
         needle = keyword.encode("utf-8").lower()
         start = 0
         while len(hits) < max_hits:
@@ -295,18 +316,20 @@ def scan_binary(path: Path, *, keywords: Iterable[str] = DEFAULT_KEYWORDS, max_h
                 break
             left = max(0, offset - 420)
             right = min(len(data), offset + len(needle) + 720)
-            context = data[left:right].decode("utf-8", errors="replace")
-            context = _redact_text(context)
-            digest = hashlib.sha256(context.encode("utf-8", errors="replace")).hexdigest()[:16]
+            context_bytes = data[left:right]
+            digest = hashlib.sha256(context_bytes).hexdigest()[:16]
             if digest not in seen:
                 seen.add(digest)
+                context = context_bytes.decode("utf-8", errors="replace")
+                structure = _static_signals(context)
                 hits.append(
                     {
                         "keyword": keyword,
                         "offset": offset,
                         "context_sha256_16": digest,
                         "candidate_endpoints": _candidate_endpoints(context),
-                        "context": context,
+                        "signals": structure["signals"],
+                        "http_methods": structure["http_methods"],
                     }
                 )
             start = offset + max(1, len(needle))
@@ -318,12 +341,13 @@ def scan_binary(path: Path, *, keywords: Iterable[str] = DEFAULT_KEYWORDS, max_h
         "source": "binary-static-scan",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(data).hexdigest(),
-        "keywords": list(keywords),
+        "keywords": keyword_list,
         "hit_count": len(hits),
         "hits": hits,
         "safety": {
             "network_requests_sent": False,
             "credential_values_included": False,
+            "source_code_contexts_included": False,
             "raw_file_contents_included": False,
         },
     }
@@ -345,12 +369,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    scan = sub.add_parser("scan-binary", help="Search app.asar/bundle bytes for upload-related source fragments.")
-    scan.add_argument("input", type=Path, help="Path to app.asar, yandex-music.asar or another official bundle.")
+    scan = sub.add_parser(
+        "scan-binary",
+        help="Search app.asar/bundle bytes for upload-related protocol structure.",
+    )
+    scan.add_argument(
+        "input", type=Path, help="Path to app.asar, yandex-music.asar or another official bundle."
+    )
     scan.add_argument("--output", type=Path, default=None, help="Write JSON report instead of stdout.")
-    scan.add_argument("--max-hits", type=int, default=200, help="Maximum distinct contexts to include.")
+    scan.add_argument("--max-hits", type=int, default=200, help="Maximum distinct contexts to inspect.")
 
-    har = sub.add_parser("sanitize-har", help="Sanitize a HAR recorded during one normal official upload.")
+    har = sub.add_parser(
+        "sanitize-har",
+        help="Sanitize a HAR recorded during one normal official upload.",
+    )
     har.add_argument("input", type=Path, help="HAR file produced by browser/Electron DevTools.")
     har.add_argument("--output", type=Path, default=None, help="Write sanitized JSON report instead of stdout.")
     return parser

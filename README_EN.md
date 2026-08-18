@@ -2,10 +2,18 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.9.4 — Coverage / Missing UI Polish.**  
+**Current code version: 0.9.5 — Downloads UI, Safe Deletion & Bulk Actions.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.4 does not change music semantics; it redesigns the Coverage / Missing workspace while preserving the existing bridge and domain boundaries.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.9.5 redesigns the Downloads workspace, adds safe removal of failed task records and explicit batch actions without turning queue-history removal into audio-file deletion.
+
+## Downloads v0.9.5
+
+`Downloads` now uses compact counted `Downloads` / `Wanted` tabs, separate summary metrics, search/status filters, compact lazy-rendered track rows and contextual bulk actions. User-facing failures are mapped from `errorCode`; the raw backend message plus task/provider/external IDs remain available separately in Technical details.
+
+`failed` and `needs_review` tasks have an explicit `Remove` action. It deletes only the persisted download-task record; the final audio file, Local Library, Matching, Coverage, Wanted state, provider cache and audit history are not deleted. The expected sibling `.part` may be cleaned best-effort only after a safe-path check. `queued`/`running` tasks cannot be removed directly and continue to use cancellation.
+
+Multi-selection supports retrying failed tasks, cancelling active tasks, removing failed tasks and `Download selected` in Wanted. The batch bridge sends ID sets through one Python process and returns partial results. `Retry selected` and `Download selected` execute only task IDs created or changed by the current action and do not wake unrelated old queue entries.
 
 ## Coverage / Missing v0.9.4
 
@@ -128,7 +136,7 @@ The bind also stores trusted ID3 TXXX provenance. Reserved provenance tags are r
 
 ## File mutation safety
 
-Scan, root view filtering, Matching, Coverage and Sync **do not modify user audio files**. An existing file changes only after an explicit Metadata Editor action.
+Scan, root view filtering, Matching, Coverage and Sync **do not modify user audio files**. An existing file changes only after an explicit Metadata Editor action. Removing a failed/needs-review download task in v0.9.5 also does not delete the final audio file.
 
 The MP3 writer uses:
 
@@ -153,6 +161,8 @@ Before the atomic replace the original remains unchanged. The audio stream is no
 Local Library displays a thumbnail for each track. Priority is embedded artwork, then already-cached Yandex artwork for a confirmed identity, then a placeholder. Local Library rows never perform a per-track Yandex request.
 
 Yandex Library provides artwork and built-in playback. The backend prepares or reuses a private cache under `.musicark/playback/yandex` and passes only the local path to Flutter. The Yandex token, Authorization headers and protected/signed provider media URLs are never passed to Flutter. Playback-cache files are not indexed into Local Library and do not affect Matching or Coverage.
+
+Downloads v0.9.5 uses a local placeholder when the current download payload has no ready artwork; it adds no per-row network artwork request.
 
 ## Content labels and Variant acceptance
 
@@ -194,7 +204,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.4 does not bump the SQLite schema. The Coverage redesign is a Flutter presentation change; the existing Coverage/Matching/Variant/Download/Sync contracts and theme/locale preferences are unchanged. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.9.5 does not bump the SQLite schema. Safe task removal reuses the existing `download_tasks` storage, and the batch command adds no table or column. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -225,8 +235,9 @@ v0.9.0 — UI, Account & Settings                        complete
 v0.9.1 — Main Screen UI Polish                         complete
 v0.9.2 — Local Library UI & Multi-Root Selection       complete
 v0.9.3 — Matching UI Redesign                          complete
-v0.9.4 — Coverage / Missing UI Polish                  current
+v0.9.4 — Coverage / Missing UI Polish                  complete
+v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    current
 v0.10.x — Yandex Upload                                next
 ```
 
-Yandex Upload is not implemented in v0.9.4. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.4.md`, `docs/versions/v0.9.3.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.
+Yandex Upload is not implemented in v0.9.5. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.9.5.md`, `docs/versions/v0.9.4.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` and `docs/architecture/variant-acceptance.md`.

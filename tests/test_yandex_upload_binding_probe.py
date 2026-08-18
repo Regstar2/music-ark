@@ -74,7 +74,8 @@ class YandexUploadBindingProbeTests(unittest.TestCase):
     def test_sensitive_object_bindings_are_filtered(self) -> None:
         source = (
             'function uploadFile(t,e){return this.httpClient.post(t.url,{'
-            'body:t.formData,Authorization:e.secret,cookie:e.cookie})}'
+            'body:t.formData,signal:e.signal,signature:e.signature,'
+            'Authorization:e.secret,cookie:e.cookie})}'
         )
         encoded = json.dumps(
             probe.extract_function_bodies(source, ("uploadFile",)),
@@ -83,6 +84,8 @@ class YandexUploadBindingProbeTests(unittest.TestCase):
         self.assertNotIn("authorization", encoded)
         self.assertNotIn("cookie", encoded)
         self.assertNotIn("secret", encoded)
+        self.assertNotIn("signature", encoded)
+        self.assertIn("signal", encoded)
         self.assertIn("t.formdata", encoded)
 
 

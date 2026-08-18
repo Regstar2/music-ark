@@ -1,10 +1,10 @@
 """Source-free probe for the public Yandex Music desktop upload HTTP profile.
 
 The probe reports only sanitized Yandex URLs, public client/profile names,
-header names, webpack module IDs, allowlisted upload/config anchors, and numeric
-module dependency paths. It never emits JavaScript source, arbitrary strings,
-query values, credentials, cookies, authorization values, raw ASAR bytes, or
-audio.
+header names, webpack module IDs, allowlisted upload/config anchors, numeric
+module dependency paths, and allowlisted configuration property names. It never
+emits JavaScript source, arbitrary strings, query values, credentials, cookies,
+authorization values, raw ASAR bytes, or audio.
 """
 
 from __future__ import annotations
@@ -50,6 +50,18 @@ MODULE_ANCHORS = (
     "YandexMusicDesktopApp",
     "YandexMusicWebNext",
 )
+MODULE_PROPERTIES = (
+    "prefixUrl",
+    "apiPrefixUrl",
+    "customApiPrefixUrl",
+    "token",
+    "apiToken",
+    "customApiToken",
+    "clientRemoteType",
+    "headers",
+    "authorization",
+    "userAgent",
+)
 PUBLIC_CLIENT_LITERALS = ("YandexMusicDesktopApp", "YandexMusicWebNext")
 _HEADER_NAMES = {
     "user-agent",
@@ -83,10 +95,7 @@ def _is_text_member(path: str) -> bool:
 
 def _is_yandex_host(host: str) -> bool:
     clean = host.lower().split(":", 1)[0].rstrip(".")
-    return any(
-        clean == suffix or clean.endswith(f".{suffix}")
-        for suffix in ("yandex.ru", "yandex.net", "yandex.com")
-    )
+    return any(clean == suffix or clean.endswith(f".{suffix}") for suffix in ("yandex.ru", "yandex.net", "yandex.com"))
 
 
 def _sanitize_yandex_url(value: str) -> str | None:
@@ -160,21 +169,38 @@ def _anchor_records(text: str, urls: list[tuple[int, str]], radius: int) -> list
     return records[:400]
 
 
-def _module_structure(text: str) -> tuple[list[dict[str, Any]], dict[str, set[str]]]:
+def _module_properties(body: str) -> list[str]:
+    """Return only allowlisted property names, never their base/value/context."""
+    found: list[str] = []
+    for name in MODULE_PROPERTIES:
+        patterns = (
+            rf"\.{re.escape(name)}\b",
+            rf"[\"']{re.escape(name)}[\"']\s*:",
+            rf"(?<![A-Za-z0-9_$]){re.escape(name)}\s*:",
+        )
+        if any(re.search(pattern, body) for pattern in patterns):
+            found.append(name)
+    return found
+
+
+def _module_structure(text: str) -> tuple[list[dict[str, Any]], dict[str, set[str]], dict[str, list[str]]]:
     sets: list[dict[str, Any]] = []
     graph: dict[str, set[str]] = defaultdict(set)
+    properties: dict[str, list[str]] = {}
     for module in wiring_probe._extract_modules(text):  # noqa: SLF001
         body = module["body"]
         module_id = module["module_id"]
         graph[module_id].update(item["source_module_id"] for item in wiring_probe._imports(body))  # noqa: SLF001
+        props = _module_properties(body)
+        if props:
+            properties[module_id] = props
         anchors = [anchor for anchor in MODULE_ANCHORS if anchor in body]
         if anchors:
             sets.append({"module_id": module_id, "anchors": anchors})
-    return sets[:240], graph
+    return sets[:240], graph, properties
 
 
 def _module_anchor_sets(text: str) -> list[dict[str, Any]]:
-    """Test/helper API: return only allowlisted anchors for each webpack module."""
     return _module_structure(text)[0]
 
 
@@ -196,12 +222,7 @@ def _shortest_path(graph: dict[str, set[str]], start: str, target: str, max_dept
     return None
 
 
-def _dependency_paths(
-    graph: dict[str, set[str]],
-    anchor_sets: list[dict[str, Any]],
-    *,
-    max_depth: int = 6,
-) -> list[dict[str, Any]]:
+def _dependency_paths(graph: dict[str, set[str]], anchor_sets: list[dict[str, Any]], *, max_depth: int = 6) -> list[dict[str, Any]]:
     loader_ids = sorted({item["module_id"] for item in anchor_sets if "loader/upload-url" in item["anchors"]})
     targets = [
         item
@@ -223,19 +244,27 @@ def _dependency_paths(
     results: list[dict[str, Any]] = []
     for loader_id in loader_ids:
         for target in targets:
-            target_id = target["module_id"]
-            path = _shortest_path(graph, loader_id, target_id, max_depth=max_depth)
+            path = _shortest_path(graph, loader_id, target["module_id"], max_depth=max_depth)
             if path is None:
                 continue
             item = {
                 "from_module_id": loader_id,
-                "to_module_id": target_id,
+                "to_module_id": target["module_id"],
                 "target_anchors": target["anchors"],
                 "path": path,
             }
             if item not in results:
                 results.append(item)
     return results[:160]
+
+
+def _dependency_module_properties(paths: list[dict[str, Any]], properties: dict[str, set[str]]) -> list[dict[str, Any]]:
+    relevant_ids = sorted({module_id for item in paths for module_id in item["path"]})
+    return [
+        {"module_id": module_id, "properties": sorted(properties.get(module_id, set()))}
+        for module_id in relevant_ids
+        if properties.get(module_id)
+    ]
 
 
 def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
@@ -250,11 +279,11 @@ def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
 def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_000_000) -> dict[str, Any]:
     header, data_start = target_probe.read_asar_header(path)
     entries = list(target_probe._walk_entries(header["files"], data_start=data_start))  # noqa: SLF001
-
     members: list[dict[str, Any]] = []
     candidate_urls: dict[str, dict[str, Any]] = {}
     all_module_sets: list[dict[str, Any]] = []
     aggregate_graph: dict[str, set[str]] = defaultdict(set)
+    aggregate_properties: dict[str, set[str]] = defaultdict(set)
 
     for entry in entries:
         if not _is_text_member(entry["path"]) or entry["size"] <= 0 or entry["size"] > max_member_size:
@@ -265,15 +294,16 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
         direct_bindings = _direct_bindings(text)
         module_sets: list[dict[str, Any]] = []
         if entry["path"].endswith(".js"):
-            module_sets, member_graph = _module_structure(text)
+            module_sets, member_graph, member_properties = _module_structure(text)
             for module_id, imports in member_graph.items():
                 aggregate_graph[module_id].update(imports)
+            for module_id, props in member_properties.items():
+                aggregate_properties[module_id].update(props)
 
         lowered = text.lower()
         present_anchors = [anchor for anchor in ANCHORS if anchor.lower() in lowered]
         if not present_anchors and not direct_bindings and not module_sets:
             continue
-
         anchor_records = _anchor_records(text, urls, radius)
         members.append(
             {
@@ -291,7 +321,6 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
         )
         for module_set in module_sets:
             all_module_sets.append({"member_path": entry["path"], **module_set})
-
         for record in anchor_records:
             for candidate in record["nearby_urls"]:
                 url = candidate["url"]
@@ -316,9 +345,10 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
             if current is None or current["best_distance"] > 0:
                 candidate_urls[url] = direct
 
+    dependency_paths = _dependency_paths(aggregate_graph, all_module_sets)
     ranked = sorted(candidate_urls.values(), key=lambda item: (item["best_distance"], item["url"]))
     return {
-        "format": "musicark-yandex-upload-runtime-profile-report-v3",
+        "format": "musicark-yandex-upload-runtime-profile-report-v4",
         "source": "asar-public-runtime-profile-static-scan",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -326,7 +356,8 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
         "radius": radius,
         "members": members[:300],
         "webpack_module_anchor_sets": all_module_sets[:500],
-        "webpack_dependency_paths": _dependency_paths(aggregate_graph, all_module_sets),
+        "webpack_dependency_paths": dependency_paths,
+        "dependency_module_properties": _dependency_module_properties(dependency_paths, aggregate_properties),
         "ranked_yandex_url_candidates": ranked[:120],
         "safety": {
             "network_requests_sent": False,

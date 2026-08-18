@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'app_localizations_ext.dart';
+import 'app_ui_tokens.dart';
 import 'folder_picker.dart';
 import 'sync_bridge.dart';
+import 'sync_localizations_ext.dart';
+
+enum SyncPlanFilter { all, download, decision, matching, variant, localOnly }
 
 class SyncPage extends StatefulWidget {
   const SyncPage({
@@ -30,6 +35,7 @@ class _SyncPageState extends State<SyncPage> {
   Map<String, dynamic>? _diff;
   String _scopeType = 'all';
   String? _scopeId;
+  SyncPlanFilter? _planFilter;
 
   @override
   void initState() {
@@ -133,13 +139,13 @@ class _SyncPageState extends State<SyncPage> {
   Future<void> _changeScope(String value) async {
     final parts = value.split('|');
     final nextType = parts.first;
-    final nextId =
-        parts.length > 1 && parts[1].isNotEmpty ? parts[1] : null;
+    final nextId = parts.length > 1 && parts[1].isNotEmpty ? parts[1] : null;
     if (nextType == _scopeType && nextId == _scopeId) return;
     setState(() {
       _scopeType = nextType;
       _scopeId = nextId;
       _diff = null;
+      _planFilter = null;
     });
     await _refreshDiff();
   }
@@ -157,7 +163,7 @@ class _SyncPageState extends State<SyncPage> {
   Future<void> _synchronize() async {
     if (_busy) return;
     if (_target['targetConfigured'] != true) {
-      setState(() => _error = 'Сначала выберите папку для загрузок.');
+      setState(() => _error = context.l10n.syncSelectFolderFirst);
       return;
     }
 
@@ -175,16 +181,17 @@ class _SyncPageState extends State<SyncPage> {
     final downloads = _int(summary['readyToDownload']);
     final queued = _int(summary['alreadyQueued']);
     final blockers = _blockerCount(summary);
+    final l10n = context.l10n;
 
     if (downloads == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             queued > 0
-                ? 'Новых загрузок нет: нужные треки уже находятся в очереди.'
+                ? l10n.syncNothingNewQueued
                 : blockers > 0
-                    ? 'Сейчас нечего скачивать. Сначала разберите треки, требующие решения или сопоставления.'
-                    : 'Синхронизация не требует новых загрузок.',
+                    ? l10n.syncNothingNewAttention
+                    : l10n.syncNothingNewComplete,
           ),
         ),
       );
@@ -193,26 +200,28 @@ class _SyncPageState extends State<SyncPage> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('sync-confirmation'),
-        title: const Text('Синхронизировать?'),
-        content: Text(
-          'В очередь загрузок будет добавлено: $downloads.\n\n'
-          'Существующие локальные файлы не удаляются, не перемещаются и не изменяются. '
-          'Коллекция Яндекс Музыки также не изменяется.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена'),
+      builder: (dialogContext) {
+        final dialogL10n = dialogContext.l10n;
+        return AlertDialog(
+          key: const Key('sync-confirmation'),
+          title: Text(dialogL10n.syncConfirmTitle),
+          content: Text(
+            '${dialogL10n.syncConfirmQueueCount(downloads)}\n\n'
+            '${dialogL10n.syncSafetyNote}',
           ),
-          FilledButton(
-            key: const Key('sync-confirm'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Синхронизировать'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(dialogL10n.cancel),
+            ),
+            FilledButton(
+              key: const Key('sync-confirm'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(dialogL10n.syncConfirmAction),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true) return;
 
@@ -233,13 +242,16 @@ class _SyncPageState extends State<SyncPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Добавлено в очередь: ${_int(data['enqueued'])}. '
-          'Пропущено: ${_int(data['skipped'])}. Ошибок: ${_int(data['failed'])}.',
+          context.l10n.syncApplyResult(
+            _int(data['enqueued']),
+            _int(data['skipped']),
+            _int(data['failed']),
+          ),
         ),
         action: widget.onOpenDownloads == null
             ? null
             : SnackBarAction(
-                label: 'Загрузки',
+                label: context.l10n.navDownloads,
                 onPressed: widget.onOpenDownloads!,
               ),
       ),
@@ -265,62 +277,100 @@ class _SyncPageState extends State<SyncPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Синхронизация'),
-        actions: [
-          IconButton(
-            key: const Key('sync-refresh'),
-            tooltip: 'Обновить список',
-            onPressed: _busy ? null : _refreshDiff,
-            icon: const Icon(Icons.refresh),
+      body: Stack(
+        children: [
+          ListView(
+            key: const Key('sync-page'),
+            padding: const EdgeInsets.all(AppUiTokens.pagePadding),
+            children: [
+              _header(),
+              const SizedBox(height: AppUiTokens.sectionGap),
+              _controls(),
+              if (_error != null) ...[
+                const SizedBox(height: AppUiTokens.sectionGap),
+                MaterialBanner(
+                  key: const Key('sync-error'),
+                  content: Text(_error!),
+                  actions: [
+                    TextButton(
+                      onPressed: () => setState(() => _error = null),
+                      child: Text(context.l10n.syncHideError),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: AppUiTokens.sectionGap),
+              if (_diff == null)
+                Card(
+                  key: const Key('sync-loading-diff'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppUiTokens.pagePadding),
+                    child: Text(context.l10n.syncCalculating),
+                  ),
+                )
+              else ...[
+                _summaryCard(_diff!),
+                const SizedBox(height: AppUiTokens.sectionGap),
+                _details(_diff!),
+              ],
+            ],
           ),
+          if (_busy)
+            const Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              key: const Key('sync-page'),
-              padding: const EdgeInsets.all(20),
-              children: [
-                _controls(),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  MaterialBanner(
-                    key: const Key('sync-error'),
-                    content: Text(_error!),
-                    actions: [
-                      TextButton(
-                        onPressed: () => setState(() => _error = null),
-                        child: const Text('Скрыть'),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 16),
-                if (_diff == null)
-                  const Card(
-                    key: Key('sync-loading-diff'),
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text(
-                        'Считаем разницу между Яндекс Музыкой и локальной библиотекой…',
-                      ),
+    );
+  }
+
+  Widget _header() {
+    final l10n = context.l10n;
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.syncTitle,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                l10n.syncSubtitle,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
                     ),
-                  )
-                else ...[
-                  _summaryCard(_diff!),
-                  const SizedBox(height: 12),
-                  _mainActions(_diff!),
-                  const SizedBox(height: 12),
-                  _details(_diff!),
-                ],
-              ],
-            ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: AppUiTokens.compactGap),
+        IconButton(
+          key: const Key('sync-refresh'),
+          tooltip: l10n.syncRefresh,
+          onPressed: _busy ? null : _refreshDiff,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
     );
   }
 
   Widget _controls() {
+    final l10n = context.l10n;
     final selectedKey =
         _scopeType == 'all' ? 'all|' : '$_scopeType|${_scopeId ?? ''}';
     final values = _scopes.map((scope) {
@@ -335,52 +385,82 @@ class _SyncPageState extends State<SyncPage> {
       );
     }).toList();
     final configured = _target['targetConfigured'] == true;
+    final path = configured ? '${_target['targetPath'] ?? ''}' : '';
+
+    Widget scopeField() => DropdownButtonFormField<String>(
+          key: ValueKey('sync-scope-selector-$selectedKey'),
+          initialValue: values.any((item) => item.value == selectedKey)
+              ? selectedKey
+              : null,
+          isExpanded: true,
+          items: values,
+          onChanged: _busy
+              ? null
+              : (value) {
+                  if (value != null) _changeScope(value);
+                },
+          decoration: InputDecoration(
+            labelText: l10n.syncScopeLabel,
+            prefixIcon: const Icon(Icons.library_music_outlined),
+            isDense: true,
+          ),
+        );
+
+    Widget folderField() => InputDecorator(
+          decoration: InputDecoration(
+            labelText: l10n.syncFolderLabel,
+            prefixIcon: const Icon(Icons.folder_outlined),
+            isDense: true,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Tooltip(
+                  message: configured ? path : l10n.syncFolderNotSelected,
+                  child: Text(
+                    configured ? path : l10n.syncFolderNotSelected,
+                    key: const Key('sync-target-state'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppUiTokens.compactGap),
+              TextButton(
+                key: const Key('sync-select-target'),
+                onPressed: _busy ? null : _chooseTarget,
+                child: Text(
+                  configured ? l10n.syncChangeFolder : l10n.syncChooseFolder,
+                ),
+              ),
+            ],
+          ),
+        );
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Что синхронизировать',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              key: ValueKey('sync-scope-selector-$selectedKey'),
-              initialValue: values.any((item) => item.value == selectedKey)
-                  ? selectedKey
-                  : null,
-              items: values,
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      if (value != null) _changeScope(value);
-                    },
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Куда скачивать недостающие треки',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              configured ? '${_target['targetPath']}' : 'Папка не выбрана.',
-              key: const Key('sync-target-state'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              key: const Key('sync-select-target'),
-              onPressed: _busy ? null : _chooseTarget,
-              icon: const Icon(Icons.folder_open),
-              label: Text(configured ? 'Изменить папку' : 'Выбрать папку'),
-            ),
-          ],
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth >= 900) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 4, child: scopeField()),
+                  const SizedBox(width: AppUiTokens.sectionGap),
+                  Expanded(flex: 6, child: folderField()),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                scopeField(),
+                const SizedBox(height: AppUiTokens.sectionGap),
+                folderField(),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -388,282 +468,809 @@ class _SyncPageState extends State<SyncPage> {
 
   Widget _summaryCard(Map<String, dynamic> diff) {
     final summary = _summary(diff);
-    final scope = _selectedScopeTitle();
-    final matching =
-        _int(summary['identityReview']) + _int(summary['notAnalyzed']);
+    final ready = _int(summary['readyToDownload']);
+    final queued = _int(summary['alreadyQueued']);
+    final blockers = _blockerCount(summary);
+    final configured = _target['targetConfigured'] == true;
+    final l10n = context.l10n;
+    final colors = Theme.of(context).colorScheme;
 
-    Widget metric(String label, int value, IconData icon) => SizedBox(
-          width: 220,
-          child: ListTile(
-            dense: true,
-            leading: Icon(icon, size: 20),
-            title: Text(label),
-            trailing: Text(
-              '$value',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        );
+    final title = ready > 0 && blockers == 0
+        ? l10n.syncStatusReadyTitle
+        : ready > 0
+            ? l10n.syncStatusMixedTitle
+            : queued > 0
+                ? l10n.syncStatusQueuedTitle
+                : blockers > 0
+                    ? l10n.syncStatusAttentionTitle
+                    : l10n.syncStatusCompleteTitle;
+    final body = ready > 0
+        ? blockers > 0
+            ? '${l10n.syncReadyBody(ready)} ${l10n.syncAttentionBody(blockers)}'
+            : l10n.syncReadyBody(ready)
+        : queued > 0
+            ? l10n.syncQueuedBody(queued)
+            : blockers > 0
+                ? l10n.syncAttentionBody(blockers)
+                : l10n.syncStatusCompleteBody;
+    final statusIcon = ready > 0 && blockers == 0
+        ? Icons.check_circle_outline
+        : ready > 0 || blockers > 0
+            ? Icons.info_outline
+            : queued > 0
+                ? Icons.schedule
+                : Icons.task_alt;
+    final statusColor = ready > 0 && blockers == 0
+        ? colors.primaryContainer
+        : blockers > 0
+            ? colors.tertiaryContainer
+            : colors.secondaryContainer;
 
     return Card(
       key: const Key('sync-summary'),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Разница: $scope',
-              key: const Key('sync-diff-title'),
-              style: Theme.of(context).textTheme.titleLarge,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final status = Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: statusColor,
+                        borderRadius: AppUiTokens.mediumRadius,
+                      ),
+                      child: Icon(statusIcon),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            key: const Key('sync-status-title'),
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            body,
+                            key: const Key('sync-status-body'),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+
+                final actions = Wrap(
+                  spacing: AppUiTokens.compactGap,
+                  runSpacing: AppUiTokens.compactGap,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    if (widget.onOpenDownloads != null)
+                      OutlinedButton.icon(
+                        key: const Key('sync-open-downloads'),
+                        onPressed: _busy ? null : widget.onOpenDownloads,
+                        icon: const Icon(Icons.download_outlined),
+                        label: Text(l10n.syncOpenDownloads),
+                      ),
+                    FilledButton.icon(
+                      key: const Key('sync-now'),
+                      onPressed: !_busy && configured ? _synchronize : null,
+                      icon: const Icon(Icons.sync),
+                      label: Text(l10n.syncSynchronizeTracks(ready)),
+                    ),
+                  ],
+                );
+
+                if (constraints.maxWidth >= 980) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: status),
+                      const SizedBox(width: AppUiTokens.sectionGap),
+                      actions,
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    status,
+                    const SizedBox(height: 12),
+                    Align(alignment: Alignment.centerLeft, child: actions),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
+            const SizedBox(height: AppUiTokens.sectionGap),
+            _coverage(summary),
+            const SizedBox(height: AppUiTokens.sectionGap),
+            _metrics(summary),
+            const SizedBox(height: 12),
+            const Divider(),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                metric(
-                  'В Яндекс Музыке',
-                  _int(summary['desiredTracks']),
-                  Icons.cloud_outlined,
-                ),
-                metric(
-                  'Уже локально',
-                  _int(summary['alreadyCovered']),
-                  Icons.library_music_outlined,
-                ),
-                metric(
-                  'К скачиванию',
-                  _int(summary['readyToDownload']),
-                  Icons.download_outlined,
-                ),
-                metric(
-                  'Уже в очереди',
-                  _int(summary['alreadyQueued']),
-                  Icons.schedule,
-                ),
-                metric(
-                  'Нужно решить',
-                  _int(summary['missingUndecided']),
-                  Icons.help_outline,
-                ),
-                metric(
-                  'Нужно сопоставить',
-                  matching,
-                  Icons.compare_arrows,
-                ),
-                metric(
-                  'Проверить версию',
-                  _int(summary['variantIssues']),
-                  Icons.rule_outlined,
+                Icon(Icons.info_outline, size: 18, color: colors.onSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    l10n.syncSafetyNote,
+                    key: const Key('sync-safety-note'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                  ),
                 ),
               ],
             ),
-            const Divider(),
-            Text(
-              'Сейчас локально: ${summary['currentCoveragePercent'] ?? 0}% · '
-              'после успешных загрузок: ${summary['projectedCoveragePercent'] ?? 0}%',
-              key: const Key('sync-coverage'),
-            ),
-            if (_blockerCount(summary) > 0) ...[
-              const SizedBox(height: 6),
-              Text(
-                '${_blockerCount(summary)} треков требуют решения или проверки и пока не будут скачаны автоматически.',
-                key: const Key('sync-blockers'),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _mainActions(Map<String, dynamic> diff) {
-    final summary = _summary(diff);
-    final ready = _int(summary['readyToDownload']);
-    final configured = _target['targetConfigured'] == true;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+  Widget _coverage(Map<String, dynamic> summary) {
+    final l10n = context.l10n;
+    final colors = Theme.of(context).colorScheme;
+    final current = _percent(summary['currentCoveragePercent']);
+    final projected = _percent(summary['projectedCoveragePercent']);
+    final desired = _int(summary['desiredTracks']);
+    final covered = _int(summary['alreadyCovered']);
+    final projectedCovered = _projectedCovered(summary, desired, projected);
+
+    return Column(
+      key: const Key('sync-coverage'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        FilledButton.icon(
-          key: const Key('sync-now'),
-          onPressed: !_busy && configured ? _synchronize : null,
-          icon: const Icon(Icons.sync),
-          label: Text(
-            ready > 0 ? 'Синхронизировать ($ready)' : 'Синхронизировать',
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l10n.syncCoverageTitle,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            if (projectedCovered != null)
+              Text(
+                l10n.syncCoverageTrackTransition(covered, projectedCovered),
+                key: const Key('sync-coverage-track-transition'),
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: SizedBox(
+            height: 10,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                LinearProgressIndicator(
+                  value: projected / 100,
+                  backgroundColor: colors.surfaceContainerHighest,
+                  color: colors.secondaryContainer,
+                ),
+                LinearProgressIndicator(
+                  value: current / 100,
+                  backgroundColor: Colors.transparent,
+                  color: colors.primary,
+                ),
+              ],
+            ),
           ),
         ),
-        if (widget.onOpenDownloads != null)
-          TextButton.icon(
-            key: const Key('sync-open-downloads'),
-            onPressed: widget.onOpenDownloads,
-            icon: const Icon(Icons.download_outlined),
-            label: const Text('Открыть загрузки'),
-          ),
+        const SizedBox(height: 7),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                l10n.syncCoverageCurrent(_formatPercent(current)),
+                key: const Key('sync-coverage-current-label'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            Text(
+              l10n.syncCoverageProjected(_formatPercent(projected)),
+              key: const Key('sync-coverage-projected-label'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
       ],
     );
   }
 
-  Widget _details(Map<String, dynamic> diff) {
-    final operations = _maps(diff['operations']);
-    final downloads = operations
-        .where((item) => item['type'] == 'enqueue_download')
-        .toList();
-    final decisions = operations
-        .where((item) => item['type'] == 'user_decision_required')
-        .toList();
-    final matching =
-        operations.where((item) => item['type'] == 'review_identity').toList();
-    final variants =
-        operations.where((item) => item['type'] == 'review_variant').toList();
-    final localOnly =
-        operations.where((item) => item['type'] == 'local_only').toList();
-
-    return Card(
-      key: const Key('sync-diff-details'),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            _group(
-              'Будет скачано',
-              downloads,
-              _downloadRow,
-              initiallyExpanded: downloads.isNotEmpty,
-            ),
-            _group(
-              'Нужно решить',
-              decisions,
-              _decisionRow,
-              initiallyExpanded: decisions.isNotEmpty,
-            ),
-            _group(
-              'Нужно сопоставить',
-              matching,
-              _matchingRow,
-              initiallyExpanded: matching.isNotEmpty && downloads.isEmpty,
-            ),
-            _group('Проверить версию', variants, _variantRow),
-            _group(
-              'Только локально / вне выбранной области',
-              localOnly,
-              _infoRow,
-            ),
-          ],
-        ),
+  Widget _metrics(Map<String, dynamic> summary) {
+    final l10n = context.l10n;
+    final entries = [
+      _MetricData(
+        keyName: 'yandex',
+        label: l10n.syncMetricYandex,
+        value: _int(summary['desiredTracks']),
+        icon: Icons.cloud_outlined,
       ),
+      _MetricData(
+        keyName: 'local',
+        label: l10n.syncMetricLocal,
+        value: _int(summary['alreadyCovered']),
+        icon: Icons.library_music_outlined,
+      ),
+      _MetricData(
+        keyName: 'download',
+        label: l10n.syncMetricDownload,
+        value: _int(summary['readyToDownload']),
+        icon: Icons.download_outlined,
+        emphasized: true,
+      ),
+      _MetricData(
+        keyName: 'queued',
+        label: l10n.syncMetricQueued,
+        value: _int(summary['alreadyQueued']),
+        icon: Icons.schedule,
+      ),
+      _MetricData(
+        keyName: 'attention',
+        label: l10n.syncMetricAttention,
+        value: _blockerCount(summary),
+        icon: Icons.help_outline,
+        attention: _blockerCount(summary) > 0,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = AppUiTokens.compactGap;
+        final columns = constraints.maxWidth >= 1050
+            ? 5
+            : constraints.maxWidth >= 680
+                ? 3
+                : constraints.maxWidth >= 420
+                    ? 2
+                    : 1;
+        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final entry in entries)
+              SizedBox(width: width, child: _metricCard(entry)),
+          ],
+        );
+      },
     );
   }
 
-  Widget _group(
-    String title,
-    List<Map<String, dynamic>> items,
-    Widget Function(Map<String, dynamic>) row, {
-    bool initiallyExpanded = false,
-  }) {
-    return ExpansionTile(
-      key: Key('sync-group-$title'),
-      initiallyExpanded: initiallyExpanded,
-      title: Text('$title (${items.length})'),
-      children: items.isEmpty
-          ? const [ListTile(title: Text('Нет'))]
-          : items.map(row).toList(),
-    );
-  }
+  Widget _metricCard(_MetricData entry) {
+    final colors = Theme.of(context).colorScheme;
+    final background = entry.emphasized
+        ? colors.primaryContainer
+        : entry.attention
+            ? colors.tertiaryContainer
+            : colors.surfaceContainerLowest;
+    final foreground = entry.emphasized
+        ? colors.onPrimaryContainer
+        : entry.attention
+            ? colors.onTertiaryContainer
+            : colors.onSurface;
 
-  Widget _downloadRow(Map<String, dynamic> item) {
-    final metadata = _metadata(item);
-    return ListTile(
-      key: Key('sync-download-${item['externalId']}'),
-      leading: const Icon(Icons.download_outlined),
-      title: Text(_trackTitle(metadata)),
-      subtitle: const Text('Будет добавлен в очередь загрузок'),
-    );
-  }
-
-  Widget _decisionRow(Map<String, dynamic> item) {
-    final metadata = _metadata(item);
-    final id = '${item['externalId'] ?? ''}';
-    return ListTile(
-      key: Key('sync-decision-$id'),
-      title: Text(_trackTitle(metadata)),
-      subtitle: const Text('Трек отсутствует локально'),
-      trailing: Wrap(
-        spacing: 4,
+    return Container(
+      key: Key('sync-metric-${entry.keyName}'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: AppUiTokens.mediumRadius,
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Row(
         children: [
-          TextButton(
-            onPressed: _busy ? null : () => _setAction(id, 'wanted'),
-            child: const Text('Скачать'),
-          ),
-          TextButton(
-            onPressed: _busy ? null : () => _setAction(id, 'ignored'),
-            child: const Text('Игнорировать'),
+          Icon(entry.icon, size: 20, color: foreground),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: foreground,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${entry.value}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _matchingRow(Map<String, dynamic> item) {
-    final metadata = _metadata(item);
-    final required = item['reason'] == 'matching_required';
-    return ListTile(
-      key: Key('sync-review-${item['externalId']}'),
-      title: Text(_trackTitle(metadata)),
-      subtitle: Text(
-        required
-            ? 'Ещё не проверялся по локальной библиотеке'
-            : 'Сопоставление требует проверки',
-      ),
-      trailing: widget.onOpenMatching == null
-          ? null
-          : TextButton(
-              onPressed: widget.onOpenMatching,
-              child: const Text('Открыть сопоставление'),
+  Widget _details(Map<String, dynamic> diff) {
+    final buckets = _OperationBuckets.fromOperations(_maps(diff['operations']));
+    final filter = _planFilter ?? _defaultFilter(buckets);
+    final items = buckets.itemsFor(filter);
+    final l10n = context.l10n;
+    final colors = Theme.of(context).colorScheme;
+
+    return Card(
+      key: const Key('sync-diff-details'),
+      child: Padding(
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.syncPlanTitle,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        l10n.syncPlanScope(_selectedScopeTitle()),
+                        key: const Key('sync-plan-scope'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  l10n.syncPlanShown(items.length, buckets.total),
+                  key: const Key('sync-plan-shown'),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _filterChip(SyncPlanFilter.all, filter, buckets.total),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    SyncPlanFilter.download,
+                    filter,
+                    buckets.downloads.length,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    SyncPlanFilter.decision,
+                    filter,
+                    buckets.decisions.length,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    SyncPlanFilter.matching,
+                    filter,
+                    buckets.matching.length,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    SyncPlanFilter.variant,
+                    filter,
+                    buckets.variants.length,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    SyncPlanFilter.localOnly,
+                    filter,
+                    buckets.localOnly.length,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Divider(),
+            if (items.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Center(
+                  child: Text(
+                    l10n.syncNoOperations,
+                    key: const Key('sync-plan-empty'),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final wide = constraints.maxWidth >= 900;
+                  return Column(
+                    children: [
+                      if (wide) _tableHeader(),
+                      for (final item in items) _operationRow(item, wide: wide),
+                    ],
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _variantRow(Map<String, dynamic> item) {
-    final metadata = _metadata(item);
-    final variant = '${metadata['variantStatus'] ?? item['reason'] ?? ''}';
-    return ListTile(
-      key: Key('sync-variant-${item['externalId']}'),
-      title: Text(_trackTitle(metadata)),
-      subtitle: Text(
-        'Локальный трек найден, но версия требует проверки: $variant',
-      ),
-      trailing: widget.onOpenMatching == null
-          ? null
-          : TextButton(
-              onPressed: widget.onOpenMatching,
-              child: const Text('Проверить'),
-            ),
+  Widget _filterChip(SyncPlanFilter value, SyncPlanFilter selected, int count) {
+    final l10n = context.l10n;
+    final label = switch (value) {
+      SyncPlanFilter.all => l10n.syncFilterAll(count),
+      SyncPlanFilter.download => l10n.syncFilterDownload(count),
+      SyncPlanFilter.decision => l10n.syncFilterDecision(count),
+      SyncPlanFilter.matching => l10n.syncFilterMatching(count),
+      SyncPlanFilter.variant => l10n.syncFilterVariant(count),
+      SyncPlanFilter.localOnly => l10n.syncFilterLocalOnly(count),
+    };
+    return ChoiceChip(
+      key: Key('sync-filter-${value.name}'),
+      selected: selected == value,
+      showCheckmark: false,
+      label: Text(label),
+      onSelected: (_) => setState(() => _planFilter = value),
     );
   }
 
-  Widget _infoRow(Map<String, dynamic> item) {
-    final metadata = _metadata(item);
-    return ListTile(
-      key: Key('sync-local-${item['externalId']}'),
-      title: Text(_trackTitle(metadata)),
-      subtitle: Text(
-        item['reason'] == 'outside_selected_scope'
-            ? 'Есть локально, но не относится к выбранной области'
-            : 'Есть только локально',
+  Widget _tableHeader() {
+    final l10n = context.l10n;
+    final colors = Theme.of(context).colorScheme;
+    Text header(String value) => Text(
+          value,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+        );
+
+    return Container(
+      key: const Key('sync-plan-table-header'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      color: colors.surfaceContainerLowest,
+      child: Row(
+        children: [
+          Expanded(flex: 5, child: header(l10n.syncColumnTrack)),
+          const SizedBox(width: 12),
+          Expanded(flex: 2, child: header(l10n.syncColumnAction)),
+          const SizedBox(width: 12),
+          Expanded(flex: 3, child: header(l10n.syncColumnReason)),
+          const SizedBox(width: 12),
+          Expanded(flex: 2, child: header(l10n.syncColumnStatus)),
+        ],
       ),
     );
+  }
+
+  Widget _operationRow(Map<String, dynamic> item, {required bool wide}) {
+    final metadata = _metadata(item);
+    final externalId = '${item['externalId'] ?? ''}';
+    final type = '${item['type'] ?? ''}';
+    final presentation = _operationPresentation(item);
+    final keyPrefix = switch (type) {
+      'enqueue_download' => 'sync-download',
+      'user_decision_required' => 'sync-decision',
+      'review_identity' => 'sync-review',
+      'review_variant' => 'sync-variant',
+      'local_only' => 'sync-local',
+      _ => 'sync-operation',
+    };
+
+    final track = _trackCell(metadata);
+    final action = Align(
+      alignment: Alignment.centerLeft,
+      child: Chip(
+        visualDensity: VisualDensity.compact,
+        avatar: Icon(presentation.icon, size: 16),
+        label: Text(presentation.actionLabel),
+      ),
+    );
+    final reason = Text(
+      presentation.reason,
+      style: Theme.of(context).textTheme.bodySmall,
+    );
+    final status = _operationStatus(item, presentation);
+
+    if (wide) {
+      return Container(
+        key: Key('$keyPrefix-$externalId'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(flex: 5, child: track),
+            const SizedBox(width: 12),
+            Expanded(flex: 2, child: action),
+            const SizedBox(width: 12),
+            Expanded(flex: 3, child: reason),
+            const SizedBox(width: 12),
+            Expanded(flex: 2, child: status),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      key: Key('$keyPrefix-$externalId'),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          track,
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              action,
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: reason,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Align(alignment: Alignment.centerLeft, child: status),
+        ],
+      ),
+    );
+  }
+
+  Widget _trackCell(Map<String, dynamic> metadata) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerHighest,
+            borderRadius: AppUiTokens.smallRadius,
+          ),
+          child: Icon(Icons.music_note, color: colors.onSurfaceVariant),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _trackTitle(metadata),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _trackArtists(metadata),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _operationStatus(
+    Map<String, dynamic> item,
+    _OperationPresentation presentation,
+  ) {
+    final type = '${item['type'] ?? ''}';
+    final id = '${item['externalId'] ?? ''}';
+    final l10n = context.l10n;
+
+    if (type == 'user_decision_required') {
+      return Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          TextButton(
+            onPressed: _busy ? null : () => _setAction(id, 'wanted'),
+            child: Text(l10n.syncDownloadAction),
+          ),
+          TextButton(
+            onPressed: _busy ? null : () => _setAction(id, 'ignored'),
+            child: Text(l10n.syncIgnoreAction),
+          ),
+        ],
+      );
+    }
+    if (type == 'review_identity' && widget.onOpenMatching != null) {
+      return TextButton(
+        onPressed: _busy ? null : widget.onOpenMatching,
+        child: Text(l10n.syncOpenMatching),
+      );
+    }
+    if (type == 'review_variant' && widget.onOpenMatching != null) {
+      return TextButton(
+        onPressed: _busy ? null : widget.onOpenMatching,
+        child: Text(l10n.syncCheckVariant),
+      );
+    }
+    return Text(
+      presentation.statusLabel,
+      style: Theme.of(context).textTheme.bodySmall,
+    );
+  }
+
+  _OperationPresentation _operationPresentation(Map<String, dynamic> item) {
+    final l10n = context.l10n;
+    final metadata = _metadata(item);
+    final type = '${item['type'] ?? ''}';
+    switch (type) {
+      case 'enqueue_download':
+        return _OperationPresentation(
+          actionLabel: l10n.syncActionDownload,
+          reason: l10n.syncReasonWillQueue,
+          statusLabel: l10n.syncStatusReady,
+          icon: Icons.download_outlined,
+        );
+      case 'user_decision_required':
+        return _OperationPresentation(
+          actionLabel: l10n.syncActionDecision,
+          reason: l10n.syncReasonMissing,
+          statusLabel: l10n.syncActionDecision,
+          icon: Icons.help_outline,
+        );
+      case 'review_identity':
+        final required = item['reason'] == 'matching_required';
+        return _OperationPresentation(
+          actionLabel: l10n.syncActionMatching,
+          reason: required
+              ? l10n.syncReasonMatchingRequired
+              : l10n.syncReasonMatchingReview,
+          statusLabel: l10n.syncActionMatching,
+          icon: Icons.compare_arrows,
+        );
+      case 'review_variant':
+        final rawVariant = '${metadata['variantStatus'] ?? item['reason'] ?? ''}';
+        return _OperationPresentation(
+          actionLabel: l10n.syncActionVariant,
+          reason: l10n.syncReasonVariant(_variantLabel(rawVariant)),
+          statusLabel: l10n.syncActionVariant,
+          icon: Icons.rule_outlined,
+        );
+      case 'local_only':
+        final outside = item['reason'] == 'outside_selected_scope';
+        return _OperationPresentation(
+          actionLabel: l10n.syncActionLocalOnly,
+          reason: outside ? l10n.syncReasonOutsideScope : l10n.syncReasonLocalOnly,
+          statusLabel: l10n.syncStatusInformational,
+          icon: Icons.folder_outlined,
+        );
+      default:
+        return _OperationPresentation(
+          actionLabel: l10n.syncStatusInformational,
+          reason: '${item['reason'] ?? ''}',
+          statusLabel: l10n.syncStatusInformational,
+          icon: Icons.info_outline,
+        );
+    }
+  }
+
+  String _variantLabel(String raw) {
+    final l10n = context.l10n;
+    return switch (raw) {
+      'same' => l10n.matchingVariantSame,
+      'altered' => l10n.matchingVariantAltered,
+      'different_version' || 'variant_different_version' =>
+        l10n.matchingVariantDifferent,
+      'uncertain' => l10n.matchingVariantUncertain,
+      'not_checked' => l10n.matchingVariantNotChecked,
+      _ => raw.isEmpty ? l10n.matchingVariantNotChecked : raw,
+    };
+  }
+
+  SyncPlanFilter _defaultFilter(_OperationBuckets buckets) {
+    if (buckets.downloads.isNotEmpty) return SyncPlanFilter.download;
+    if (buckets.decisions.isNotEmpty) return SyncPlanFilter.decision;
+    if (buckets.matching.isNotEmpty) return SyncPlanFilter.matching;
+    if (buckets.variants.isNotEmpty) return SyncPlanFilter.variant;
+    return SyncPlanFilter.all;
   }
 
   String _selectedScopeTitle() {
     for (final scope in _scopes) {
       if ('${scope['type'] ?? ''}' == _scopeType &&
           _nullableString(scope['id']) == _scopeId) {
-        return '${scope['title'] ?? _scopeId ?? 'Вся библиотека'}';
+        return '${scope['title'] ?? _scopeId ?? context.l10n.syncAllLibrary}';
       }
     }
-    return _scopeId ?? 'Вся библиотека';
+    return _scopeId ?? context.l10n.syncAllLibrary;
+  }
+
+  String _trackTitle(Map<String, dynamic> metadata) {
+    final title = '${metadata['title'] ?? ''}'.trim();
+    return title.isEmpty ? context.l10n.syncUnknownTrack : title;
+  }
+
+  String _trackArtists(Map<String, dynamic> metadata) {
+    final rawArtists = metadata['artists'];
+    final artists = rawArtists is List
+        ? rawArtists
+            .map((e) => '$e'.trim())
+            .where((e) => e.isNotEmpty)
+            .join(', ')
+        : '';
+    return artists.isEmpty ? context.l10n.syncUnknownArtist : artists;
+  }
+
+  String _formatPercent(double value) {
+    final text = value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+    return Localizations.localeOf(context).languageCode == 'ru'
+        ? text.replaceAll('.', ',')
+        : text;
+  }
+
+  static int? _projectedCovered(
+    Map<String, dynamic> summary,
+    int desired,
+    double projectedPercent,
+  ) {
+    for (final key in const ['projectedCovered', 'projectedCoveredTracks']) {
+      final value = summary[key];
+      if (value != null) return _int(value);
+    }
+    if (desired > 0 && projectedPercent >= 99.999) return desired;
+    return null;
   }
 
   static bool _scopeExists(
@@ -694,17 +1301,14 @@ class _SyncPageState extends State<SyncPage> {
     return value is Map ? Map<String, dynamic>.from(value) : const {};
   }
 
-  static String _trackTitle(Map<String, dynamic> metadata) {
-    final rawArtists = metadata['artists'];
-    final artists = rawArtists is List
-        ? rawArtists.map((e) => '$e').where((e) => e.isNotEmpty).join(', ')
-        : '';
-    final title = '${metadata['title'] ?? ''}';
-    return artists.isEmpty ? title : '$artists — $title';
-  }
-
   static int _int(Object? value) =>
       value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  static double _percent(Object? value) {
+    final parsed =
+        value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+    return parsed.clamp(0, 100).toDouble();
+  }
 
   static String? _nullableString(Object? value) {
     if (value == null) return null;
@@ -721,4 +1325,88 @@ class _SyncPageState extends State<SyncPage> {
 
   static String _message(Object error) =>
       error is SyncBridgeException ? error.message : error.toString();
+}
+
+class _MetricData {
+  const _MetricData({
+    required this.keyName,
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.emphasized = false,
+    this.attention = false,
+  });
+
+  final String keyName;
+  final String label;
+  final int value;
+  final IconData icon;
+  final bool emphasized;
+  final bool attention;
+}
+
+class _OperationPresentation {
+  const _OperationPresentation({
+    required this.actionLabel,
+    required this.reason,
+    required this.statusLabel,
+    required this.icon,
+  });
+
+  final String actionLabel;
+  final String reason;
+  final String statusLabel;
+  final IconData icon;
+}
+
+class _OperationBuckets {
+  const _OperationBuckets({
+    required this.all,
+    required this.downloads,
+    required this.decisions,
+    required this.matching,
+    required this.variants,
+    required this.localOnly,
+  });
+
+  factory _OperationBuckets.fromOperations(
+    List<Map<String, dynamic>> operations,
+  ) {
+    return _OperationBuckets(
+      all: operations,
+      downloads: operations
+          .where((item) => item['type'] == 'enqueue_download')
+          .toList(),
+      decisions: operations
+          .where((item) => item['type'] == 'user_decision_required')
+          .toList(),
+      matching: operations
+          .where((item) => item['type'] == 'review_identity')
+          .toList(),
+      variants: operations
+          .where((item) => item['type'] == 'review_variant')
+          .toList(),
+      localOnly: operations
+          .where((item) => item['type'] == 'local_only')
+          .toList(),
+    );
+  }
+
+  final List<Map<String, dynamic>> all;
+  final List<Map<String, dynamic>> downloads;
+  final List<Map<String, dynamic>> decisions;
+  final List<Map<String, dynamic>> matching;
+  final List<Map<String, dynamic>> variants;
+  final List<Map<String, dynamic>> localOnly;
+
+  int get total => all.length;
+
+  List<Map<String, dynamic>> itemsFor(SyncPlanFilter filter) => switch (filter) {
+        SyncPlanFilter.all => all,
+        SyncPlanFilter.download => downloads,
+        SyncPlanFilter.decision => decisions,
+        SyncPlanFilter.matching => matching,
+        SyncPlanFilter.variant => variants,
+        SyncPlanFilter.localOnly => localOnly,
+      };
 }

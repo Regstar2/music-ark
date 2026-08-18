@@ -2,9 +2,42 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.5 Draft candidate
+## Unreleased — v0.9.6 Draft candidate
 
-### v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions
+### v0.9.6 — Sync Page UI Polish
+
+#### Added
+
+- responsive Sync header and configuration card for scope plus download target;
+- status-oriented summary with current/projected local coverage and five primary metrics;
+- one counted/filterable Sync plan workspace replacing multiple large operation accordions;
+- wide desktop operation table plus stacked narrow-layout rows;
+- theme-aware local artwork placeholder without adding provider requests or expanding the Sync payload for decoration;
+- Sync presentation localization through the existing generated RU/EN localization catalog;
+- Flutter regression coverage for metrics/blockers, coverage, filters, no-target state, confirmation, decisions, navigation, target selection, narrow layout and English locale.
+
+#### Changed
+
+- Sync plan filters are Flutter presentation state over the current operation snapshot and do not rebuild or persist a second plan;
+- scope/folder changes, explicit wanted/ignored decisions and Apply continue to use the existing `SyncBridgeClient` methods and planner/application boundary;
+- the primary status card now keeps the confirmation-protected Sync action and Downloads shortcut next to the information that explains the action;
+- empty operation categories remain visible as compact counted filters instead of occupying full `ExpansionTile` sections;
+- application/backend package version advances to `0.9.6`, Flutter package to `0.9.6+1`; SQLite remains `1.8.4`.
+
+#### Safety / boundaries
+
+- Controlled Sync planner rules, Coverage/Matching/Variant truth, DownloadService semantics and Metadata Editor behavior are unchanged;
+- existing local files are not deleted, moved, renamed or retagged by v0.9.6 Sync;
+- Yandex collections are not mutated; reverse Sync and Yandex Upload remain unimplemented;
+- `DIFFERENT_VERSION` still never triggers automatic replacement;
+- no SQLite migration, new provider or new state-management dependency is introduced.
+
+#### Verification state
+
+- source changes and focused Sync widget regressions are included in the v0.9.6 branch;
+- Flutter analyze/tests, Python regression suite, GitHub Actions and Windows visual smoke are recorded only after they actually run against the final PR head.
+
+## v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions
 
 #### Added
 

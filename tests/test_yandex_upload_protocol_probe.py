@@ -39,13 +39,20 @@ class YandexUploadProtocolProbeTests(unittest.TestCase):
                             "headers": [
                                 {"name": "Authorization", "value": "OAuth auth-secret"},
                                 {"name": "Cookie", "value": "Session_id=cookie-secret"},
-                                {"name": "Content-Type", "value": "multipart/form-data; boundary=secret-boundary"},
+                                {
+                                    "name": "Content-Type",
+                                    "value": "multipart/form-data; boundary=secret-boundary",
+                                },
                             ],
                             "postData": {
                                 "mimeType": "multipart/form-data",
                                 "params": [
                                     {"name": "playlistUuid", "value": "private-playlist"},
-                                    {"name": "file", "fileName": "private_song.mp3", "value": "raw-file-data"},
+                                    {
+                                        "name": "file",
+                                        "fileName": "private_song.mp3",
+                                        "value": "raw-file-data",
+                                    },
                                 ],
                             },
                         },
@@ -59,7 +66,10 @@ class YandexUploadProtocolProbeTests(unittest.TestCase):
                                 "mimeType": "application/json",
                                 "text": json.dumps(
                                     {
-                                        "track": {"id": "user-track-id", "title": "Private title"},
+                                        "track": {
+                                            "id": "user-track-id",
+                                            "title": "Private title",
+                                        },
                                         "token": "response-token-secret",
                                     }
                                 ),
@@ -98,9 +108,10 @@ class YandexUploadProtocolProbeTests(unittest.TestCase):
         self.assertEqual(entry["response"]["json_shape"]["track"]["id"], "string")
         self.assertEqual(entry["response"]["json_shape"]["token"], "<redacted-field>")
 
-    def test_binary_scan_redacts_auth_and_finds_endpoint_shape(self) -> None:
+    def test_binary_scan_omits_source_context_and_finds_endpoint_shape(self) -> None:
+        secret = "abcdefghijklmnopqrstuvwxyz0123456789"
         source = (
-            'const x="Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789";'
+            f'const x="Authorization: Bearer {secret}";'
             'this.httpClient.post("/playlist/123/upload", {body:new FormData()});'
         ).encode("utf-8")
 
@@ -112,8 +123,11 @@ class YandexUploadProtocolProbeTests(unittest.TestCase):
         encoded = json.dumps(report, ensure_ascii=False)
         self.assertEqual(report["hit_count"], 1)
         self.assertIn("/playlist/123/upload", encoded)
-        self.assertIn("Bearer <redacted>", encoded)
-        self.assertNotIn("abcdefghijklmnopqrstuvwxyz0123456789", encoded)
+        self.assertIn("POST", report["hits"][0]["http_methods"])
+        self.assertIn("FormData", report["hits"][0]["signals"])
+        self.assertFalse(report["safety"]["source_code_contexts_included"])
+        self.assertNotIn(secret, encoded)
+        self.assertNotIn("Authorization", encoded)
 
 
 if __name__ == "__main__":

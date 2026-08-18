@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +47,21 @@ class YandexUploadLivePocTests(unittest.TestCase):
         result = poc._classify_readback_identity({"1", "2"}, {"1", "2"}, "2")  # noqa: SLF001
         self.assertFalse(result["verified"])
         self.assertEqual(result["identitySource"], "not-observed")
+
+    def test_prepare_blocks_before_credentials_or_playlist_network(self) -> None:
+        args = argparse.Namespace(confirm_prepare=True)
+        with patch.object(poc, "_prepare_context") as prepare_context:
+            with self.assertRaisesRegex(Exception, "BLOCKED"):
+                poc.run_prepare(args)
+        prepare_context.assert_not_called()
+
+    def test_upload_blocks_before_credentials_or_playlist_network(self) -> None:
+        args = argparse.Namespace(confirm_upload=True)
+        with patch.dict(poc.os.environ, {"MUSICARK_YANDEX_UPLOAD_LIVE": "1"}, clear=False):
+            with patch.object(poc, "_prepare_context") as prepare_context:
+                with self.assertRaisesRegex(Exception, "BLOCKED"):
+                    poc.run_upload(args)
+        prepare_context.assert_not_called()
 
 
 if __name__ == "__main__":

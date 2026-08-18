@@ -6,9 +6,10 @@ HTTP configuration used around the recovered UGC upload pipeline.
 
 It scans only text-like packed members from the locally installed official
 ``app.asar`` and emits sanitized Yandex URLs (scheme/host/path only), safe
-configuration key names, public client enum literals, header names, and anchor
-proximity. It never emits JavaScript source, arbitrary string values, query
-values, credentials, cookies, authorization values, raw ASAR bytes, or audio.
+configuration key names, public client enum literals, header names, anchor
+proximity, and webpack module IDs with allowlisted anchor sets. It never emits
+JavaScript source, arbitrary string values, query values, credentials, cookies,
+authorization values, raw ASAR bytes, or audio.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import yandex_upload_module_wiring_probe as wiring_probe
 import yandex_upload_target_probe as target_probe
 
 
@@ -37,6 +39,20 @@ ANCHORS = (
     "clientSafeConfig",
     "getClientSafeConfig",
     "prefixUrl",
+)
+MODULE_ANCHORS = (
+    "loader/upload-url",
+    "getUploadUrl",
+    "UgcUploadHttpClient",
+    "getApiPrefixUrl",
+    "customApiPrefixUrl",
+    "customApiToken",
+    "createHttpOptions",
+    "createRequestHeaders",
+    "createSessionRequestHeaders",
+    "clientRemoteType",
+    "YandexMusicDesktopApp",
+    "YandexMusicWebNext",
 )
 CONFIG_KEYS = (
     "apiPrefixUrl",
@@ -102,9 +118,6 @@ def _sanitize_yandex_url(value: str) -> str | None:
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or not _is_yandex_host(parsed.netloc):
         return None
-    # Query/fragment values are intentionally discarded before any output.
-    # Sensitive words in query values therefore do not make the public host/path
-    # unusable as structural evidence; sensitive host/path text still rejects it.
     if _SENSITIVE_RE.search(f"{parsed.netloc}{parsed.path}"):
         return None
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "", "", ""))
@@ -170,6 +183,18 @@ def _anchor_records(text: str, urls: list[tuple[int, str]], radius: int) -> list
     return records[:400]
 
 
+def _module_anchor_sets(text: str) -> list[dict[str, Any]]:
+    """Return webpack module IDs with only allowlisted upload/config anchors."""
+    results: list[dict[str, Any]] = []
+    for module in wiring_probe._extract_modules(text):  # noqa: SLF001
+        body = module["body"]
+        anchors = [anchor for anchor in MODULE_ANCHORS if anchor in body]
+        if not anchors:
+            continue
+        results.append({"module_id": module["module_id"], "anchors": anchors})
+    return results[:240]
+
+
 def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
     with path.open("rb") as stream:
         stream.seek(entry["start"])
@@ -185,6 +210,7 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
 
     members: list[dict[str, Any]] = []
     candidate_urls: dict[str, dict[str, Any]] = {}
+    all_module_sets: list[dict[str, Any]] = []
     for entry in entries:
         if not _is_text_member(entry["path"]) or entry["size"] <= 0 or entry["size"] > max_member_size:
             continue
@@ -194,7 +220,8 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
         present_anchors = [anchor for anchor in ANCHORS if anchor.lower() in lowered]
         direct_bindings = _direct_bindings(text)
         urls = _url_occurrences(text)
-        if not present_anchors and not direct_bindings:
+        module_sets = _module_anchor_sets(text) if entry["path"].endswith(".js") else []
+        if not present_anchors and not direct_bindings and not module_sets:
             continue
 
         anchor_records = _anchor_records(text, urls, radius)
@@ -212,8 +239,11 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
                 "public_clients": public_clients,
                 "header_names": header_names,
                 "anchor_records": anchor_records,
+                "webpack_module_anchor_sets": module_sets,
             }
         )
+        for module_set in module_sets:
+            all_module_sets.append({"member_path": entry["path"], **module_set})
 
         for record in anchor_records:
             for candidate in record["nearby_urls"]:
@@ -242,13 +272,14 @@ def build_report(path: Path, *, radius: int = 12000, max_member_size: int = 8_00
 
     ranked = sorted(candidate_urls.values(), key=lambda item: (item["best_distance"], item["url"]))
     return {
-        "format": "musicark-yandex-upload-runtime-profile-report-v1",
+        "format": "musicark-yandex-upload-runtime-profile-report-v2",
         "source": "asar-public-runtime-profile-static-scan",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "asar_data_start": data_start,
         "radius": radius,
         "members": members[:300],
+        "webpack_module_anchor_sets": all_module_sets[:500],
         "ranked_yandex_url_candidates": ranked[:120],
         "safety": {
             "network_requests_sent": False,

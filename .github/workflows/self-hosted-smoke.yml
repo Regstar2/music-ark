@@ -30,8 +30,30 @@ jobs:
           whoami
           Write-Host "PowerShell:"
           $PSVersionTable.PSVersion
-          Write-Host "Git:"
-          git --version
+
+      - name: Inspect development toolchain
+        shell: pwsh
+        run: |
+          $commands = @('git', 'python', 'pip', 'node', 'npm', 'flutter', 'dart')
+          foreach ($name in $commands) {
+            Write-Host "`n=== $name ==="
+            $cmd = Get-Command $name -ErrorAction SilentlyContinue
+            if ($null -eq $cmd) {
+              Write-Host "NOT FOUND"
+              continue
+            }
+
+            Write-Host "Path: $($cmd.Source)"
+            switch ($name) {
+              'git'     { git --version }
+              'python'  { python --version }
+              'pip'     { pip --version }
+              'node'    { node --version }
+              'npm'     { npm --version }
+              'flutter' { flutter --version }
+              'dart'    { dart --version }
+            }
+          }
 
       - name: Verify writable workspace
         shell: pwsh

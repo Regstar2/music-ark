@@ -27,6 +27,11 @@ class YandexUploadRuntimeConfigProbeTests(unittest.TestCase):
         self.assertIn({"key": "customApiPrefixUrl", "kind": "null"}, records)
         self.assertIn({"key": "customApiToken", "kind": "null"}, records)
 
+    def test_empty_custom_overrides_are_distinguished(self) -> None:
+        records = probe._records('customApiPrefixUrl:"",customApiToken:""')  # noqa: SLF001
+        self.assertIn({"key": "customApiPrefixUrl", "kind": "empty-string"}, records)
+        self.assertIn({"key": "customApiToken", "kind": "empty-string"}, records)
+
     def test_sensitive_custom_token_value_is_never_emitted(self) -> None:
         records = probe._records('customApiToken:"SUPER_SECRET_TOKEN"')  # noqa: SLF001
         encoded = json.dumps(records, ensure_ascii=False)

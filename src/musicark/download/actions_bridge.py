@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from musicark.download.models import DownloadStatus
 
-from .bridge import _require_user_task_id, _retry_user_task, _run_user_task
+from .bridge import _retry_user_task, _user_run_one
 from .service import DownloadService, DownloadServiceError
 
 
@@ -131,35 +131,69 @@ class DownloadTaskActions:
         operation: Callable[[str], dict[str, Any]],
     ) -> dict[str, Any]:
         requested = _clean_ids(task_ids)
+        valid, validation_errors = self._validate_user_tasks(requested)
         items: list[dict[str, Any]] = []
-        errors: list[dict[str, str]] = []
+        errors: list[dict[str, str]] = list(validation_errors)
         for task_id in requested:
+            if task_id not in valid:
+                continue
             try:
                 items.append(operation(task_id))
             except Exception as exc:  # noqa: BLE001 - batch must report partial failures.
                 errors.append(_error_payload(exc, task_id))
         return _batch_result(requested, items, errors)
 
+    def _validate_user_tasks(
+        self,
+        task_ids: list[str],
+    ) -> tuple[set[str], list[dict[str, str]]]:
+        """Reject missing/internal tasks before any batch mutation begins."""
+        if not task_ids:
+            return set(), []
+        valid: set[str] = set()
+        errors: list[dict[str, str]] = []
+        try:
+            with closing(sqlite3.connect(self._service._database_path)) as conn:  # noqa: SLF001
+                for task_id in task_ids:
+                    row = conn.execute(
+                        "SELECT task_type FROM download_tasks WHERE id=?",
+                        (task_id,),
+                    ).fetchone()
+                    if row is None or str(row[0]) != _USER_TASK_TYPE:
+                        errors.append(
+                            {
+                                "id": task_id,
+                                "code": "invalid_task",
+                                "message": "Download task is not available to the user Downloads workflow.",
+                            }
+                        )
+                    else:
+                        valid.add(task_id)
+        except sqlite3.Error as exc:
+            raise DownloadServiceError(
+                "Failed to validate download tasks.",
+                code="storage_error",
+            ) from exc
+        return valid, errors
+
     def _retry_one(self, task_id: str) -> dict[str, Any]:
-        user_task_id = _require_user_task_id(self._service, task_id)
-        result = _retry_user_task(self._service, user_task_id)
+        result = _retry_user_task(self._service, task_id)
         task = result.get("task")
-        return dict(task) if isinstance(task, dict) else {"id": user_task_id}
+        return dict(task) if isinstance(task, dict) else {"id": task_id}
 
     def _cancel_one(self, task_id: str) -> dict[str, Any]:
-        user_task_id = _require_user_task_id(self._service, task_id)
-        result = self._service.cancel(user_task_id)
+        result = self._service.cancel(task_id)
         task = result.get("task")
-        return dict(task) if isinstance(task, dict) else {"id": user_task_id}
+        return dict(task) if isinstance(task, dict) else {"id": task_id}
 
     def _run_one(self, task_id: str) -> dict[str, Any]:
-        user_task_id = _require_user_task_id(self._service, task_id)
-        task = _run_user_task(self._service, user_task_id)
-        return self._service._task_payload(task)  # noqa: SLF001 - existing bridge payload contract.
+        """Use the existing one-task bridge guard so another worker is never bypassed."""
+        result = _user_run_one(self._service, task_id)
+        task = result.get("task")
+        return dict(task) if isinstance(task, dict) else {"id": task_id}
 
     def _remove_one(self, task_id: str) -> dict[str, Any]:
-        user_task_id = _require_user_task_id(self._service, task_id)
-        task = self._service._downloads.get_task(user_task_id)  # noqa: SLF001
+        task = self._service._downloads.get_task(task_id)  # noqa: SLF001
         if task.status not in _REMOVABLE_STATUSES:
             raise DownloadServiceError(
                 "Only failed or needs-review downloads can be removed.",
@@ -172,7 +206,7 @@ class DownloadTaskActions:
                 with conn:
                     cursor = conn.execute(
                         "DELETE FROM download_tasks WHERE id=? AND task_type=?",
-                        (user_task_id, _USER_TASK_TYPE),
+                        (task_id, _USER_TASK_TYPE),
                     )
                     if int(cursor.rowcount) != 1:
                         raise DownloadServiceError(
@@ -185,13 +219,13 @@ class DownloadTaskActions:
                 code="storage_error",
             ) from exc
 
-        self._service._audit_event(  # noqa: SLF001 - keep audit after queue-history deletion.
+        self._service._audit_event(  # noqa: SLF001 - audit remains authoritative after history removal.
             "download_task_removed",
             "success",
             f"status={task.status.value} source={task.source_id}",
-            user_task_id,
+            task_id,
         )
-        return {"id": user_task_id, "status": "removed"}
+        return {"id": task_id, "status": "removed"}
 
     @staticmethod
     def _cleanup_partial(task: Any) -> None:

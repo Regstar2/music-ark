@@ -49,8 +49,6 @@ def _saved_token(base_dir: Path | None) -> str:
     if token:
         return token
 
-    # Developer environments may still use the provider's existing env/local.properties
-    # resolution path. The token is never returned to output or logs.
     provider = YandexMusicProvider(base_dir=base_dir)
     try:
         return provider._resolve_token()  # noqa: SLF001 - existing credential boundary fallback.
@@ -119,6 +117,48 @@ def _file_summary(path: Path) -> dict[str, Any]:
     }
 
 
+def _classify_readback_identity(
+    before_ids: set[str],
+    current_ids: set[str],
+    reported_track_id: str | None,
+) -> dict[str, Any]:
+    """Require an unambiguous new track identity before declaring success."""
+    new_ids = current_ids - before_ids
+    clean_reported = str(reported_track_id or "").strip() or None
+    if clean_reported and clean_reported in new_ids:
+        return {
+            "verified": True,
+            "newTrackIds": sorted(new_ids),
+            "verifiedTrackId": clean_reported,
+            "identitySource": "stage2-track-id",
+            "ambiguous": False,
+        }
+    if len(new_ids) == 1:
+        only = next(iter(new_ids))
+        return {
+            "verified": True,
+            "newTrackIds": [only],
+            "verifiedTrackId": only,
+            "identitySource": "single-readback-difference",
+            "ambiguous": False,
+        }
+    if len(new_ids) > 1:
+        return {
+            "verified": False,
+            "newTrackIds": sorted(new_ids),
+            "verifiedTrackId": None,
+            "identitySource": "ambiguous-readback-difference",
+            "ambiguous": True,
+        }
+    return {
+        "verified": False,
+        "newTrackIds": [],
+        "verifiedTrackId": None,
+        "identitySource": "not-observed",
+        "ambiguous": False,
+    }
+
+
 def _prepare_context(args: argparse.Namespace) -> tuple[Any, Any, Path, str, str, str | None]:
     base_dir = Path(args.base_dir) if args.base_dir else None
     _require_research_opt_in(base_dir)
@@ -129,7 +169,7 @@ def _prepare_context(args: argparse.Namespace) -> tuple[Any, Any, Path, str, str
 
     file_path = Path(args.file).expanduser().resolve()
     if not file_path.is_file():
-        raise YandexUploadProtocolError(f"Selected upload file does not exist: {file_path}")
+        raise YandexUploadProtocolError("Selected upload file does not exist.")
     if file_path.stat().st_size <= 0:
         raise YandexUploadProtocolError("Selected upload file is empty.")
 
@@ -199,21 +239,19 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     )
     transfer = transport.upload_file(slot, file_path)
 
-    new_ids: set[str] = set()
     attempts_used = 0
+    readback = _classify_readback_identity(before_ids, before_ids, transfer.track_id)
     for attempt in range(1, args.readback_attempts + 1):
         attempts_used = attempt
         current = _refresh_playlist(client, args.playlist_kind, uid)
         current_ids = _playlist_track_ids(current)
-        new_ids = current_ids - before_ids
-        if transfer.track_id and transfer.track_id in current_ids:
-            new_ids.add(transfer.track_id)
-        if new_ids:
+        readback = _classify_readback_identity(before_ids, current_ids, transfer.track_id)
+        if readback["verified"] or readback["ambiguous"]:
             break
         if attempt < args.readback_attempts:
             time.sleep(args.readback_delay)
 
-    verified = bool(new_ids)
+    verified = bool(readback["verified"])
     payload = {
         "mode": "upload",
         "status": "verified" if verified else "uploaded_unverified",
@@ -234,8 +272,7 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "trackIdPresent": transfer.track_id is not None,
         },
         "readBack": {
-            "verified": verified,
-            "newTrackIds": sorted(new_ids),
+            **readback,
             "attemptsUsed": attempts_used,
         },
     }

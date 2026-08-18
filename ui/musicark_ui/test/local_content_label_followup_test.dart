@@ -8,7 +8,7 @@ import 'package:musicark_ui/local_library_page.dart';
 import 'package:musicark_ui/main.dart';
 
 void main() {
-  testWidgets('Local Library scans configured roots on every tab activation', (
+  testWidgets('Local Library activation is cache-first and Scan stays explicit', (
     tester,
   ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
@@ -20,13 +20,17 @@ void main() {
 
     await tester.tap(find.byKey(const Key('nav-local-library')));
     await tester.pumpAndSettle();
-    expect(bridge.localScanCalls, 1);
+    expect(bridge.localScanCalls, 0);
 
     await tester.tap(find.byIcon(Icons.cloud_outlined));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('nav-local-library')));
     await tester.pumpAndSettle();
-    expect(bridge.localScanCalls, 2);
+    expect(bridge.localScanCalls, 0);
+
+    await tester.tap(find.byKey(const Key('local-scan-all')));
+    await tester.pumpAndSettle();
+    expect(bridge.localScanCalls, 1);
   });
 
   testWidgets('local track ORIGINAL/CENSORED label is visible and editable', (

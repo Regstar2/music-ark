@@ -1,0 +1,42 @@
+name: Self-hosted runner smoke test
+
+on:
+  push:
+    branches:
+      - chore/self-hosted-runner-smoke
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test on local Windows runner
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+
+    steps:
+      - name: Show runner environment
+        shell: pwsh
+        run: |
+          Write-Host "Runner name: $env:RUNNER_NAME"
+          Write-Host "Runner OS: $env:RUNNER_OS"
+          Write-Host "Runner arch: $env:RUNNER_ARCH"
+          Write-Host "Computer: $env:COMPUTERNAME"
+          Write-Host "User:"
+          whoami
+          Write-Host "PowerShell:"
+          $PSVersionTable.PSVersion
+          Write-Host "Git:"
+          git --version
+
+      - name: Verify writable workspace
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "chatgpt-runner-smoke.txt"
+          "self-hosted runner is working" | Set-Content -Path $path -Encoding utf8
+          Get-Content $path
+          Remove-Item $path -Force

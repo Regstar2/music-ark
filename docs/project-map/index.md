@@ -1,6 +1,6 @@
 # MusicArk Project Map
 
-## Active desktop path — v0.9.6 Sync UI over v0.8.2 music baseline
+## Active desktop path — v0.9.7 utility UI over v0.8.2 music baseline
 
 ```text
 ui/musicark_ui/
@@ -10,6 +10,9 @@ ui/musicark_ui/
   lib/musicark_mark.dart              theme-aware vector MusicArk brand mark
   lib/account_session.dart            provider-independent Flutter account/session state + bridge observer
   lib/account_control.dart            global profile/sign-in/logout control
+  lib/settings_page.dart              responsive appearance/language/provider utility settings
+  lib/help_page.dart                  grouped offline RU/EN workflow help and Settings return path
+  lib/about_page.dart                 version/environment/diagnostics/licenses/project utility page
   lib/yandex_app.dart                 standalone Yandex entry point / workspace re-export
   lib/yandex_workspace.dart           Tracks / Playlists / explicitly liked Albums workspace and detail views
   lib/yandex_content_labels.dart      cached Yandex ORIGINAL/CENSORED mark management
@@ -39,6 +42,32 @@ src/musicark/
   download/                           authorized acquisition, metadata enrichment and queue service
   sync/                               read-only planner, staleness checks and enqueue-only Apply
 ```
+
+## Utility presentation boundary
+
+v0.9.7 changes only the Flutter presentation of Settings, Help and About. These pages remain inside the existing shell `IndexedStack` and keep the application-wide Now Playing boundary intact.
+
+```text
+Settings
+  → AppSettingsController
+  → existing typed UI preference store
+
+provider account card
+  → AccountSessionController
+  → existing Yandex session payload observer
+
+Help
+  → local generated RU/EN ARB resources
+  → no web request / no music-domain mutation
+
+About diagnostics
+  → AppInfo + OS + current UI preferences
+  → clipboard without credentials/library contents
+```
+
+Utility content is constrained to about `1180 px` on large desktops and reflows through `LayoutBuilder` on smaller windows. Help/About return to Settings through the existing shell index selection; no routing or state-management framework is introduced. The existing `MusicArkMark` is reused in About instead of adding a brand asset pipeline.
+
+The GitHub project action uses a copy-link fallback because v0.9.7 does not add a new external-URL dependency solely for one utility action.
 
 ## Sync presentation boundary
 
@@ -111,7 +140,7 @@ SQLite COUNT / search / sort / LIMIT / OFFSET over the same filtered set
 
 The Albums tab is **not** derived from album tags on tracks in `Мне нравится / Liked`. It represents albums explicitly liked by the authenticated Yandex Music account through the pinned provider client. MusicArk only reads and caches this information; v0.9.x UI milestones do not like/unlike albums or otherwise mutate Yandex Music.
 
-The album cache, Local Library root filter, Matching/Coverage/Downloads UI milestones and Sync UI v0.9.6 all reuse existing schema `1.8.4`; no database migration is required.
+The album cache, Local Library root filter and v0.9.3–v0.9.7 presentation milestones all reuse existing schema `1.8.4`; no database migration is required.
 
 ## Authoritative safety boundaries
 
@@ -123,15 +152,18 @@ Yandex playback is a user-initiated preview path. It creates/reuses a private fi
 
 Metadata Editor remains the explicit ordinary write boundary. Local Scan, root selection, Matching, Coverage, Sync, content labels and variant acceptance never rewrite user audio files. ORIGINAL/CENSORED marks never mutate Yandex provider data or alter Matching identity.
 
+v0.9.7 Help documents these boundaries but does not create new domain behavior. About diagnostics remain limited to app/backend/schema version, OS, theme and locale.
+
 ## Documentation entry points
 
-- `docs/versions/v0.9.6.md` — current Sync UI Draft milestone and verification gate;
+- `docs/versions/v0.9.7.md` — current Settings / Help / About UI Draft milestone and verification gate;
+- `docs/versions/v0.9.6.md` — Controlled Sync presentation and safety boundaries;
 - `docs/versions/v0.9.5.md` — Downloads safe deletion / bulk-action semantics;
 - `docs/versions/v0.9.4.md` — Coverage / Missing UI presentation;
 - `docs/versions/v0.9.3.md` — Matching UI presentation;
 - `docs/versions/v0.9.2.md` — Local Library multi-root query/view semantics;
 - `docs/architecture/ui-design-system.md` — shared desktop presentation rules;
-- `docs/architecture/app-shell-settings.md` — shell/account/preferences boundaries;
+- `docs/architecture/app-shell-settings.md` — shell/account/preferences/utility-page boundaries;
 - `docs/architecture/metadata-editor.md` — explicit local write boundary;
 - `docs/architecture/content-labels.md` — ORIGINAL/CENSORED app-level marks;
 - `docs/architecture/variant-acceptance.md` — reviewed recording decisions;

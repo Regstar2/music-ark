@@ -2,9 +2,39 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.6 Draft candidate
+## Unreleased — v0.9.7 Draft candidate
 
-### v0.9.6 — Sync Page UI Polish
+### v0.9.7 — Settings, Help & About UI Polish
+
+#### Added
+
+- constrained responsive desktop layouts for Settings, Help and About;
+- compact Settings auto-save status, responsive theme/language cards and a provider/account card backed by the existing account session controller;
+- grouped offline Help with eleven RU/EN topics covering provider/local libraries, Matching, Variant/censorship, Missing, Downloads, Controlled Sync, Metadata Editor, artwork/playback, settings and data safety;
+- explicit Help/About return path to Settings inside the existing shell without a new router;
+- About product card using the existing MusicArk vector mark, responsive version/environment data, diagnostics/licenses actions and a GitHub copy-link fallback;
+- utility-page layout tokens and Flutter regressions for account states, long names, Help topics/navigation, About actions and narrow desktop widths.
+
+#### Changed
+
+- the old Settings `General` card containing only the auto-save explanation is removed in favor of header status UI;
+- utility content is capped at approximately 1180 px on wide desktops and reflows through `LayoutBuilder` rather than stretching controls across the full workspace;
+- Help now documents current safety and semantic boundaries such as Identity vs Metadata/Variant, Missing vs Different Version, Apply Metadata vs Apply + Bind, ORIGINAL/CENSORED labels and Controlled Sync constraints;
+- application/backend package version advances to `0.9.7`, Flutter package to `0.9.7+1`; SQLite remains `1.8.4`.
+
+#### Safety / boundaries
+
+- Matching/Variant/Coverage truth, Download execution, Controlled Sync planner/Apply, Metadata Editor writes, provider authentication and playback semantics are unchanged;
+- Settings continues to use the existing typed UI preference store and Yandex-session-derived account state;
+- About diagnostics still exclude tokens, cookies, protected URLs and library contents;
+- no external URL dependency, SQLite migration, provider mutation, routing/state-management framework, Yandex Upload or reverse Sync is introduced.
+
+#### Verification state
+
+- source changes, RU/EN Help content and focused utility-page widget regressions are included in the v0.9.7 branch;
+- Flutter analyze/tests, Python regression suite, GitHub Actions and Windows visual smoke are recorded only after they actually run against the final PR head.
+
+## v0.9.6 — Sync Page UI Polish
 
 #### Added
 
@@ -69,7 +99,7 @@ All notable project changes are recorded here. Entries describe the current code
 #### Verification state
 
 - source changes and regression tests are included in the v0.9.5 branch;
-- GitHub Actions Python/Flutter results and Windows visual smoke are recorded only after they actually run against the final PR head.
+- GitHub Actions Python/Flutter results and Windows visual smoke must be recorded only after they actually run against the final PR head.
 
 ## v0.9.4 — Coverage / Missing UI Polish
 

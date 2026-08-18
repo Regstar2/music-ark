@@ -291,8 +291,13 @@ class _MusicArkShellState extends State<MusicArkShell> {
                         onOpenHelp: () => _selectSection(_helpIndex),
                         onOpenAbout: () => _selectSection(_aboutIndex),
                       ),
-                      const HelpPage(),
-                      AboutPage(settings: widget.settings),
+                      HelpPage(
+                        onBackToSettings: () => _selectSection(_settingsIndex),
+                      ),
+                      AboutPage(
+                        settings: widget.settings,
+                        onBackToSettings: () => _selectSection(_settingsIndex),
+                      ),
                     ],
                   ),
                 ),

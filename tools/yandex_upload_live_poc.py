@@ -1,0 +1,295 @@
+"""Explicit local runner for the experimental Yandex own-track upload PoC.
+
+The runner is intentionally separate from MusicArk Sync/UI. It never accepts a
+Yandex token on the command line, never prints the token or the dynamic upload
+URL, and requires explicit opt-in before any network mutation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from typing import Any
+
+from musicark.core.config import load_config
+from musicark.credentials import CredentialStoreError, SystemCredentialStore
+from musicark.providers.yandex_music_provider import YandexMusicProvider, YandexTokenMissingError
+from musicark.providers.yandex_upload_transport import (
+    YandexUploadProtocolError,
+    YandexUploadTransport,
+)
+
+
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def _enabled(value: str | None) -> bool:
+    return str(value or "").strip().lower() in _TRUE
+
+
+def _require_research_opt_in(base_dir: Path | None) -> None:
+    config_enabled = bool(load_config(base_dir).experimental_yandex_upload)
+    env_enabled = _enabled(os.getenv("MUSICARK_EXPERIMENTAL_YANDEX_UPLOAD"))
+    if not (config_enabled or env_enabled):
+        raise YandexUploadProtocolError(
+            "Experimental upload is disabled. Enable the MusicArk experimental Yandex upload flag first."
+        )
+
+
+def _saved_token(base_dir: Path | None) -> str:
+    """Resolve the already-saved MusicArk token without accepting CLI secrets."""
+    try:
+        token = SystemCredentialStore().get_token()
+    except CredentialStoreError:
+        token = None
+    if token:
+        return token
+
+    # Developer environments may still use the provider's existing env/local.properties
+    # resolution path. The token is never returned to output or logs.
+    provider = YandexMusicProvider(base_dir=base_dir)
+    try:
+        return provider._resolve_token()  # noqa: SLF001 - existing credential boundary fallback.
+    except YandexTokenMissingError:
+        raise YandexTokenMissingError(
+            "No saved Yandex token is available in the MusicArk credential boundary."
+        ) from None
+
+
+def _build_client(base_dir: Path | None) -> Any:
+    token = _saved_token(base_dir)
+    return YandexMusicProvider(base_dir=base_dir, token=token)._build_client()  # noqa: SLF001
+
+
+def _resolve_playlist(client: Any, kind: str) -> Any:
+    method = getattr(client, "users_playlists_list", None)
+    if not callable(method):
+        raise YandexUploadProtocolError("Yandex client cannot list user playlists.")
+    for playlist in method() or []:
+        if str(getattr(playlist, "kind", "")) == str(kind):
+            return playlist
+    raise YandexUploadProtocolError(f"User playlist kind '{kind}' was not found.")
+
+
+def _playlist_track_ids(playlist: Any) -> set[str]:
+    tracks = playlist.fetch_tracks() if hasattr(playlist, "fetch_tracks") else []
+    result: set[str] = set()
+    for item in tracks or []:
+        value = getattr(item, "id", None)
+        embedded = getattr(item, "track", None)
+        if value is None and embedded is not None:
+            value = getattr(embedded, "id", None)
+        if value is not None and str(value).strip():
+            result.add(str(value).strip())
+    return result
+
+
+def _upload_playlist_id(playlist: Any, source: str) -> str:
+    if source == "kind":
+        value = getattr(playlist, "kind", None)
+    else:
+        value = getattr(playlist, "playlist_uuid", None)
+    clean = str(value or "").strip()
+    if not clean:
+        raise YandexUploadProtocolError(
+            f"Playlist has no usable {source} identifier for the upload request."
+        )
+    return clean
+
+
+def _refresh_playlist(client: Any, kind: str, uid: str) -> Any:
+    method = getattr(client, "users_playlists", None)
+    if not callable(method):
+        raise YandexUploadProtocolError("Yandex client cannot read back a playlist.")
+    playlist = method(kind, uid)
+    if playlist is None:
+        raise YandexUploadProtocolError("Yandex playlist read-back returned no playlist.")
+    return playlist
+
+
+def _file_summary(path: Path) -> dict[str, Any]:
+    return {
+        "name": path.name,
+        "extension": path.suffix.lower(),
+        "size": path.stat().st_size,
+    }
+
+
+def _prepare_context(args: argparse.Namespace) -> tuple[Any, Any, Path, str, str, str | None]:
+    base_dir = Path(args.base_dir) if args.base_dir else None
+    _require_research_opt_in(base_dir)
+    if not args.confirm_owned_file:
+        raise YandexUploadProtocolError(
+            "Refusing to continue without --confirm-owned-file for the explicitly selected local file."
+        )
+
+    file_path = Path(args.file).expanduser().resolve()
+    if not file_path.is_file():
+        raise YandexUploadProtocolError(f"Selected upload file does not exist: {file_path}")
+    if file_path.stat().st_size <= 0:
+        raise YandexUploadProtocolError("Selected upload file is empty.")
+
+    client = _build_client(base_dir)
+    playlist = _resolve_playlist(client, args.playlist_kind)
+    uid_value = getattr(playlist, "uid", None) or getattr(client, "account_uid", None)
+    uid = str(uid_value or "").strip()
+    if not uid:
+        raise YandexUploadProtocolError("Unable to resolve the authenticated playlist owner uid.")
+
+    playlist_id = _upload_playlist_id(playlist, args.playlist_id_source)
+    visibility_value = getattr(playlist, "visibility", None)
+    visibility = str(visibility_value).strip() if visibility_value else None
+    return client, playlist, file_path, uid, playlist_id, visibility
+
+
+def _stage1_path(file_path: Path, mode: str) -> str:
+    if mode == "name":
+        return file_path.name
+    return str(file_path)
+
+
+def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.confirm_prepare:
+        raise YandexUploadProtocolError("prepare mode requires --confirm-prepare.")
+    client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
+    transport = YandexUploadTransport(client)
+    slot = transport.prepare_upload(
+        uid=uid,
+        playlist_id=playlist_id,
+        visibility=visibility,
+        path=_stage1_path(file_path, args.path_mode),
+    )
+    return {
+        "mode": "prepare",
+        "status": "upload_url_obtained",
+        "network": {"stage1Sent": True, "stage2Sent": False},
+        "playlist": {
+            "kind": str(getattr(playlist, "kind", "")),
+            "playlistIdSource": args.playlist_id_source,
+            "visibility": visibility,
+        },
+        "file": _file_summary(file_path),
+        "stage1": {
+            "uploadUrlPresent": bool(slot.upload_url),
+            "responseShape": slot.response_shape,
+        },
+    }
+
+
+def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if not args.confirm_upload:
+        raise YandexUploadProtocolError("upload mode requires --confirm-upload.")
+    if not _enabled(os.getenv("MUSICARK_YANDEX_UPLOAD_LIVE")):
+        raise YandexUploadProtocolError(
+            "Live mutation is disabled. Set MUSICARK_YANDEX_UPLOAD_LIVE=1 for this explicit local PoC."
+        )
+
+    client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
+    before_ids = _playlist_track_ids(playlist)
+    transport = YandexUploadTransport(client)
+    slot = transport.prepare_upload(
+        uid=uid,
+        playlist_id=playlist_id,
+        visibility=visibility,
+        path=_stage1_path(file_path, args.path_mode),
+    )
+    transfer = transport.upload_file(slot, file_path)
+
+    new_ids: set[str] = set()
+    attempts_used = 0
+    for attempt in range(1, args.readback_attempts + 1):
+        attempts_used = attempt
+        current = _refresh_playlist(client, args.playlist_kind, uid)
+        current_ids = _playlist_track_ids(current)
+        new_ids = current_ids - before_ids
+        if transfer.track_id and transfer.track_id in current_ids:
+            new_ids.add(transfer.track_id)
+        if new_ids:
+            break
+        if attempt < args.readback_attempts:
+            time.sleep(args.readback_delay)
+
+    verified = bool(new_ids)
+    payload = {
+        "mode": "upload",
+        "status": "verified" if verified else "uploaded_unverified",
+        "network": {"stage1Sent": True, "stage2Sent": True, "readBackSent": True},
+        "playlist": {
+            "kind": str(getattr(playlist, "kind", "")),
+            "playlistIdSource": args.playlist_id_source,
+            "visibility": visibility,
+        },
+        "file": _file_summary(file_path),
+        "stage1": {
+            "uploadUrlPresent": bool(slot.upload_url),
+            "responseShape": slot.response_shape,
+        },
+        "stage2": {
+            "httpStatus": transfer.status_code,
+            "responseShape": transfer.response_shape,
+            "trackIdPresent": transfer.track_id is not None,
+        },
+        "readBack": {
+            "verified": verified,
+            "newTrackIds": sorted(new_ids),
+            "attemptsUsed": attempts_used,
+        },
+    }
+    return payload, (0 if verified else 3)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Explicit local PoC for the recovered Yandex Music own-track upload transport."
+    )
+    parser.add_argument("mode", choices=("prepare", "upload"))
+    parser.add_argument("--base-dir", default=None)
+    parser.add_argument("--file", required=True, help="Explicit local audio file owned/authorized by the user.")
+    parser.add_argument("--playlist-kind", required=True, help="Existing user playlist kind used for read-back.")
+    parser.add_argument(
+        "--playlist-id-source",
+        choices=("uuid", "kind"),
+        default="uuid",
+        help="Which playlist identifier is sent as the recovered playlist-id field.",
+    )
+    parser.add_argument(
+        "--path-mode",
+        choices=("full", "name"),
+        default="full",
+        help="Value used for the recovered stage-one path field.",
+    )
+    parser.add_argument("--confirm-owned-file", action="store_true")
+    parser.add_argument("--confirm-prepare", action="store_true")
+    parser.add_argument("--confirm-upload", action="store_true")
+    parser.add_argument("--readback-attempts", type=int, default=15)
+    parser.add_argument("--readback-delay", type=float, default=2.0)
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.readback_attempts < 1 or args.readback_attempts > 60:
+        raise SystemExit("--readback-attempts must be between 1 and 60")
+    if args.readback_delay < 0 or args.readback_delay > 10:
+        raise SystemExit("--readback-delay must be between 0 and 10 seconds")
+
+    try:
+        if args.mode == "prepare":
+            payload = run_prepare(args)
+            code = 0
+        else:
+            payload, code = run_upload(args)
+    except Exception as exc:  # noqa: BLE001 - CLI boundary returns a safe error.
+        print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))
+        return 2
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,15 +1,16 @@
 """Isolated experimental transport for the recovered Yandex Music UGC upload flow.
 
-This module is intentionally not wired into provider capabilities, Sync, or the UI.
-It exists only for explicit local proof-of-concept runs while production upload
-support remains disabled.
+Stage two is recovered with high confidence. Stage one remains intentionally
+fail-closed in production/research runtime because the official desktop client
+uses a non-public runtime prefix/authorization profile that has not been
+legitimately reproduced through MusicArk's existing credential boundary.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import requests
@@ -19,6 +20,17 @@ from musicark.providers.yandex_music_provider import YandexMusicError
 
 class YandexUploadProtocolError(YandexMusicError):
     """Raised when the recovered upload protocol cannot be followed safely."""
+
+
+class YandexUploadStage1UnavailableError(YandexUploadProtocolError):
+    """Raised when no verified public stage-one request profile is available."""
+
+
+class YandexUploadStage1Requester(Protocol):
+    """Injectable stage-one boundary used only after a profile is independently verified."""
+
+    def post_upload_url(self, params: dict[str, str]) -> Any:
+        """Return the decoded response from the recovered loader/upload-url request."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,17 +51,41 @@ class YandexUploadTransferResult:
 
 
 class YandexUploadTransport:
-    """Two-stage transport recovered from the official desktop client.
+    """Recovered two-stage upload transport with a fail-closed stage one.
 
-    Stage one uses the authenticated Yandex Music API request boundary. Stage
-    two deliberately uses a fresh HTTP request without the Music API OAuth
-    headers because the official client excludes its normal headers for the
-    dynamic upload URL.
+    A stage-one requester must be injected explicitly. MusicArk deliberately has
+    no default requester because the previously assumed ordinary
+    ``api.music.yandex.net`` / Android-oriented ``yandex-music`` profile failed
+    live and the official desktop runtime uses an opaque custom prefix plus a
+    private token/configuration boundary. This class therefore cannot silently
+    fall back to the normal provider client.
+
+    Stage two uses a fresh HTTP request without Music API OAuth/session headers,
+    matching the recovered ``excludeHeaders`` / ``withoutHeaders`` behavior.
     """
 
-    def __init__(self, client: Any, *, transfer_timeout_seconds: float = 120.0) -> None:
-        self._client = client
+    def __init__(
+        self,
+        stage1_requester: YandexUploadStage1Requester | None = None,
+        *,
+        transfer_timeout_seconds: float = 120.0,
+    ) -> None:
+        self._stage1_requester = stage1_requester
         self._transfer_timeout_seconds = float(transfer_timeout_seconds)
+
+    @property
+    def stage1_available(self) -> bool:
+        """Whether an explicitly verified stage-one requester was supplied."""
+        return self._stage1_requester is not None
+
+    def require_stage1_profile(self) -> None:
+        """Fail before an upload mutation when the official stage-one profile is unavailable."""
+        if self._stage1_requester is None:
+            raise YandexUploadStage1UnavailableError(
+                "Yandex single-track upload stage one is BLOCKED: the official desktop request "
+                "uses a non-public runtime prefix/authorization profile that is not available "
+                "through MusicArk's existing credential boundary. No upload request was sent."
+            )
 
     @staticmethod
     def _shape(value: Any) -> dict[str, Any]:
@@ -96,9 +132,7 @@ class YandexUploadTransport:
             parsed = urlparse(clean)
             if parsed.scheme in {"http", "https"} and parsed.netloc:
                 return clean
-        raise YandexUploadProtocolError(
-            "loader/upload-url returned no usable HTTP(S) upload URL."
-        )
+        raise YandexUploadProtocolError("loader/upload-url returned no usable HTTP(S) upload URL.")
 
     @staticmethod
     def _extract_track_id(payload: Any) -> str | None:
@@ -117,6 +151,27 @@ class YandexUploadTransport:
                     return str(value).strip()
         return None
 
+    @staticmethod
+    def build_prepare_params(
+        *,
+        uid: str | int,
+        playlist_id: str | int,
+        path: str,
+        visibility: str | None = None,
+    ) -> dict[str, str]:
+        """Build only the statically recovered stage-one query contract."""
+        clean_path = str(path).strip()
+        if not clean_path:
+            raise YandexUploadProtocolError("Upload path is empty.")
+        params = {
+            "uid": str(uid),
+            "playlist-id": str(playlist_id),
+            "path": clean_path,
+        }
+        if visibility:
+            params["visibility"] = str(visibility)
+        return params
+
     def prepare_upload(
         self,
         *,
@@ -125,28 +180,16 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> YandexUploadSlot:
-        """Request a dynamic upload URL through the authenticated Music API."""
-        clean_path = str(path).strip()
-        if not clean_path:
-            raise YandexUploadProtocolError("Upload path is empty.")
-
-        params: dict[str, str] = {
-            "uid": str(uid),
-            "playlist-id": str(playlist_id),
-            "path": clean_path,
-        }
-        if visibility:
-            params["visibility"] = str(visibility)
-
-        base_url = str(getattr(self._client, "base_url", "")).rstrip("/")
-        request = getattr(self._client, "request", None)
-        post = getattr(request, "post", None)
-        if not base_url or not callable(post):
-            raise YandexUploadProtocolError(
-                "Authenticated Yandex client does not expose the required request boundary."
-            )
-
-        payload = post(f"{base_url}/loader/upload-url", params=params)
+        """Request a dynamic upload URL only through an injected verified requester."""
+        params = self.build_prepare_params(
+            uid=uid,
+            playlist_id=playlist_id,
+            path=path,
+            visibility=visibility,
+        )
+        self.require_stage1_profile()
+        assert self._stage1_requester is not None
+        payload = self._stage1_requester.post_upload_url(params)
         return YandexUploadSlot(
             upload_url=self._extract_upload_url(payload),
             response_shape=self._shape(payload),

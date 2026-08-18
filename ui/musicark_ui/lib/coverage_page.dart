@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_localizations_ext.dart';
 import 'coverage_bridge.dart';
 import 'download_bridge.dart';
 import 'matching_bridge.dart';
 
 part 'coverage_page_view.dart';
 part 'coverage_widgets.dart';
+part 'coverage_track_widgets.dart';
+part 'coverage_support_widgets.dart';
 
 class CoveragePage extends StatefulWidget {
   const CoveragePage({
@@ -50,6 +53,7 @@ class _CoveragePageState extends State<CoveragePage> {
   int _total = 0;
   bool _loading = true;
   bool _matching = false;
+  bool _analysisExpanded = false;
   String? _error;
 
   int get _pageLimit => _pageSize;
@@ -165,7 +169,9 @@ class _CoveragePageState extends State<CoveragePage> {
       }
 
       setState(() {
-        if (refreshSummary) _summary = Map<String, dynamic>.from(results.first);
+        if (refreshSummary) {
+          _summary = Map<String, dynamic>.from(results.first);
+        }
         _items = items;
         _total = total;
         if (clearSelection) _selected.clear();
@@ -187,6 +193,7 @@ class _CoveragePageState extends State<CoveragePage> {
       _offset = 0;
       _selected.clear();
       if (status != 'covered') _variantStatus = '';
+      if (status != 'missing') _userAction = '';
     });
     _reloadTracks(refreshSummary: false);
   }
@@ -314,21 +321,25 @@ class _CoveragePageState extends State<CoveragePage> {
       }
       await _reloadTracks(clearSelection: true);
       if (!mounted) return;
+      final l10n = context.l10n;
       final message = finalStatus == 'completed'
-          ? 'Трек скачан и добавлен в локальную библиотеку.'
+          ? l10n.coverageDownloadCompleted
           : finalStatus == 'failed' || finalStatus == 'needs_review'
-              ? 'Загрузка завершилась с ошибкой. Подробности — в «Загрузках».'
-              : 'Загрузка поставлена в очередь.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+              ? l10n.coverageDownloadFailed
+              : l10n.coverageDownloadQueued;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } on DownloadBridgeException catch (error) {
       if (!mounted) return;
       setState(() => _error = error.message);
       if (error.code == 'target_required' && widget.onOpenDownloads != null) {
+        final l10n = context.l10n;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Сначала выберите папку для скачивания.'),
+            content: Text(l10n.coverageDownloadTargetRequired),
             action: SnackBarAction(
-              label: 'Выбрать',
+              label: l10n.coverageChooseFolder,
               onPressed: widget.onOpenDownloads!,
             ),
           ),

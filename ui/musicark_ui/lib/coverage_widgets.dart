@@ -1,191 +1,289 @@
 part of 'coverage_page.dart';
 
 class _Summary extends StatelessWidget {
-  const _Summary({required this.summary});
+  const _Summary({
+    required this.summary,
+    required this.expanded,
+    required this.onToggleDetails,
+  });
+
   final Map<String, dynamic> summary;
+  final bool expanded;
+  final VoidCallback onToggleDetails;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final scheme = Theme.of(context).colorScheme;
+    final coverage = _asDouble(summary['coveragePercent']).clamp(0, 100) / 100;
     final variants = summary['variantVerification'] is Map
         ? Map<String, dynamic>.from(summary['variantVerification'] as Map)
         : const <String, dynamic>{};
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
       child: Card(
         key: const Key('coverage-summary'),
         child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Wrap(
-            spacing: 24,
-            runSpacing: 8,
-            children: [
-              Text('Yandex: ${_asInt(summary['total'])}'),
-              Text('Локально найдено: ${_asInt(summary['covered'])}'),
-              Text('Отсутствует: ${_asInt(summary['missing'])}'),
-              Text('Требует проверки: ${_asInt(summary['needsReview'])}'),
-              Text('Не анализировалось: ${_asInt(summary['notAnalyzed'])}'),
-              Text('Local coverage: ${_asDouble(summary['coveragePercent']).toStringAsFixed(1)}%'),
-              Text('Matching analyzed: ${_asDouble(summary['matchingAnalyzedPercent']).toStringAsFixed(1)}%'),
-              Text(
-                'Variant — Same ${_asInt(variants['same'])}, '
-                'Altered ${_asInt(variants['altered'])}, '
-                'Different ${_asInt(variants['differentVersion'])}, '
-                'Uncertain ${_asInt(variants['uncertain'])}, '
-                'Not checked ${_asInt(variants['notChecked'])}',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({super.key, required this.selected, required this.label, required this.onSelected});
-  final bool selected;
-  final String label;
-  final VoidCallback onSelected;
-
-  @override
-  Widget build(BuildContext context) => ChoiceChip(
-        selected: selected,
-        label: Text(label),
-        onSelected: (_) => onSelected(),
-      );
-}
-
-class _CoverageRow extends StatelessWidget {
-  const _CoverageRow({
-    super.key,
-    required this.item,
-    required this.selected,
-    required this.onSelectionChanged,
-    required this.onOpen,
-    required this.onWanted,
-    required this.onIgnored,
-    required this.onReset,
-    required this.onDownload,
-    required this.onOpenMatching,
-  });
-
-  final Map<String, dynamic> item;
-  final bool selected;
-  final ValueChanged<bool>? onSelectionChanged;
-  final VoidCallback onOpen;
-  final VoidCallback? onWanted;
-  final VoidCallback? onIgnored;
-  final VoidCallback? onReset;
-  final VoidCallback? onDownload;
-  final VoidCallback? onOpenMatching;
-
-  @override
-  Widget build(BuildContext context) {
-    final provider = item['provider'] is Map
-        ? Map<String, dynamic>.from(item['provider'] as Map)
-        : const <String, dynamic>{};
-    final artists = provider['artists'] is List ? (provider['artists'] as List).join(', ') : '';
-    final title = (provider['title'] ?? '').toString();
-    final album = (provider['album_title'] ?? provider['album'] ?? '').toString();
-    final status = (item['coverageStatus'] ?? '').toString();
-    final action = (item['userAction'] ?? 'unreviewed').toString();
-    final variant = item['variantStatus']?.toString();
-    final collections = _maps(item['collections']);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.all(16),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final coverageWidth = constraints.maxWidth < 240
+                  ? constraints.maxWidth
+                  : 240.0;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (onSelectionChanged != null)
-                    Checkbox(
-                      key: ValueKey('coverage-select-${item['externalId']}'),
-                      value: selected,
-                      onChanged: (value) => onSelectionChanged!(value ?? false),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: coverageWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.coverageSummaryTitle,
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${_asDouble(summary['coveragePercent']).toStringAsFixed(1)}%',
+                              key: const Key('coverage-summary-percent'),
+                              style: Theme.of(context).textTheme.headlineSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: coverage,
+                                minHeight: 7,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _SummaryMetric(
+                        label: l10n.coverageSummaryTotal,
+                        value: _asInt(summary['total']),
+                        background: scheme.surfaceContainerHighest,
+                        foreground: scheme.onSurface,
+                      ),
+                      _SummaryMetric(
+                        label: l10n.coverageSummaryCovered,
+                        value: _asInt(summary['covered']),
+                        background: scheme.secondaryContainer,
+                        foreground: scheme.onSecondaryContainer,
+                      ),
+                      _SummaryMetric(
+                        label: l10n.coverageSummaryMissing,
+                        value: _asInt(summary['missing']),
+                        background: scheme.errorContainer,
+                        foreground: scheme.onErrorContainer,
+                      ),
+                      _SummaryMetric(
+                        label: l10n.coverageSummaryNotAnalyzed,
+                        value: _asInt(summary['notAnalyzed']),
+                        background: scheme.tertiaryContainer,
+                        foreground: scheme.onTertiaryContainer,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const Key('coverage-analysis-toggle'),
+                      onPressed: onToggleDetails,
+                      icon: Icon(
+                        expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 18,
+                      ),
+                      label: Text(
+                        expanded
+                            ? l10n.coverageHideAnalysisDetails
+                            : l10n.coverageShowAnalysisDetails,
+                      ),
                     ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  ),
+                  if (expanded) ...[
+                    const Divider(),
+                    Wrap(
+                      key: const Key('coverage-analysis-details'),
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        Text('$artists — $title', style: Theme.of(context).textTheme.titleMedium),
-                        if (album.isNotEmpty) Text(album),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: collections
-                              .map((collection) => Text(
-                                    collection['id'] == 'liked'
-                                        ? '♥ Мне нравится'
-                                        : '▤ ${collection['title']}',
-                                  ))
-                              .toList(),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.coverageMatchingAnalyzed}: ${_asDouble(summary['matchingAnalyzedPercent']).toStringAsFixed(1)}%',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.coverageNeedsReview}: ${_asInt(summary['needsReview'])}',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.matchingVariantSame}: ${_asInt(variants['same'])}',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.matchingVariantAltered}: ${_asInt(variants['altered'])}',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.matchingVariantDifferent}: ${_asInt(variants['differentVersion'])}',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.matchingVariantUncertain}: ${_asInt(variants['uncertain'])}',
+                        ),
+                        _AnalysisPill(
+                          label:
+                              '${l10n.matchingVariantNotChecked}: ${_asInt(variants['notChecked'])}',
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 190),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _StatusLabel(status: status),
-                        if (status == 'covered' && variant != null) _VariantLabel(status: variant),
-                        if ((status == 'needs_review' || status == 'not_analyzed') && onOpenMatching != null)
-                          TextButton(
-                            key: ValueKey('coverage-open-matching-${item['externalId']}'),
-                            onPressed: onOpenMatching,
-                            child: const Text('Открыть в сопоставлении'),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (onWanted != null) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    if (onDownload != null)
-                      FilledButton.icon(
-                        key: ValueKey('coverage-download-${item['externalId']}'),
-                        onPressed: onDownload,
-                        icon: const Icon(Icons.download, size: 18),
-                        label: const Text('Скачать'),
-                      ),
-                    TextButton(
-                      key: ValueKey('coverage-wanted-${item['externalId']}'),
-                      onPressed: action == 'wanted' ? null : onWanted,
-                      child: const Text('Нужен'),
-                    ),
-                    TextButton(
-                      key: ValueKey('coverage-ignored-${item['externalId']}'),
-                      onPressed: action == 'ignored' ? null : onIgnored,
-                      child: const Text('Игнорировать'),
-                    ),
-                    if (action != 'unreviewed')
-                      IconButton(
-                        key: ValueKey('coverage-reset-${item['externalId']}'),
-                        tooltip: 'Сбросить решение',
-                        onPressed: onReset,
-                        icon: const Icon(Icons.undo),
-                      ),
                   ],
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({
+    required this.label,
+    required this.value,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final int value;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 142,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$value',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: foreground,
+                  ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _AnalysisPill extends StatelessWidget {
+  const _AnalysisPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+    );
+  }
+}
+
+class _StatusTab extends StatelessWidget {
+  const _StatusTab({
+    super.key,
+    required this.selected,
+    required this.label,
+    required this.count,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String label;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final background = selected ? scheme.primaryContainer : scheme.surface;
+    final foreground = selected ? scheme.onPrimaryContainer : scheme.onSurface;
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: foreground,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? scheme.surfaceContainerLow
+                        : scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -193,216 +291,3 @@ class _CoverageRow extends StatelessWidget {
   }
 }
 
-class _StatusLabel extends StatelessWidget {
-  const _StatusLabel({required this.status});
-  final String status;
-  @override
-  Widget build(BuildContext context) {
-    final label = switch (status) {
-      'covered' => 'Локально найдено',
-      'missing' => 'Missing',
-      'needs_review' => 'Требует проверки',
-      'not_analyzed' => 'Не анализировалось',
-      _ => status,
-    };
-    return Text(label, style: Theme.of(context).textTheme.labelLarge);
-  }
-}
-
-class _VariantLabel extends StatelessWidget {
-  const _VariantLabel({required this.status});
-  final String status;
-  @override
-  Widget build(BuildContext context) {
-    final label = switch (status) {
-      'same' => 'Та же версия',
-      'altered' => 'Изменённая запись',
-      'different_version' => 'Другая версия локально',
-      'uncertain' => 'Версия требует проверки',
-      'not_checked' => 'Версия не проверена',
-      _ => status,
-    };
-    return Padding(padding: const EdgeInsets.only(top: 4), child: Text(label));
-  }
-}
-
-class _BulkBar extends StatelessWidget {
-  const _BulkBar({required this.count, required this.onWanted, required this.onIgnored, required this.onReset});
-  final int count;
-  final VoidCallback onWanted;
-  final VoidCallback onIgnored;
-  final VoidCallback onReset;
-
-  @override
-  Widget build(BuildContext context) => Material(
-        key: const Key('coverage-bulk-bar'),
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-          child: Row(
-            children: [
-              Text('$count выбрано'),
-              const SizedBox(width: 16),
-              TextButton(key: const Key('coverage-bulk-wanted'), onPressed: onWanted, child: const Text('Нужны')),
-              TextButton(key: const Key('coverage-bulk-ignored'), onPressed: onIgnored, child: const Text('Игнорировать')),
-              TextButton(key: const Key('coverage-bulk-reset'), onPressed: onReset, child: const Text('Сбросить')),
-            ],
-          ),
-        ),
-      );
-}
-
-class _Pagination extends StatelessWidget {
-  const _Pagination({
-    required this.offset,
-    required this.limit,
-    required this.total,
-    required this.onPrevious,
-    required this.onNext,
-  });
-  final int offset;
-  final int limit;
-  final int total;
-  final VoidCallback? onPrevious;
-  final VoidCallback? onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    if (total == 0) return const SizedBox(height: 8);
-    final start = offset + 1;
-    final end = (offset + limit).clamp(0, total);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text('$start–$end из $total'),
-          IconButton(key: const Key('coverage-page-previous'), onPressed: onPrevious, icon: const Icon(Icons.chevron_left)),
-          IconButton(key: const Key('coverage-page-next'), onPressed: onNext, icon: const Icon(Icons.chevron_right)),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.title, this.subtitle, this.actionLabel, this.onAction, this.secondaryAction});
-  final String title;
-  final String? subtitle;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-  final VoidCallback? secondaryAction;
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, textAlign: TextAlign.center),
-              if (subtitle != null) ...[
-                const SizedBox(height: 8),
-                Text(subtitle!, textAlign: TextAlign.center),
-              ],
-              if (actionLabel != null) ...[
-                const SizedBox(height: 12),
-                FilledButton(key: const Key('coverage-run-matching'), onPressed: onAction, child: Text(actionLabel!)),
-              ],
-              if (secondaryAction != null) ...[
-                const SizedBox(height: 4),
-                TextButton(onPressed: secondaryAction, child: const Text('Открыть «Сопоставление»')),
-              ],
-            ],
-          ),
-        ),
-      );
-}
-
-class _CoverageDetailsDialog extends StatelessWidget {
-  const _CoverageDetailsDialog({required this.payload, required this.onOpenMatching});
-  final Map<String, dynamic> payload;
-  final VoidCallback? onOpenMatching;
-
-  @override
-  Widget build(BuildContext context) {
-    final track = payload['track'] is Map
-        ? Map<String, dynamic>.from(payload['track'] as Map)
-        : const <String, dynamic>{};
-    final provider = track['provider'] is Map
-        ? Map<String, dynamic>.from(track['provider'] as Map)
-        : const <String, dynamic>{};
-    final matching = payload['matching'] is Map
-        ? Map<String, dynamic>.from(payload['matching'] as Map)
-        : null;
-    final variant = payload['variant'] is Map
-        ? Map<String, dynamic>.from(payload['variant'] as Map)
-        : const <String, dynamic>{};
-    final artists = provider['artists'] is List ? (provider['artists'] as List).join(', ') : '';
-    final collections = _maps(track['collections']);
-    final coverageStatus = (track['coverageStatus'] ?? '').toString();
-
-    return AlertDialog(
-      key: const Key('coverage-detail'),
-      title: Text('${provider['title'] ?? ''}'),
-      content: SizedBox(
-        width: 680,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Yandex', style: Theme.of(context).textTheme.titleMedium),
-              Text('Исполнители: $artists'),
-              Text('Альбом: ${provider['album_title'] ?? provider['album'] ?? ''}'),
-              Text('Длительность: ${provider['duration_seconds'] ?? '—'}'),
-              Text('External ID: ${track['externalId'] ?? ''}'),
-              Text('Коллекции: ${collections.map((item) => item['title']).join(', ')}'),
-              const Divider(),
-              Text('Matching', style: Theme.of(context).textTheme.titleMedium),
-              Text('Coverage: $coverageStatus'),
-              Text('Status: ${matching?['status'] ?? 'NOT ANALYZED'}'),
-              Text('Reason: ${matching?['reason'] ?? track['reason'] ?? '—'}'),
-              if (matching?['confidence'] != null) Text('Confidence: ${matching!['confidence']}'),
-              const Divider(),
-              Text('Variant', style: Theme.of(context).textTheme.titleMedium),
-              Text(
-                variant['applicable'] == true
-                    ? 'Status: ${variant['status'] ?? 'not_checked'}'
-                    : 'N/A — no accepted local identity',
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        if ((coverageStatus == 'needs_review' || coverageStatus == 'not_analyzed') && onOpenMatching != null)
-          TextButton(
-            key: const Key('coverage-detail-open-matching'),
-            onPressed: () {
-              Navigator.of(context).pop();
-              onOpenMatching!();
-            },
-            child: const Text('Открыть в сопоставлении'),
-          ),
-        FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть')),
-      ],
-    );
-  }
-}
-
-List<Map<String, dynamic>> _maps(Object? value) {
-  if (value is! List) return <Map<String, dynamic>>[];
-  return value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
-}
-
-int _asInt(Object? value) {
-  if (value is int) return value;
-  if (value is num) return value.toInt();
-  return int.tryParse(value?.toString() ?? '') ?? 0;
-}
-
-double _asDouble(Object? value) {
-  if (value is double) return value;
-  if (value is num) return value.toDouble();
-  return double.tryParse(value?.toString() ?? '') ?? 0;
-}

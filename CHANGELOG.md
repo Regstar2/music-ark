@@ -2,9 +2,40 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — v0.9.3 Draft candidate
+## Unreleased — v0.9.4 Draft candidate
 
-### v0.9.3 — Matching UI Redesign
+### v0.9.4 — Coverage / Missing UI Polish
+
+#### Added
+
+- compact Coverage summary with local coverage progress, four primary metrics and collapsible Matching/Variant analysis details;
+- counted Coverage status tabs, master Select All with indeterminate partial-selection state and localized list result counts;
+- provider-artwork thumbnails with theme-aware local fallback that does not introduce a new cache or dependency;
+- RU/EN localization for the Coverage workspace, actions, empty states, pagination feedback and details dialog;
+- Flutter regression coverage for summary details, tabs, selection, artwork fallback, single-page pagination hiding, English localization and compact desktop widths.
+
+#### Changed
+
+- Coverage now prioritizes track rows over the previous long technical summary string and separate ChoiceChip/action rows;
+- Search is the primary wide filter, Decision is shown only for Missing, and Variant filtering remains scoped to Covered results;
+- track rows now render title first, artist/album second, collection badges, Coverage/Variant status badges and responsive action hierarchy;
+- `Скачать / Download` remains the primary Missing action while Wanted, Ignore and Reset retain their existing triage semantics;
+- pagination is hidden when the current filtered result fits within the existing 100-item page size;
+- application/backend/Flutter package version advances to `0.9.4`; SQLite remains `1.8.4`.
+
+#### Safety / boundaries
+
+- Coverage calculation, Matching/Variant algorithms, Download execution, Controlled Sync and Metadata Editor semantics are unchanged;
+- direct Download does not mutate `userAction`, and bulk selection still performs only triage actions rather than bulk-download;
+- artwork uses the already persisted `ProviderTrack.artwork_url`; Flutter does not construct Yandex URLs or receive provider credentials;
+- no SQLite migration or new dependency is introduced by v0.9.4.
+
+#### Verification state
+
+- source-level structural checks and RU/EN ARB JSON/key-parity checks were performed while preparing the branch;
+- Flutter analyze/tests, Python regression suite, Windows build and Windows visual smoke must be recorded only after they actually run against the v0.9.4 PR head.
+
+## v0.9.3 — Matching UI Redesign
 
 #### Added
 
@@ -100,7 +131,7 @@ All notable project changes are recorded here. Entries describe the current code
 - opened playlists and albums use detail views with explicit back navigation instead of returning to a nested sidebar;
 - Yandex search, sort and version-label controls now reflow responsively instead of relying on the old approximately `920 px` forced workspace with horizontal scrolling;
 - track rows use a table-like desktop layout when wide and a compact responsive layout when narrow;
-- the normal provider status `available` is no longer rendered on every row; unavailable tracks remain distinguishable and have playback disabled with an explanatory tooltip;
+- the normal provider status `available` is no longer rendered on every track. unavailable tracks remain distinguishable and have playback disabled with an explanatory tooltip;
 - the general ORIGINAL/CENSORED manager moved into the collection toolbar while inline chips and row editing remain available;
 - injected Flutter test applications now use isolated default settings and do not launch the production content-label subprocess unless that dependency is explicitly supplied;
 - the global sidebar received a compact branded presentation and consistent selected/hover surfaces;

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/coverage_bridge.dart';
 import 'package:musicark_ui/coverage_page.dart';
 import 'package:musicark_ui/download_bridge.dart';
+import 'package:musicark_ui/l10n/app_localizations.dart';
 import 'package:musicark_ui/main.dart';
 import 'package:musicark_ui/matching_bridge.dart';
 import 'package:musicark_ui/musicark_bridge.dart';
@@ -15,11 +17,20 @@ void main() {
     FakeMatchingBridge? matching,
     FakeDownloadBridge? downloads,
     VoidCallback? onOpenMatching,
+    Locale locale = const Locale('ru'),
   }) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
+        locale: locale,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: CoveragePage(
             bridge: coverage ?? FakeCoverageBridge(),
@@ -35,7 +46,11 @@ void main() {
 
   testWidgets('main navigation opens Coverage page', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1000));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.binding.platformDispatcher.localeTestValue = const Locale('ru');
+    addTearDown(() {
+      tester.binding.setSurfaceSize(null);
+      tester.binding.platformDispatcher.clearLocaleTestValue();
+    });
     final coverage = FakeCoverageBridge();
     await tester.pumpWidget(
       MusicArkDesktopApp(
@@ -54,24 +69,37 @@ void main() {
     expect(coverage.summaryCalls, greaterThan(0));
   });
 
-  testWidgets('summary renders and Missing is the default filter', (tester) async {
+  testWidgets('summary is compact and analysis details can be toggled', (
+    tester,
+  ) async {
     await page(tester);
 
     expect(find.byKey(const Key('coverage-summary')), findsOneWidget);
-    expect(find.textContaining('Yandex: 4'), findsOneWidget);
-    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
-    expect(find.byKey(const ValueKey('coverage-row-202')), findsNothing);
+    expect(find.text('Локальное покрытие'), findsOneWidget);
+    expect(find.text('25.0%'), findsOneWidget);
+    expect(find.byKey(const Key('coverage-analysis-details')), findsNothing);
 
-    final chip = tester.widget<ChoiceChip>(
-      find.descendant(
-        of: find.byKey(const Key('coverage-filter-missing')),
-        matching: find.byType(ChoiceChip),
-      ),
-    );
-    expect(chip.selected, isTrue);
+    await tester.tap(find.byKey(const Key('coverage-analysis-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('coverage-analysis-details')), findsOneWidget);
+    expect(find.textContaining('Matching проанализировано'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('coverage-analysis-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('coverage-analysis-details')), findsNothing);
   });
 
-  testWidgets('primary filters keep Review, Not Analyzed, and Covered distinct', (
+  testWidgets('Missing is the default counted status tab', (tester) async {
+    await page(tester);
+
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
+    expect(find.byKey(const ValueKey('coverage-row-202')), findsNothing);
+    expect(find.byKey(const Key('coverage-filter-missing')), findsOneWidget);
+    expect(find.text('Отсутствуют'), findsOneWidget);
+    expect(find.text('1'), findsWidgets);
+  });
+
+  testWidgets('primary tabs keep Review, Not Analyzed, and Covered distinct', (
     tester,
   ) async {
     await page(tester);
@@ -84,16 +112,16 @@ void main() {
     await tester.tap(find.byKey(const Key('coverage-filter-not-analyzed')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('coverage-row-204')), findsOneWidget);
-    expect(find.text('Не анализировалось'), findsWidgets);
+    expect(find.text('Не анализировано'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('coverage-filter-covered')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('coverage-row-201')), findsOneWidget);
-    expect(find.text('Другая версия локально'), findsOneWidget);
-    expect(find.text('Missing'), findsNothing);
+    expect(find.text('Другая версия'), findsOneWidget);
+    expect(find.text('Отсутствует'), findsNothing);
   });
 
-  testWidgets('collection selector scopes the page and exposes playlist order sort', (
+  testWidgets('collection selector scopes page and exposes playlist order sort', (
     tester,
   ) async {
     await page(tester);
@@ -104,15 +132,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('coverage-row-203')), findsOneWidget);
-    expect(find.textContaining('Yandex: 2'), findsOneWidget);
-
     final sort = tester.widget<DropdownButtonFormField<String>>(
       find.byKey(const Key('coverage-sort')),
     );
     expect(sort.initialValue, 'position');
   });
 
-  testWidgets('search covers provider metadata and collection names', (tester) async {
+  testWidgets('search covers provider metadata and collection names', (
+    tester,
+  ) async {
     await page(tester);
 
     await tester.enterText(
@@ -133,7 +161,9 @@ void main() {
     expect(find.text('Нет треков для выбранных фильтров.'), findsOneWidget);
   });
 
-  testWidgets('wanted/ignored triage persists through bridge reloads', (tester) async {
+  testWidgets('wanted/ignored triage persists through bridge reloads', (
+    tester,
+  ) async {
     final coverage = FakeCoverageBridge();
     await page(tester, coverage: coverage);
 
@@ -152,28 +182,32 @@ void main() {
     expect(coverage.items.first['userAction'], 'unreviewed');
   });
 
-  testWidgets('missing track can be downloaded in one click without mutating triage action', (
-    tester,
-  ) async {
-    final coverage = FakeCoverageBridge();
-    final downloads = FakeDownloadBridge();
-    await page(tester, coverage: coverage, downloads: downloads);
+  testWidgets(
+    'missing track can be downloaded in one click without mutating triage action',
+    (tester) async {
+      final coverage = FakeCoverageBridge();
+      final downloads = FakeDownloadBridge();
+      await page(tester, coverage: coverage, downloads: downloads);
 
-    expect(coverage.items.first['userAction'], 'unreviewed');
-    expect(find.byKey(const ValueKey('coverage-download-203')), findsOneWidget);
-    expect(find.text('Скачать'), findsOneWidget);
+      expect(coverage.items.first['userAction'], 'unreviewed');
+      expect(
+        find.byKey(const ValueKey('coverage-download-203')),
+        findsOneWidget,
+      );
+      expect(find.text('Скачать'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('coverage-download-203')));
+      await tester.pumpAndSettle();
 
-    expect(coverage.items.first['userAction'], 'unreviewed');
-    expect(coverage.setActionCalls, 0);
-    expect(downloads.enqueueCalls, 1);
-    expect(downloads.lastEnqueuedId, '203');
-    expect(downloads.runTaskCalls, 1);
-    expect(downloads.lastRunTaskId, 'direct-203');
-    expect(downloads.runCalled, isFalse);
-  });
+      expect(coverage.items.first['userAction'], 'unreviewed');
+      expect(coverage.setActionCalls, 0);
+      expect(downloads.enqueueCalls, 1);
+      expect(downloads.lastEnqueuedId, '203');
+      expect(downloads.runTaskCalls, 1);
+      expect(downloads.lastRunTaskId, 'direct-203');
+      expect(downloads.runCalled, isFalse);
+    },
+  );
 
   testWidgets('direct download does not empty an unreviewed Missing filter', (
     tester,
@@ -197,6 +231,57 @@ void main() {
     expect(downloads.runCalled, isFalse);
   });
 
+  testWidgets('master checkbox selects all filtered Missing results', (
+    tester,
+  ) async {
+    await page(tester);
+
+    await tester.tap(find.byKey(const Key('coverage-select-all')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('coverage-bulk-bar')), findsOneWidget);
+    final master = tester.widget<Checkbox>(
+      find.byKey(const Key('coverage-select-all')),
+    );
+    expect(master.value, isTrue);
+  });
+
+  testWidgets('master checkbox becomes indeterminate after partial selection', (
+    tester,
+  ) async {
+    final coverage = FakeCoverageBridge();
+    coverage.items.add({
+      'providerId': 'yandex_music',
+      'externalId': '205',
+      'provider': {
+        'title': 'Another Missing Song',
+        'artists': ['Missing Artist'],
+        'album_title': 'Unknown',
+        'duration_seconds': 210,
+      },
+      'collections': [
+        {'id': 'liked', 'title': 'Мне нравится', 'position': 8},
+      ],
+      'coverageStatus': 'missing',
+      'matchingStatus': 'unmatched',
+      'confidence': 0.0,
+      'reason': 'no_candidates',
+      'variantStatus': null,
+      'userAction': 'unreviewed',
+      'local': null,
+    });
+    await page(tester, coverage: coverage);
+
+    await tester.tap(find.byKey(const ValueKey('coverage-select-203')));
+    await tester.pump();
+
+    final master = tester.widget<Checkbox>(
+      find.byKey(const Key('coverage-select-all')),
+    );
+    expect(master.value, isNull);
+    expect(find.byKey(const Key('coverage-bulk-bar')), findsOneWidget);
+  });
+
   testWidgets('bulk selection applies wanted action without download control', (
     tester,
   ) async {
@@ -214,6 +299,18 @@ void main() {
     expect(find.textContaining('Скачать'), findsNothing);
   });
 
+  testWidgets('missing artwork uses a local fallback without network', (
+    tester,
+  ) async {
+    await page(tester);
+
+    expect(
+      find.byKey(const ValueKey('coverage-artwork-203')),
+      findsOneWidget,
+    );
+    expect(find.byIcon(Icons.music_note_rounded), findsWidgets);
+  });
+
   testWidgets('details keep identity and variant sections independent', (
     tester,
   ) async {
@@ -223,10 +320,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('coverage-detail')), findsOneWidget);
-    expect(find.text('Matching'), findsOneWidget);
-    expect(find.text('Variant'), findsOneWidget);
-    expect(find.text('Status: unmatched'), findsOneWidget);
-    expect(find.text('N/A — no accepted local identity'), findsOneWidget);
+    expect(find.byKey(const Key('coverage-detail-matching')), findsOneWidget);
+    expect(find.byKey(const Key('coverage-detail-variant')), findsOneWidget);
+    expect(find.textContaining('Статус: Не найдено'), findsOneWidget);
+    expect(
+      find.text('Нет принятой локальной идентичности для проверки версии.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Needs Review can route to existing Matching page', (tester) async {
@@ -261,7 +361,16 @@ void main() {
     expect(matching.runCalls, 1);
   });
 
-  testWidgets('coverage list paginates instead of materializing the full library', (
+  testWidgets('pagination is hidden when results fit on one page', (
+    tester,
+  ) async {
+    await page(tester);
+
+    expect(find.byKey(const Key('coverage-page-previous')), findsNothing);
+    expect(find.byKey(const Key('coverage-page-next')), findsNothing);
+  });
+
+  testWidgets('coverage list paginates instead of materializing full library', (
     tester,
   ) async {
     final coverage = FakeCoverageBridge();
@@ -297,6 +406,17 @@ void main() {
 
     await tester.tap(find.byKey(const Key('coverage-page-next')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('101–106 из 106'), findsOneWidget);
+    expect(find.text('101–106 из 106'), findsOneWidget);
+  });
+
+  testWidgets('Coverage workspace is localized in English', (tester) async {
+    await page(tester, locale: const Locale('en'));
+
+    expect(find.text('Missing tracks'), findsOneWidget);
+    expect(find.text('Local coverage'), findsOneWidget);
+    expect(find.text('Missing'), findsWidgets);
+    expect(find.text('Wanted'), findsOneWidget);
+    expect(find.text('Ignore'), findsOneWidget);
+    expect(find.text('Недостающие треки'), findsNothing);
   });
 }

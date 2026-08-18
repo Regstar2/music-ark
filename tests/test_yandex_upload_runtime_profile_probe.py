@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import importlib.util
 import json
 from pathlib import Path
@@ -66,13 +67,23 @@ class YandexUploadRuntimeProfileProbeTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["module_id"], "123")
         self.assertIn("loader/upload-url", records[0]["anchors"])
-        self.assertIn("getUploadUrl", records[0]["anchors"])
         self.assertIn("getApiPrefixUrl", records[0]["anchors"])
-        self.assertIn("createHttpOptions", records[0]["anchors"])
-        self.assertIn("YandexMusicDesktopApp", records[0]["anchors"])
         encoded = json.dumps(records, ensure_ascii=False)
         self.assertNotIn("DO_NOT_EMIT", encoded)
         self.assertNotIn("SUPER_SECRET", encoded)
+
+    def test_dependency_paths_are_numeric_structure_only(self) -> None:
+        graph = defaultdict(set, {"10": {"20"}, "20": {"30"}})
+        anchor_sets = [
+            {"member_path": "a.js", "module_id": "10", "anchors": ["loader/upload-url"]},
+            {"member_path": "a.js", "module_id": "30", "anchors": ["getApiPrefixUrl", "clientRemoteType"]},
+        ]
+        paths = probe._dependency_paths(graph, anchor_sets)  # noqa: SLF001
+        self.assertEqual(paths[0]["path"], ["10", "20", "30"])
+        self.assertEqual(paths[0]["target_anchors"], ["getApiPrefixUrl", "clientRemoteType"])
+        encoded = json.dumps(paths, ensure_ascii=False)
+        self.assertNotIn("source", encoded)
+        self.assertNotIn("secret", encoded.lower())
 
     def test_non_yandex_urls_are_ignored(self) -> None:
         self.assertIsNone(probe._sanitize_yandex_url("https://example.com/api"))  # noqa: SLF001

@@ -8,7 +8,6 @@ support remains disabled.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -179,7 +178,7 @@ class YandexUploadTransport:
         if "json" in content_type:
             try:
                 response_payload = response.json()
-            except (json.JSONDecodeError, requests.JSONDecodeError, ValueError):
+            except ValueError:
                 response_payload = None
 
         if not 200 <= response.status_code <= 299:

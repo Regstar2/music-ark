@@ -42,6 +42,7 @@ from musicark.storage.download_storage import DownloadStorageRepository
 from musicark.storage.sync_storage import SyncStorageRepository
 from musicark.sync.executor import SyncSafeExecutor, execute_experimental_yandex_upload
 from musicark.sync.planner import SyncPlanner
+from musicark.upload.yandex_service import YandexSingleTrackUploadService
 
 
 def _db_query(db_path: Path, sql: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
@@ -63,6 +64,29 @@ def _download_task_public_dict(task: DownloadTask) -> dict[str, Any]:
     data = asdict(task)
     data["status"] = str(task.status)
     return data
+
+
+def _validate_yandex_upload_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate the production upload action before application-service dispatch."""
+    required = {"local_file_id", "playlist_kind", "confirm", "rights_confirmed"}
+    if set(payload) != required:
+        raise ValueError("yandex_upload_track requires exactly four payload fields.")
+    local_file_id = payload.get("local_file_id")
+    playlist_kind = payload.get("playlist_kind")
+    confirm = payload.get("confirm")
+    rights_confirmed = payload.get("rights_confirmed")
+    if isinstance(local_file_id, bool) or not isinstance(local_file_id, int) or local_file_id <= 0:
+        raise ValueError("payload.local_file_id must be a positive integer.")
+    if not isinstance(playlist_kind, str) or not playlist_kind.strip():
+        raise ValueError("payload.playlist_kind must be a non-empty string.")
+    if not isinstance(confirm, bool) or not isinstance(rights_confirmed, bool):
+        raise ValueError("payload.confirm and payload.rights_confirmed must be booleans.")
+    return {
+        "local_file_id": local_file_id,
+        "playlist_kind": playlist_kind.strip(),
+        "confirm": confirm,
+        "rights_confirmed": rights_confirmed,
+    }
 
 
 def build_snapshot(base_dir: Path | None = None) -> dict[str, Any]:
@@ -324,7 +348,13 @@ def run_action(
         executor = SyncSafeExecutor(database_path=db_path, base_dir=base_dir)
         return executor.execute_safe_plan_operations(plan_id=pid, confirm=pl.get("confirm"))
 
+    if name == "yandex_upload_track":
+        request = _validate_yandex_upload_payload(pl)
+        return YandexSingleTrackUploadService(base_dir=base_dir).upload_track(**request).to_dict()
+
     if name == "experimental_yandex_upload":
+        # Deprecated feasibility action: it remains separate from the production
+        # mutation so old callers do not start uploading through v0.11 implicitly.
         return execute_experimental_yandex_upload(database_path=db_path, base_dir=base_dir, payload=dict(pl))
 
     if name == "scan_yandex":
@@ -391,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--experimental-yandex-upload",
         default=None,
         choices=("true", "false"),
-        help="Enable/disable v0.11 experimental Yandex upload scaffolding.",
+        help="Deprecated v0.10 research flag retained for config compatibility; not a production upload gate.",
     )
     return parser
 

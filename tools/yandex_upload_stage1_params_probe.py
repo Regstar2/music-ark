@@ -2,9 +2,9 @@
 
 V35 proves that ``31322.X`` falls back to ``this.config.params.common.oauth``.
 This probe inspects the second object argument supplied to ``new 12690.S`` and
-emits only semantic keys (params/common/oauth), stable webpack source module and
-export references, and normalized structural expression tokens. No OAuth value,
-credential, arbitrary string or raw local name is emitted.
+emits safe schema keys, stable webpack source module/export references, and
+normalized structural expression tokens. No OAuth value, credential, arbitrary
+string or raw local name is emitted.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+import yandex_upload_config_binding_probe as config_probe
 import yandex_upload_contract_probe as contract_probe
 import yandex_upload_module_wiring_probe as wiring_probe
 import yandex_upload_prefix_provenance_probe as prefix_probe
@@ -60,7 +61,6 @@ def _semantic_keys(expression: str) -> list[str]:
 def _import_refs(expression: str, imports: list[dict[str, str]]) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     for item in imports:
-        # Stable export member at exact use site.
         member_pattern = re.compile(rf"\b{re.escape(item['local'])}\.(?P<member>[A-Za-z_$][A-Za-z0-9_$]{{0,100}})")
         found_member = False
         for match in member_pattern.finditer(expression):
@@ -75,11 +75,35 @@ def _import_refs(expression: str, imports: list[dict[str, str]]) -> list[dict[st
     return results[:100]
 
 
+def _safe_object_properties(expression: str, imports: list[dict[str, str]]) -> list[dict[str, Any]]:
+    value = expression.strip()
+    if not (value.startswith("{") and value.endswith("}")):
+        return []
+    results: list[dict[str, Any]] = []
+    for part in contract_probe._split_top_level(value[1:-1]):  # noqa: SLF001
+        colon = config_probe._find_top_level_colon(part)  # noqa: SLF001
+        if colon is None:
+            continue
+        raw_key = part[:colon].strip().strip("\"'")
+        key = contract_probe._safe_key(raw_key)  # noqa: SLF001
+        if key is None:
+            continue
+        rhs = part[colon + 1:].strip()
+        results.append({
+            "key": key,
+            "sourceRefs": _import_refs(rhs, imports),
+            "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, rhs, imports),  # noqa: SLF001
+        })
+    return results[:100]
+
+
 def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[str, Any]:
     value = expression.strip()
     result: dict[str, Any] = {
         "kind": "object" if value.startswith("{") and value.endswith("}") else "expression",
         "semanticKeys": _semantic_keys(value),
+        "objectKeys": contract_probe._object_keys(value) if value.startswith("{") else [],  # noqa: SLF001
+        "propertySources": _safe_object_properties(value, imports),
         "sourceRefs": _import_refs(value, imports),
         "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, value, imports),  # noqa: SLF001
     }
@@ -87,6 +111,8 @@ def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[st
     if common_rhs is not None:
         result["common"] = {
             "semanticKeys": _semantic_keys(common_rhs),
+            "objectKeys": contract_probe._object_keys(common_rhs) if common_rhs.strip().startswith("{") else [],  # noqa: SLF001
+            "propertySources": _safe_object_properties(common_rhs, imports),
             "sourceRefs": _import_refs(common_rhs, imports),
             "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, common_rhs, imports),  # noqa: SLF001
         }
@@ -127,7 +153,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                     "analysis": analyze_body(module["body"]),
                 })
     return {
-        "format": "musicark-yandex-upload-stage1-params-v1",
+        "format": "musicark-yandex-upload-stage1-params-v2",
         "source": "asar-stage1-params-common-oauth-provenance",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

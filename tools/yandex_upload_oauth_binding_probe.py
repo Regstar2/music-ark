@@ -28,7 +28,7 @@ import yandex_upload_target_probe as target_probe
 
 MODULE_ID = "31322"
 EXPORT_KEY = "X"
-_SEMANTIC_PROPERTIES = {"oauth", "authorization", "config", "httpClient", "headers", "prefixUrl", "clientRemoteType", "account", "user"}
+_SEMANTIC_PROPERTIES = {"oauth", "authorization", "config", "httpClient", "headers", "prefixUrl", "clientRemoteType", "account", "user", "common"}
 _SENSITIVE_PROPERTY_RE = re.compile(r"(?:secret|cookie|session|password|credential|signature|customApiToken)", re.IGNORECASE)
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
 
@@ -50,6 +50,13 @@ def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
     if len(data) != entry["size"]:
         raise target_probe.AsarFormatError(f"Unable to read complete ASAR member: {entry['path']}")
     return data
+
+
+def _constructor_params(class_fragment: str) -> list[str]:
+    match = re.search(r"\bconstructor\s*\((?P<params>[^()]*)\)\s*\{", class_fragment)
+    if not match:
+        return []
+    return [item.strip() for item in contract_probe._split_top_level(match.group("params")) if item.strip()]  # noqa: SLF001
 
 
 def _authorization_candidate(class_fragment: str) -> tuple[str, int] | None:
@@ -77,7 +84,7 @@ def _authorization_candidate(class_fragment: str) -> tuple[str, int] | None:
 
 
 def _safe_member_path(expression: str) -> list[str] | None:
-    clean = re.sub(r"\s+", "", expression)
+    clean = re.sub(r"\s+", "", expression).replace("?.", ".")
     match = re.fullmatch(r"this\.([A-Za-z_$][A-Za-z0-9_$]*)(?:\.([A-Za-z_$][A-Za-z0-9_$]*))?", clean)
     if not match:
         return None
@@ -87,11 +94,45 @@ def _safe_member_path(expression: str) -> list[str] | None:
     return ["this", *[_safe_property(item) for item in values]]
 
 
+def _semantic_oauth_sources(expression: str, class_fragment: str) -> list[dict[str, Any]]:
+    """Recognize only proven OAuth-shaped property paths, never scalar values."""
+    compact = re.sub(r"\s+", "", expression).replace("?.", ".")
+    results: list[dict[str, Any]] = []
+    params = _constructor_params(class_fragment)
+
+    # Direct constructor-param.common.oauth path.
+    for index, param in enumerate(params):
+        if re.search(rf"\b{re.escape(param)}\.common\.oauth\b", compact):
+            results.append({"kind": "constructor-param-path", "index": index, "path": ["common", "oauth"]})
+
+    # TypeScript optional-chain lowering commonly assigns a temporary parameter:
+    # `(tmp = source.common) ... tmp.oauth`. Recognize the relation structurally.
+    for source_index, source_param in enumerate(params):
+        for temp_index, temp_param in enumerate(params):
+            if source_index == temp_index:
+                continue
+            assignment = re.search(rf"\b{re.escape(temp_param)}={re.escape(source_param)}\.common\b", compact)
+            oauth_use = re.search(rf"\b{re.escape(temp_param)}\.oauth\b", compact)
+            if assignment and oauth_use:
+                item = {"kind": "constructor-param-path", "index": source_index, "path": ["common", "oauth"], "viaTemporaryParam": temp_index}
+                if item not in results:
+                    results.append(item)
+
+    # Fallback stored in the request config. The intermediate config key is a
+    # semantic property on an exact OAuth path; emit it only if non-sensitive.
+    pattern = re.compile(r"\bthis\.config\.(?P<key>[A-Za-z_$][A-Za-z0-9_$]*)\.common\.oauth\b")
+    for match in pattern.finditer(compact):
+        key = match.group("key")
+        if _SENSITIVE_PROPERTY_RE.search(key):
+            continue
+        item = {"kind": "request-config-path", "path": ["this", "config", _safe_property(key), "common", "oauth"]}
+        if item not in results:
+            results.append(item)
+    return results[:20]
+
+
 def _constructor_param_source(class_fragment: str, identifier: str) -> dict[str, Any] | None:
-    match = re.search(r"\bconstructor\s*\((?P<params>[^()]*)\)\s*\{", class_fragment)
-    if not match:
-        return None
-    params = [item.strip() for item in contract_probe._split_top_level(match.group("params")) if item.strip()]  # noqa: SLF001
+    params = _constructor_params(class_fragment)
     if identifier in params:
         return {"kind": "constructor-param", "index": params.index(identifier)}
     return None
@@ -109,13 +150,15 @@ def _nearest_simple_assignment(class_fragment: str, identifier: str, before: int
             return {"kind": "this-member", "path": member_path}
         if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", rhs.strip()):
             return {"kind": "local-alias", "aliasHash": _hash(rhs.strip())}
-        return {"kind": "expression", "normalized": prefix_probe._normalized_expression(MODULE_ID, rhs, [])}  # noqa: SLF001
+        return {
+            "kind": "expression",
+            "normalized": prefix_probe._normalized_expression(MODULE_ID, rhs, []),  # noqa: SLF001
+            "semanticOAuthSources": _semantic_oauth_sources(rhs, class_fragment),
+        }
     return None
 
 
 def _destructure_source(class_fragment: str, identifier: str, before: int) -> dict[str, Any] | None:
-    # Match only the semantic `oauth` property; arbitrary destructured keys are
-    # irrelevant to the proven OAuth header and are not emitted.
     patterns = (
         re.compile(rf"\{{[^{{}}]*\boauth\s*:\s*{re.escape(identifier)}\b[^{{}}]*\}}\s*=\s*"),
         re.compile(rf"\{{[^{{}}]*\b{re.escape(identifier)}\b[^{{}}]*\}}\s*=\s*"),

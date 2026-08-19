@@ -40,6 +40,7 @@ import yandex_upload_stage1_hooks_export_probe as stage1_hooks_export
 import yandex_upload_stage1_hooks_module_probe as stage1_hooks_module
 import yandex_upload_stage1_hooks_object_probe as stage1_hooks_object
 import yandex_upload_stage1_params_probe as stage1_params
+import yandex_upload_stage1_playlist_id_literal_probe as stage1_playlist_id_literal
 import yandex_upload_stage1_playlist_id_probe as stage1_playlist_id
 import yandex_upload_stage1_prefix_use_site_probe as stage1_prefix_use_site
 import yandex_upload_stage1_role_probe as stage1_role
@@ -83,6 +84,7 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-stage1-flow-v44-ci.json", stage1_flow.build_report),
     ("yandex-upload-stage1-header-provenance-v45-ci.json", stage1_headers.build_report),
     ("yandex-upload-stage1-playlist-id-v46-ci.json", stage1_playlist_id.build_report),
+    ("yandex-upload-stage1-playlist-id-literal-v47-ci.json", stage1_playlist_id_literal.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

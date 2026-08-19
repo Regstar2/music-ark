@@ -1,6 +1,6 @@
 """Isolated experimental transport for the recovered Yandex Music UGC upload flow.
 
-The official desktop runtime has now verified the production stage-one host and
+The official desktop runtime has verified the production stage-one host and
 response contract. Stage one is ``POST /loader/upload-url`` on an explicit
 Yandex HTTPS origin and uses account OAuth authorization. The successful desktop
 response exposes ``post-target``, ``poll-result`` and ``ugc-track-id``.
@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
+import httpx
 import requests
 
 from musicark.providers.yandex_music_provider import YandexMusicError
@@ -39,10 +40,10 @@ class YandexUploadStage1Requester(Protocol):
 def _safe_exception_kinds(exc: BaseException) -> str:
     """Return only exception class names from a transport failure tree.
 
-    ``requests`` often nests urllib3/http.client exceptions inside ``args`` rather
-    than a normal ``__cause__`` chain. Class names are useful for distinguishing
-    HTTP profile failures from TLS/socket/protocol failures without exposing a
-    URL, query value, credential, proxy value, or server response body.
+    HTTP clients often nest lower-level protocol/socket errors inside ``args`` or
+    exception causes. Class names distinguish HTTP profile failures from
+    TLS/socket/protocol failures without exposing URLs, query values, credentials,
+    proxy values, or response bodies.
     """
 
     names: list[str] = []
@@ -65,6 +66,11 @@ def _safe_exception_kinds(exc: BaseException) -> str:
     return "/".join(names) if names else type(exc).__name__
 
 
+_STAGE1_TRANSPORTS = {"requests", "http2"}
+_STAGE1_CLIENT_PROFILES = {"bare", "desktop"}
+_DESKTOP_CLIENT_LABEL = "YandexMusicDesktopApp"
+
+
 class YandexOAuthStage1Requester:
     """Explicit OAuth requester for a ground-truth-verified Yandex stage-one prefix.
 
@@ -74,7 +80,11 @@ class YandexOAuthStage1Requester:
     the request class to ``common.oauth`` and does not reference
     ``customApiToken`` in that authorization path.
 
-    This class performs exactly one POST and has no retry/fallback behavior.
+    ``transport_mode=http2`` uses HTTPX with HTTP/2 enabled. The optional
+    ``desktop`` client profile adds only the statically evidenced public
+    ``X-Yandex-Music-Client: YandexMusicDesktopApp`` header. It does not invent a
+    browser User-Agent, accept-language, device ID, request ID, cookies, or any
+    secret/session header. There is no retry or profile permutation behavior.
     """
 
     def __init__(
@@ -83,6 +93,9 @@ class YandexOAuthStage1Requester:
         base_url: str,
         oauth_token: str,
         timeout_seconds: float = 30.0,
+        transport_mode: str = "requests",
+        client_profile: str = "bare",
+        trust_env: bool = True,
     ) -> None:
         self._base_url = self._validate_base_url(base_url)
         token = str(oauth_token or "").strip()
@@ -92,6 +105,17 @@ class YandexOAuthStage1Requester:
         self._timeout_seconds = float(timeout_seconds)
         if self._timeout_seconds <= 0:
             raise YandexUploadProtocolError("Stage-one timeout must be positive.")
+
+        clean_transport = str(transport_mode or "").strip().lower()
+        if clean_transport not in _STAGE1_TRANSPORTS:
+            raise YandexUploadProtocolError("Unsupported stage-one transport mode.")
+        self._transport_mode = clean_transport
+
+        clean_profile = str(client_profile or "").strip().lower()
+        if clean_profile not in _STAGE1_CLIENT_PROFILES:
+            raise YandexUploadProtocolError("Unsupported stage-one client profile.")
+        self._client_profile = clean_profile
+        self._trust_env = bool(trust_env)
 
     @staticmethod
     def _validate_base_url(value: str) -> str:
@@ -123,40 +147,89 @@ class YandexOAuthStage1Requester:
         path = parsed.path.rstrip("/")
         return f"{parsed.scheme}://{parsed.netloc}{path}"
 
-    def post_upload_url(self, params: dict[str, str]) -> Any:
-        endpoint = f"{self._base_url}/loader/upload-url"
-        try:
-            response = requests.post(
-                endpoint,
-                params=dict(params),
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"OAuth {self._oauth_token}",
-                },
-                timeout=self._timeout_seconds,
-            )
-        except requests.RequestException as exc:
-            kind = _safe_exception_kinds(exc)
-            raise YandexUploadProtocolError(
-                f"Yandex stage-one OAuth request failed (transport={kind})."
-            ) from exc
+    @property
+    def sanitized_profile(self) -> dict[str, Any]:
+        """Return only public/non-secret request-profile choices."""
+        return {
+            "transport": self._transport_mode,
+            "clientProfile": self._client_profile,
+            "trustEnv": self._trust_env,
+            "desktopClientHeader": self._client_profile == "desktop",
+        }
 
-        if not 200 <= int(response.status_code) <= 299:
-            raise YandexUploadProtocolError(
-                f"Yandex stage-one endpoint returned HTTP {int(response.status_code)}."
-            )
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"OAuth {self._oauth_token}",
+        }
+        if self._client_profile == "desktop":
+            headers["X-Yandex-Music-Client"] = _DESKTOP_CLIENT_LABEL
+        return headers
 
+    def _profile_label(self) -> str:
+        trust = "inherit" if self._trust_env else "ignore"
+        return f"client={self._transport_mode},profile={self._client_profile},env={trust}"
+
+    def _requests_post(self, endpoint: str, params: dict[str, str]) -> Any:
+        kwargs = {
+            "params": dict(params),
+            "headers": self._headers(),
+            "timeout": self._timeout_seconds,
+        }
+        if self._trust_env:
+            return requests.post(endpoint, **kwargs)
+        with requests.Session() as session:
+            session.trust_env = False
+            return session.post(endpoint, **kwargs)
+
+    def _http2_post(self, endpoint: str, params: dict[str, str]) -> httpx.Response:
+        with httpx.Client(
+            http1=True,
+            http2=True,
+            trust_env=self._trust_env,
+            timeout=self._timeout_seconds,
+            follow_redirects=False,
+        ) as client:
+            return client.post(endpoint, params=dict(params), headers=self._headers())
+
+    @staticmethod
+    def _decode_response(response: Any) -> Any:
+        status_code = int(response.status_code)
+        if not 200 <= status_code <= 299:
+            return None
         content_type = str(response.headers.get("Content-Type", "")).lower()
         if "json" in content_type:
             try:
                 return response.json()
             except ValueError as exc:
                 raise YandexUploadProtocolError("Yandex stage-one endpoint returned invalid JSON.") from exc
-
         text = str(getattr(response, "text", "") or "").strip()
         if text:
             return text
         raise YandexUploadProtocolError("Yandex stage-one endpoint returned an empty response.")
+
+    def post_upload_url(self, params: dict[str, str]) -> Any:
+        endpoint = f"{self._base_url}/loader/upload-url"
+        try:
+            if self._transport_mode == "http2":
+                response = self._http2_post(endpoint, params)
+            else:
+                response = self._requests_post(endpoint, params)
+        except (requests.RequestException, httpx.HTTPError) as exc:
+            kind = _safe_exception_kinds(exc)
+            raise YandexUploadProtocolError(
+                f"Yandex stage-one OAuth request failed ({self._profile_label()},transport={kind})."
+            ) from exc
+
+        status_code = int(response.status_code)
+        http_version = str(getattr(response, "http_version", "") or "unknown")
+        if not 200 <= status_code <= 299:
+            version_suffix = f",httpVersion={http_version}" if self._transport_mode == "http2" else ""
+            raise YandexUploadProtocolError(
+                f"Yandex stage-one endpoint returned HTTP {status_code} ({self._profile_label()}{version_suffix})."
+            )
+
+        return self._decode_response(response)
 
 
 @dataclass(slots=True, frozen=True)
@@ -199,6 +272,14 @@ class YandexUploadTransport:
     def stage1_available(self) -> bool:
         """Whether an explicitly verified stage-one requester was supplied."""
         return self._stage1_requester is not None
+
+    @property
+    def stage1_profile(self) -> dict[str, Any] | None:
+        """Expose only the requester's sanitized public profile metadata."""
+        if self._stage1_requester is None:
+            return None
+        value = getattr(self._stage1_requester, "sanitized_profile", None)
+        return dict(value) if isinstance(value, dict) else None
 
     def require_stage1_profile(self) -> None:
         """Fail before an upload mutation when the stage-one requester is unavailable."""

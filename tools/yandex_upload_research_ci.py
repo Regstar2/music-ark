@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yandex_upload_prefix_factory_probe as prefix_factory
+import yandex_upload_prefix_import_binding_probe as prefix_binding
 import yandex_upload_prefix_provenance_probe as prefix_provenance
 import yandex_upload_runtime_composition_probe as composition
 import yandex_upload_runtime_config_probe as runtime_config
@@ -37,6 +38,7 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-prefix-provenance-v21-ci.json", prefix_provenance.build_report),
     ("yandex-upload-prefix-factory-v22-ci.json", prefix_factory.build_report),
     ("yandex-upload-tld-helper-v23-ci.json", tld_helper.build_report),
+    ("yandex-upload-prefix-import-binding-v24-ci.json", prefix_binding.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

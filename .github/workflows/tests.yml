@@ -123,6 +123,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           foreach ($output in @($profileOutput, $configOutput)) {
+            if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Runtime report was not created." }
             $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($report.input_sha256 -ne $expected) { throw "Runtime report input hash mismatch." }
             if ($report.safety.network_requests_sent -ne $false) { throw "Runtime safety gate failed: network activity." }
@@ -135,6 +136,7 @@ jobs:
           }
 
       - name: Upload sanitized runtime profile reports
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: yandex-upload-runtime-profile-v16-sanitized

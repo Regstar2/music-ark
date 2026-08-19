@@ -34,6 +34,8 @@ import yandex_upload_runtime_profile_probe as runtime_profile
 import yandex_upload_runtime_topology_probe as topology
 import yandex_upload_stage1_auth_lineage_probe as auth_lineage
 import yandex_upload_stage1_context_probe as stage1_context
+import yandex_upload_stage1_flow_probe as stage1_flow
+import yandex_upload_stage1_header_probe as stage1_headers
 import yandex_upload_stage1_hooks_export_probe as stage1_hooks_export
 import yandex_upload_stage1_hooks_module_probe as stage1_hooks_module
 import yandex_upload_stage1_hooks_object_probe as stage1_hooks_object
@@ -77,6 +79,8 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-stage1-hooks-export-v41-ci.json", stage1_hooks_export.build_report),
     ("yandex-upload-stage1-hooks-module-v42-ci.json", stage1_hooks_module.build_report),
     ("yandex-upload-stage1-hooks-object-v43-ci.json", stage1_hooks_object.build_report),
+    ("yandex-upload-stage1-flow-v44-ci.json", stage1_flow.build_report),
+    ("yandex-upload-stage1-header-provenance-v45-ci.json", stage1_headers.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

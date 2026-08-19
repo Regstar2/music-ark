@@ -1,9 +1,8 @@
 """Fail-closed compatibility boundary for the obsolete Yandex upload experiment.
 
-v0.10.0 records Yandex Upload feasibility as BLOCKED.  There is no verified
-provider upload protocol in MusicArk, so this module must never construct or
-send an upload request.  The legacy developer CLI entry point is retained only
-to fail safely for anyone who still has an old command/script.
+v0.10.0 feasibility is complete and v0.11.0 provides a separate production
+single-track upload service.  This legacy module remains intentionally disabled
+so old commands/scripts cannot silently turn into a real upload mutation.
 """
 
 from __future__ import annotations
@@ -15,13 +14,14 @@ from musicark.providers.yandex_music_provider import YandexMusicError
 
 
 _BLOCKED_MESSAGE = (
-    "Yandex Upload feasibility is BLOCKED in MusicArk v0.10.0: no verified "
-    "upload protocol is implemented. No Yandex upload request was sent."
+    "The legacy experimental_yandex_upload action is deprecated and disabled. "
+    "Use the explicit v0.11.0 yandex_upload_track production workflow instead. "
+    "No Yandex upload request was sent."
 )
 
 
 def client_exposes_upload_api() -> tuple[bool, list[str]]:
-    """Return the conservative v0.10.0 feasibility result without network I/O."""
+    """Return the legacy fail-closed compatibility result without network I/O."""
     return False, []
 
 
@@ -31,6 +31,6 @@ def run_experimental_yandex_upload(
     base_dir: Path | None,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Fail closed; v0.10.0 has no reproducible upload protocol."""
+    """Fail closed so legacy callers cannot perform the production mutation."""
     del database_path, base_dir, payload
     raise YandexMusicError(_BLOCKED_MESSAGE)

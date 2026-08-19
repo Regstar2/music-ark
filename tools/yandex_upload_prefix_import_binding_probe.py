@@ -58,8 +58,29 @@ def _require_chain(expression: str, loader: str, module_id: str) -> list[str]:
     return [part for part in tail.split(".") if part and _SAFE_MEMBER_RE.fullmatch(part)][:20]
 
 
-def _normalized_binding(expression: str, imports: list[dict[str, str]]) -> list[str]:
-    return prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, expression, imports)  # noqa: SLF001
+def _normalized_binding(
+    expression: str,
+    imports: list[dict[str, str]],
+    *,
+    loader: str | None = None,
+    source_module_id: str | None = None,
+) -> list[str]:
+    """Normalize an assignment while preserving the exact require(module) source.
+
+    ``prefix_probe`` understands import *locals*, not loader calls inside the
+    local's own definition. Replace only the proven loader(module) occurrence
+    with a synthetic import-local, then let the shared normalizer emit
+    ``m<module>.<export>`` without exposing the original loader/local name.
+    """
+    normalized_expression = expression
+    normalized_imports = list(imports)
+    if loader and source_module_id:
+        synthetic = f"__musicark_module_{source_module_id}"
+        pattern = re.compile(rf"\b{re.escape(loader)}\(\s*{re.escape(source_module_id)}\s*\)")
+        normalized_expression, count = pattern.subn(synthetic, normalized_expression, count=1)
+        if count:
+            normalized_imports.append({"local": synthetic, "source_module_id": source_module_id})
+    return prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, normalized_expression, normalized_imports)  # noqa: SLF001
 
 
 def analyze_composition(body: str) -> dict[str, Any]:
@@ -94,8 +115,13 @@ def analyze_composition(body: str) -> dict[str, Any]:
             "definitionFound": rhs is not None,
         }
         if rhs is not None:
-            record["normalizedRhs"] = _normalized_binding(rhs, imports)
             loader = str(match.get("loader") or "")
+            record["normalizedRhs"] = _normalized_binding(
+                rhs,
+                imports,
+                loader=loader or None,
+                source_module_id=source_id,
+            )
             if loader:
                 record["requireMemberChain"] = _require_chain(rhs, loader, source_id)
         results.append(record)
@@ -137,7 +163,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                 }
             )
     return {
-        "format": "musicark-yandex-upload-prefix-import-binding-v1",
+        "format": "musicark-yandex-upload-prefix-import-binding-v2",
         "source": "asar-exact-stage1-prefix-import-binding-scan",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

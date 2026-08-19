@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 import importlib.util
 import json
 from pathlib import Path
@@ -119,7 +119,7 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        with sqlite3.connect(database_path) as conn:
+        with closing(sqlite3.connect(database_path)) as conn:
             conn.execute(
                 """
                 CREATE TABLE provider_collection_snapshots(

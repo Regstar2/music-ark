@@ -2,18 +2,41 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.10.0 — Yandex Upload Feasibility (BLOCKED).**  
+**Current code version: 0.11.0 — Production Single-Track Yandex Upload.**  
 **Current SQLite schema: 1.8.4.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. The v0.9.x line is complete. v0.10.0 investigates uploading one user-owned local file to Yandex Music and records a `BLOCKED` result: no reproducible programmatic upload protocol through MusicArk's existing authentication boundary has been confirmed.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. The v0.9.x line is complete. v0.10.0 completed the feasibility phase and confirmed direct-Python upload end to end; v0.11.0 promotes that proven protocol into a production manual workflow for one local MP3.
 
-## Yandex Upload Feasibility v0.10.0
+## Production Single-Track Yandex Upload v0.11.0
 
-Official Yandex Music Help confirms an own-track workflow through the website or desktop application: the user selects/creates a personal playlist and uploads local files. Direct upload into `Liked`, another user's playlist or an editorial playlist is not supported; artwork, title and artist are read from the file.
+The confirmed v0.10.0 live result is:
 
-However, the inspected primary sources and pinned `yandex-music==3.0.0` dependency do not provide MusicArk with a verified HTTP upload contract. Endpoint, method, request body/content type, sufficiency of the existing token, additional cookies/session artifacts and response identity remain unknown. Therefore v0.10.0 adds no production Upload UI, queue, reverse Sync, Matching/Coverage integration or guessed transport implementation.
+```text
+Stage 1 HTTP 200
+Stage 2 HTTP 201
+playlist read-back verified=true
+ambiguous=false
+attemptsUsed=1
+```
 
-`YandexMusicProvider.can_upload_tracks` and `supports_user_uploads` remain `false`. The old experimental compatibility path is now fail-closed: it does not read the candidate file, log its path or send an upload request. The full evidence table is in `docs/versions/v0.10.0.md`.
+Production Stage 1 uses the fixed endpoint:
+
+```text
+POST https://api.music.yandex.net/loader/upload-url
+uid=<authenticated uid>
+playlist-id=<uid>:<playlist kind>
+path=<filename only>
+```
+
+MusicArk adds no `visibility`, Authorization, OAuth or Cookie. Stage 2 sends exactly one multipart `file` to the dynamic `post-target` after HTTPS/Yandex-host validation. HTTPX uses `http1=True`, `http2=True`, `trust_env=False`, `follow_redirects=False`, a bounded timeout and no automatic retry.
+
+Local Library exposes an explicit **Upload to Yandex Music** action for one track. The user chooses an owned Yandex playlist and confirms the right to upload the file. The backend accepts `local_file_id`, resolves the indexed path itself, and before Stage 1 validates auth/UID, playlist ownership, an existing non-empty MP3 file, `confirm=true` and `rights_confirmed=true`.
+
+After Stage 2 MusicArk performs bounded playlist read-back. A Stage 2 network failure **does not automatically send the file again**: MusicArk checks `ugc-track-id`; if delivery cannot be confirmed, it returns `delivery_unknown` and tells the user to inspect the playlist before retrying manually. This reduces the risk of duplicate UGC tracks.
+
+`YandexMusicProvider.can_upload_tracks` and `supports_user_uploads` are now `true`, while Controlled Sync still generates no upload operations. The old `experimental_yandex_upload` remains a separate deprecated research/compatibility path and is not silently converted into the production mutation. Details are in `docs/versions/v0.11.0.md`.
+
+v0.11.0 limitations: MP3 only, one track per action, no bulk upload, no upload queue, no auto-sync upload, no automatic retry, no format conversion, no censorship replacement and no background upload worker. This milestone does not create a production release or installer.
 
 ## Settings / Help / About v0.9.7
 
@@ -196,7 +219,7 @@ For `ALTERED`, `DIFFERENT_VERSION` and `UNCERTAIN`, the user may accept the curr
 
 ## Formats
 
-The editor uses format adapters. Full safe writing is implemented for **MP3/ID3**. Other audio formats remain read-only in Metadata Editor.
+The editor uses format adapters. Full safe writing is implemented for **MP3/ID3**. Other audio formats remain read-only in Metadata Editor. Manual Yandex upload v0.11.0 is also MP3-only; format conversion is outside this milestone.
 
 ## Controlled Sync
 
@@ -206,10 +229,10 @@ Sync is not a bidirectional filesystem mirror. Normal Apply remains constrained 
 deleted local files = 0
 renamed/moved local files = 0
 modified existing local files/tags = 0
-Yandex mutations = 0
+Yandex mutations from Controlled Sync = 0
 ```
 
-v0.9.6 changes presentation only: plan filters operate on the already returned operation snapshot, while Apply still requires confirmation. Metadata Editor is a separate explicit-write workflow and is never called automatically by Scan/Matching/Coverage/Sync.
+v0.9.6 changes presentation only: plan filters operate on the already returned operation snapshot, while Apply still requires confirmation. Metadata Editor is a separate explicit-write workflow and is never called automatically by Scan/Matching/Coverage/Sync. Manual upload v0.11.0 is likewise a separate explicit workflow and is not invoked by SyncPlanner.
 
 ## SQLite
 
@@ -228,7 +251,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.10.0 does not bump the SQLite schema. The feasibility milestone adds no upload-history or upload-task persistence. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
+v0.10.0 and v0.11.0 do not bump the SQLite schema. Manual one-track upload adds no upload queue/history tables and never persists signed upload targets. Database initialization remains idempotent and does not require deleting an existing `.musicark/musicark.db`.
 
 ## Windows development run
 
@@ -264,8 +287,9 @@ v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
 v0.9.6 — Sync Page UI Polish                           complete
 v0.9.7 — Settings, Help & About UI Polish              complete
 v0.9.x — UI improvement line                           complete
-v0.10.0 — Yandex Upload Feasibility                    complete / blocked
-next — upload architecture decision                    decision required
+v0.10.0 — Yandex Upload Feasibility / live proof       complete
+v0.11.0 — Production Single-Track Yandex Upload        current
+v0.12.0 — Upload queue / batch safety                  planned
 ```
 
-Production Yandex Upload is not implemented in v0.10.0. The milestone confirms only the existence of Yandex's user-facing upload workflow and documents the lack of a verified programmatic protocol for MusicArk. This describes source state and does not claim that a public GitHub Release exists. See `docs/versions/v0.10.0.md`.
+v0.11.0 is the production boundary for manually uploading one MP3, not a GitHub Release. Bulk upload, upload queue, auto-sync upload, conversion and automatic retry remain outside this milestone. See `docs/versions/v0.11.0.md`.

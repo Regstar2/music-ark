@@ -107,15 +107,18 @@ def _rhs_origins(rhs: str, constructor: dict[str, Any] | None) -> dict[str, Any]
         safe = _safe_property(prop)
         if safe not in this_properties:
             this_properties.append(safe)
-    # Remove property names from bare-identifier candidates by excluding tokens
-    # immediately preceded by a dot and standard syntax identifiers.
+    # Constructor parameters must be classified before allowlisted property
+    # words are discarded. A minified parameter can legitimately be named
+    # ``oauth`` in synthetic/regression input, and its identity still matters.
     for match in _IDENTIFIER_RE.finditer(rhs):
         name = match.group(0)
-        if name in _JS_SKIP or name in _ALLOWLISTED_PROPERTIES:
+        if name in _JS_SKIP:
             continue
         if match.start() > 0 and rhs[match.start() - 1] == ".":
             continue
         alias_hash = _hash(name)
+        if name in _ALLOWLISTED_PROPERTIES and alias_hash not in param_hashes:
+            continue
         item: dict[str, Any] = {"aliasHash": alias_hash}
         if alias_hash in param_hashes:
             item["origin"] = {"kind": "constructor-param", "index": param_hashes[alias_hash]}

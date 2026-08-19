@@ -6,8 +6,8 @@ stage-one request, one multipart stage-two request, no credentials on either
 request and no automatic retry.
 
 The older ``YandexUploadTransport`` and ``YandexOAuthStage1Requester`` symbols
-remain as deprecated research compatibility boundaries. Production code must not
-use them.
+remain unchanged as deprecated research compatibility boundaries. Production
+code must not use them.
 """
 
 from __future__ import annotations
@@ -28,11 +28,11 @@ _ALLOWED_YANDEX_DOMAINS = ("yandex.ru", "yandex.net", "yandex.com")
 
 
 class YandexUploadProtocolError(YandexMusicError):
-    """Raised when the upload protocol cannot be followed safely."""
+    """Raised when an upload protocol cannot be followed safely."""
 
 
 class YandexUploadNetworkError(YandexUploadProtocolError):
-    """Sanitized transport failure that intentionally omits URL/error text."""
+    """Sanitized production transport failure that omits URL/error text."""
 
     def __init__(self, stage: str, exception_type: str) -> None:
         super().__init__(f"Yandex upload {stage} transport failed ({exception_type}).")
@@ -41,7 +41,7 @@ class YandexUploadNetworkError(YandexUploadProtocolError):
 
 
 class YandexUploadHttpError(YandexUploadProtocolError):
-    """HTTP status failure without response body or signed URL exposure."""
+    """Production HTTP status failure without response body or signed URL exposure."""
 
     def __init__(self, stage: str, status_code: int) -> None:
         super().__init__(f"Yandex upload {stage} returned HTTP {status_code}.")
@@ -49,13 +49,9 @@ class YandexUploadHttpError(YandexUploadProtocolError):
         self.status_code = int(status_code)
 
 
-class YandexUploadStage1UnavailableError(YandexUploadProtocolError):
-    """Raised by the deprecated research transport when no requester exists."""
-
-
 @dataclass(slots=True, frozen=True)
 class YandexDirectUploadSlot:
-    """Internal stage-one response; signed URLs must never cross the service boundary."""
+    """Internal production stage-one response; signed URLs never cross the service boundary."""
 
     post_target: str
     poll_result: str | None
@@ -65,7 +61,7 @@ class YandexDirectUploadSlot:
 
 @dataclass(slots=True, frozen=True)
 class YandexDirectUploadTransferResult:
-    """Sanitized successful stage-two response metadata."""
+    """Sanitized successful production stage-two response metadata."""
 
     status_code: int
 
@@ -137,7 +133,7 @@ class YandexDirectUploadTransport:
         playlist_kind: str | int,
         file_path: Path,
     ) -> YandexDirectUploadSlot:
-        """Perform exactly one credential-free stage-one request."""
+        """Perform exactly one credential-free production stage-one request."""
         path = Path(file_path)
         params = {
             "uid": str(uid),
@@ -175,7 +171,7 @@ class YandexDirectUploadTransport:
         slot: YandexDirectUploadSlot,
         file_path: Path,
     ) -> YandexDirectUploadTransferResult:
-        """Perform exactly one multipart stage-two POST without auth/session headers."""
+        """Perform exactly one multipart production stage-two POST without auth/session headers."""
         path = Path(file_path)
         target = self.validate_post_target(slot.post_target)
         try:
@@ -195,16 +191,25 @@ class YandexDirectUploadTransport:
 
 
 # ---------------------------------------------------------------------------
-# Deprecated research compatibility surface.
+# Deprecated v0.10 research compatibility surface. Keep behavior stable for
+# research tooling and tests; production v0.11.0 uses only the direct classes
+# above.
 # ---------------------------------------------------------------------------
 
 
+class YandexUploadStage1UnavailableError(YandexUploadProtocolError):
+    """Raised when no verified research stage-one request profile is available."""
+
+
 class YandexUploadStage1Requester(Protocol):
+    """Injectable research stage-one boundary."""
+
     def post_upload_url(self, params: dict[str, str]) -> Any:
-        """Return a decoded research stage-one response."""
+        """Return the decoded response from the recovered loader/upload-url request."""
 
 
 def _safe_exception_kinds(exc: BaseException) -> str:
+    """Return only exception class names from a transport failure tree."""
     names: list[str] = []
     seen: set[int] = set()
 
@@ -231,7 +236,7 @@ _DESKTOP_CLIENT_LABEL = "YandexMusicDesktopApp"
 
 
 class YandexOAuthStage1Requester:
-    """Deprecated v0.10 research requester retained for tooling compatibility."""
+    """Deprecated OAuth requester retained only for v0.10 research compatibility."""
 
     def __init__(
         self,
@@ -249,13 +254,17 @@ class YandexOAuthStage1Requester:
             raise YandexUploadProtocolError("Stage-one OAuth credential is empty.")
         self._oauth_token = token
         self._timeout_seconds = float(timeout_seconds)
+        if self._timeout_seconds <= 0:
+            raise YandexUploadProtocolError("Stage-one timeout must be positive.")
+
         clean_transport = str(transport_mode or "").strip().lower()
-        clean_profile = str(client_profile or "").strip().lower()
         if clean_transport not in _STAGE1_TRANSPORTS:
             raise YandexUploadProtocolError("Unsupported stage-one transport mode.")
+        self._transport_mode = clean_transport
+
+        clean_profile = str(client_profile or "").strip().lower()
         if clean_profile not in _STAGE1_CLIENT_PROFILES:
             raise YandexUploadProtocolError("Unsupported stage-one client profile.")
-        self._transport_mode = clean_transport
         self._client_profile = clean_profile
         self._trust_env = bool(trust_env)
 
@@ -264,13 +273,34 @@ class YandexOAuthStage1Requester:
         clean = str(value or "").strip().rstrip("/")
         parsed = urlparse(clean)
         host = (parsed.hostname or "").lower().rstrip(".")
-        allowed = any(host == item or host.endswith(f".{item}") for item in _ALLOWED_YANDEX_DOMAINS)
-        if parsed.scheme != "https" or not allowed or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise YandexUploadProtocolError("Stage-one research base URL is invalid.")
+        yandex_host = any(
+            host == suffix or host.endswith(f".{suffix}")
+            for suffix in ("yandex.ru", "yandex.net", "yandex.com")
+        )
+        if (
+            parsed.scheme != "https"
+            or not host
+            or not yandex_host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise YandexUploadProtocolError(
+                "Stage-one base URL must be an explicit HTTPS Yandex host/prefix without credentials, query, or fragment."
+            )
         return clean
 
     @property
+    def sanitized_origin(self) -> str:
+        """Return only scheme/host/path; never credential data."""
+        parsed = urlparse(self._base_url)
+        path = parsed.path.rstrip("/")
+        return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+    @property
     def sanitized_profile(self) -> dict[str, Any]:
+        """Return only public/non-secret research request-profile choices."""
         return {
             "transport": self._transport_mode,
             "clientProfile": self._client_profile,
@@ -279,58 +309,84 @@ class YandexOAuthStage1Requester:
         }
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Accept": "application/json", "Authorization": f"OAuth {self._oauth_token}"}
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"OAuth {self._oauth_token}",
+        }
         if self._client_profile == "desktop":
             headers["X-Yandex-Music-Client"] = _DESKTOP_CLIENT_LABEL
         return headers
+
+    def _profile_label(self) -> str:
+        trust = "inherit" if self._trust_env else "ignore"
+        return f"client={self._transport_mode},profile={self._client_profile},env={trust}"
+
+    def _requests_post(self, endpoint: str, params: dict[str, str]) -> Any:
+        kwargs = {
+            "params": dict(params),
+            "headers": self._headers(),
+            "timeout": self._timeout_seconds,
+        }
+        if self._trust_env:
+            return requests.post(endpoint, **kwargs)
+        with requests.Session() as session:
+            session.trust_env = False
+            return session.post(endpoint, **kwargs)
+
+    def _http2_post(self, endpoint: str, params: dict[str, str]) -> httpx.Response:
+        with httpx.Client(
+            http1=True,
+            http2=True,
+            trust_env=self._trust_env,
+            timeout=self._timeout_seconds,
+            follow_redirects=False,
+        ) as client:
+            return client.post(endpoint, params=dict(params), headers=self._headers())
+
+    @staticmethod
+    def _decode_response(response: Any) -> Any:
+        status_code = int(response.status_code)
+        if not 200 <= status_code <= 299:
+            return None
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if "json" in content_type:
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise YandexUploadProtocolError("Yandex stage-one endpoint returned invalid JSON.") from exc
+        text = str(getattr(response, "text", "") or "").strip()
+        if text:
+            return text
+        raise YandexUploadProtocolError("Yandex stage-one endpoint returned an empty response.")
 
     def post_upload_url(self, params: dict[str, str]) -> Any:
         endpoint = f"{self._base_url}/loader/upload-url"
         try:
             if self._transport_mode == "http2":
-                with httpx.Client(
-                    http1=True,
-                    http2=True,
-                    trust_env=self._trust_env,
-                    timeout=self._timeout_seconds,
-                    follow_redirects=False,
-                ) as client:
-                    response = client.post(endpoint, params=dict(params), headers=self._headers())
-            elif self._trust_env:
-                response = requests.post(
-                    endpoint,
-                    params=dict(params),
-                    headers=self._headers(),
-                    timeout=self._timeout_seconds,
-                )
+                response = self._http2_post(endpoint, params)
             else:
-                with requests.Session() as session:
-                    session.trust_env = False
-                    response = session.post(
-                        endpoint,
-                        params=dict(params),
-                        headers=self._headers(),
-                        timeout=self._timeout_seconds,
-                    )
+                response = self._requests_post(endpoint, params)
         except (requests.RequestException, httpx.HTTPError) as exc:
+            kind = _safe_exception_kinds(exc)
             raise YandexUploadProtocolError(
-                f"Research stage-one request failed ({_safe_exception_kinds(exc)})."
+                f"Yandex stage-one OAuth request failed ({self._profile_label()},transport={kind})."
             ) from exc
-        if not 200 <= int(response.status_code) <= 299:
+
+        status_code = int(response.status_code)
+        http_version = str(getattr(response, "http_version", "") or "unknown")
+        if not 200 <= status_code <= 299:
+            version_suffix = f",httpVersion={http_version}" if self._transport_mode == "http2" else ""
             raise YandexUploadProtocolError(
-                f"Research stage-one endpoint returned HTTP {int(response.status_code)}."
+                f"Yandex stage-one endpoint returned HTTP {status_code} ({self._profile_label()}{version_suffix})."
             )
-        try:
-            return response.json()
-        except ValueError:
-            text = str(getattr(response, "text", "") or "").strip()
-            if text:
-                return text
-            raise YandexUploadProtocolError("Research stage-one response was empty.")
+
+        return self._decode_response(response)
 
 
 @dataclass(slots=True, frozen=True)
 class YandexUploadSlot:
+    """Prepared server-side research upload slot returned by ``loader/upload-url``."""
+
     upload_url: str
     response_shape: dict[str, Any]
     poll_url: str | None = None
@@ -339,13 +395,15 @@ class YandexUploadSlot:
 
 @dataclass(slots=True, frozen=True)
 class YandexUploadTransferResult:
+    """Sanitized research result of sending one file to the prepared dynamic URL."""
+
     status_code: int
     response_shape: dict[str, Any]
     track_id: str | None = None
 
 
 class YandexUploadTransport:
-    """Deprecated fail-closed research transport retained for v0.10 tooling."""
+    """Deprecated v0.10 two-stage research transport with fail-closed stage one."""
 
     def __init__(
         self,
@@ -358,27 +416,44 @@ class YandexUploadTransport:
 
     @property
     def stage1_available(self) -> bool:
+        """Whether an explicitly verified research stage-one requester was supplied."""
         return self._stage1_requester is not None
 
     @property
     def stage1_profile(self) -> dict[str, Any] | None:
+        """Expose only the requester's sanitized public profile metadata."""
         if self._stage1_requester is None:
             return None
         value = getattr(self._stage1_requester, "sanitized_profile", None)
         return dict(value) if isinstance(value, dict) else None
 
     def require_stage1_profile(self) -> None:
+        """Preserve the v0.10 fail-closed research behavior."""
         if self._stage1_requester is None:
             raise YandexUploadStage1UnavailableError(
-                "Deprecated experimental Yandex upload is disabled; no request was sent."
+                "Yandex single-track upload stage one is BLOCKED: no ground-truth-verified "
+                "desktop stage-one requester has been supplied. No upload request was sent."
             )
 
     @staticmethod
     def _shape(value: Any) -> dict[str, Any]:
+        """Return response structure without scalar values or signed URLs."""
         if isinstance(value, dict):
-            return {"type": "object", "keys": {str(key): YandexUploadTransport._shape(item) for key, item in value.items() if str(key).lower() not in {"token", "secret", "authorization", "cookie"}}}
+            return {
+                "type": "object",
+                "keys": {
+                    str(key): YandexUploadTransport._shape(item)
+                    for key, item in value.items()
+                    if str(key).lower() not in {"token", "secret", "authorization", "cookie"}
+                },
+            }
         if isinstance(value, list):
-            return {"type": "array", "length": len(value)}
+            sample = value[0] if value else None
+            return {
+                "type": "array",
+                "length": len(value),
+                "item": YandexUploadTransport._shape(sample) if sample is not None else {"type": "unknown"},
+            }
         if value is None:
             return {"type": "null"}
         if isinstance(value, bool):
@@ -397,28 +472,43 @@ class YandexUploadTransport:
             result = payload.get("result")
             if isinstance(result, dict):
                 candidates.extend(result.get(key) for key in keys)
+
         for candidate in candidates:
-            if isinstance(candidate, str):
-                parsed = urlparse(candidate.strip())
-                if parsed.scheme in {"http", "https"} and parsed.netloc:
-                    return candidate.strip()
+            if not isinstance(candidate, str):
+                continue
+            clean = candidate.strip()
+            parsed = urlparse(clean)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                return clean
         return None
 
     @classmethod
     def _extract_upload_url(cls, payload: Any) -> str:
-        value = cls._extract_http_url(payload, ("post-target", "postTarget", "url"))
-        if not value:
-            raise YandexUploadProtocolError("Research response has no upload URL.")
-        return value
+        url = cls._extract_http_url(payload, ("post-target", "postTarget", "url"))
+        if url:
+            return url
+        raise YandexUploadProtocolError("loader/upload-url returned no usable HTTP(S) upload URL.")
+
+    @classmethod
+    def _extract_poll_url(cls, payload: Any) -> str | None:
+        return cls._extract_http_url(payload, ("poll-result", "pollResult"))
 
     @staticmethod
     def _extract_track_id(payload: Any) -> str | None:
+        """Extract the UGC identity from observed and legacy shallow shapes."""
         if not isinstance(payload, dict):
             return None
-        for key in ("ugc-track-id", "ugcTrackId", "trackId", "track_id", "id"):
+        keys = ("ugc-track-id", "ugcTrackId", "trackId", "track_id", "id")
+        for key in keys:
             value = payload.get(key)
             if value is not None and str(value).strip():
                 return str(value).strip()
+        result = payload.get("result")
+        if isinstance(result, dict):
+            for key in keys:
+                value = result.get(key)
+                if value is not None and str(value).strip():
+                    return str(value).strip()
         return None
 
     @staticmethod
@@ -429,7 +519,15 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> dict[str, str]:
-        params = {"uid": str(uid), "playlist-id": str(playlist_id), "path": str(path).strip()}
+        """Build only the recovered research stage-one query contract."""
+        clean_path = str(path).strip()
+        if not clean_path:
+            raise YandexUploadProtocolError("Upload path is empty.")
+        params = {
+            "uid": str(uid),
+            "playlist-id": str(playlist_id),
+            "path": clean_path,
+        }
         if visibility:
             params["visibility"] = str(visibility)
         return params
@@ -442,21 +540,31 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> YandexUploadSlot:
-        params = self.build_prepare_params(uid=uid, playlist_id=playlist_id, path=path, visibility=visibility)
+        """Request a dynamic URL only through the deprecated research requester."""
+        params = self.build_prepare_params(
+            uid=uid,
+            playlist_id=playlist_id,
+            path=path,
+            visibility=visibility,
+        )
         self.require_stage1_profile()
         assert self._stage1_requester is not None
         payload = self._stage1_requester.post_upload_url(params)
         return YandexUploadSlot(
             upload_url=self._extract_upload_url(payload),
             response_shape=self._shape(payload),
-            poll_url=self._extract_http_url(payload, ("poll-result", "pollResult")),
+            poll_url=self._extract_poll_url(payload),
             track_id=self._extract_track_id(payload),
         )
 
     def upload_file(self, slot: YandexUploadSlot, file_path: Path) -> YandexUploadTransferResult:
+        """Preserve the deprecated research Stage 2 behavior for compatibility tests."""
         path = Path(file_path)
-        if not path.is_file() or path.stat().st_size <= 0:
-            raise YandexUploadProtocolError("Research upload file is missing or empty.")
+        if not path.is_file():
+            raise YandexUploadProtocolError(f"Upload file does not exist: {path}")
+        if path.stat().st_size <= 0:
+            raise YandexUploadProtocolError("Refusing to upload an empty file.")
+
         try:
             with path.open("rb") as stream:
                 response = requests.post(
@@ -465,14 +573,26 @@ class YandexUploadTransport:
                     timeout=self._transfer_timeout_seconds,
                 )
         except requests.RequestException as exc:
+            kind = _safe_exception_kinds(exc)
             raise YandexUploadProtocolError(
-                f"Research stage-two request failed ({_safe_exception_kinds(exc)})."
+                f"Dynamic Yandex upload request failed (transport={kind})."
             ) from exc
-        if not 200 <= int(response.status_code) <= 299:
+
+        response_payload: Any = None
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if "json" in content_type:
+            try:
+                response_payload = response.json()
+            except ValueError:
+                response_payload = None
+
+        if not 200 <= response.status_code <= 299:
             raise YandexUploadProtocolError(
-                f"Research stage-two endpoint returned HTTP {int(response.status_code)}."
+                f"Dynamic Yandex upload endpoint returned HTTP {response.status_code}."
             )
+
         return YandexUploadTransferResult(
             status_code=int(response.status_code),
-            response_shape={"type": "uninspected"},
+            response_shape=self._shape(response_payload),
+            track_id=self._extract_track_id(response_payload),
         )

@@ -19,7 +19,7 @@ import yandex_upload_cdp_oauth_probe as base
 
 
 _FORMAT = "musicark-yandex-upload-cdp-failure-detail-probe-v1"
-_NET_ERROR_RE = re.compile(r"^net::ERR_[A-Z0-9_]{1,120}$")
+_NET_ERROR_RE = re.compile(r"^NET::ERR_[A-Z0-9_]{1,120}$")
 
 
 def _safe_net_error(value: Any) -> str | None:

@@ -67,13 +67,13 @@ class YandexUploadStage1RoleProbeTests(unittest.TestCase):
     def test_local_identifiers_are_hashed_in_value_summary(self) -> None:
         summary = probe._value_summary(  # noqa: SLF001
             "7644",
-            "localSecretAlias",
+            "localAlias",
             [],
         )
         encoded = json.dumps(summary)
         self.assertEqual(summary["kind"], {"kind": "identifier"})
         self.assertTrue(summary["alias_refs"][0].startswith("alias:"))
-        self.assertNotIn("localSecretAlias", encoded)
+        self.assertNotIn("localAlias", encoded)
 
     def test_source_module_reference_uses_stable_export_key(self) -> None:
         imports = [{"local": "provider", "source_module_id": "70204"}]

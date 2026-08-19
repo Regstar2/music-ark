@@ -47,7 +47,7 @@ class YandexUploadStage1PlaylistIdProbeTests(unittest.TestCase):
         self.assertIn("playlistKind", tokens)
         self.assertNotIn("private-prefix", encoded)
 
-    def test_call_record_reports_alias_relationship_and_nearest_assignment(self) -> None:
+    def test_call_record_reports_indirect_alias_relationship_via_nearest_assignment(self) -> None:
         body = (
             "const accountUid=user.uid;"
             "const computed=makeId(accountUid,playlistKind);"
@@ -56,12 +56,24 @@ class YandexUploadStage1PlaylistIdProbeTests(unittest.TestCase):
         records = probe._call_records("53128", body)  # noqa: SLF001
         self.assertEqual(len(records), 1)
         record = records[0]
-        self.assertTrue(record["relationships"]["playlistIdSharesAliasWithUid"])
+
+        # The direct playlistId expression is only `computed`; the uid alias is
+        # reached through its nearest assignment rather than being shared by the
+        # two call arguments directly.
+        self.assertFalse(record["relationships"]["playlistIdSharesAliasWithUid"])
+
         assignments = record["playlistId"]["aliasAssignments"]
+        self.assertTrue(assignments)
+        assignment_tokens = assignments[0]["normalizedAssignment"]
+        uid_tokens = record["uid"]["normalizedExpression"]
+        assignment_aliases = {item for item in assignment_tokens if str(item).startswith("alias:")}
+        uid_aliases = {item for item in uid_tokens if str(item).startswith("alias:")}
+        self.assertIn("playlistKind", assignment_tokens)
+        self.assertTrue(assignment_aliases & uid_aliases)
+
         encoded = json.dumps(assignments)
         self.assertNotIn("computed", encoded)
         self.assertNotIn("accountUid", encoded)
-        self.assertIn("playlistKind", json.dumps(record["playlistId"]))
 
     def test_object_values_keep_only_protocol_keys(self) -> None:
         values = probe._safe_object_values(  # noqa: SLF001

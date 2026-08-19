@@ -103,6 +103,7 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
                 playlist_kind="1055",
                 confirm_owned_file=True,
                 confirm_desktop_upload=True,
+                preflight_only=False,
                 port=9222,
                 target_contains="Yandex",
                 launch_exe=None,
@@ -126,6 +127,47 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
                     poc.run(args, prompt=lambda _: "")
             assisted_run.assert_not_called()
 
+    def test_preflight_only_requires_no_file_playlist_or_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            instrument = root / "instrument.js"
+            instrument.write_text("(()=>{})();", encoding="utf-8")
+            target = {
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/1",
+                "type": "page",
+                "url": "https://music.yandex.ru/",
+                "title": "Yandex Music",
+            }
+            args = argparse.Namespace(
+                base_dir=None,
+                file=None,
+                playlist_kind=None,
+                confirm_owned_file=False,
+                confirm_desktop_upload=False,
+                preflight_only=True,
+                port=9222,
+                target_contains="Yandex",
+                launch_exe=None,
+                launch_wait=0.0,
+                trace_duration=0.05,
+                instrumentation_js=instrument,
+                readback_attempts=1,
+                readback_delay=0.0,
+                trace_output=root / "trace.json",
+                decision_output=root / "decision.json",
+                output=root / "result.json",
+            )
+            with patch.object(poc, "_discover_target", return_value=target), \
+                 patch.object(poc.cdp, "CdpClient", _FakeCdpClient), \
+                 patch.object(poc.assisted, "run") as assisted_run:
+                result, code = poc.run(args, prompt=lambda _: "")
+            self.assertEqual(code, 0)
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(result["mode"], "cdp-preflight")
+            self.assertFalse(result["probe"]["networkMutationInitiatedByProbe"])
+            self.assertTrue(all(value is False for value in result["safety"].values()))
+            assisted_run.assert_not_called()
+
     def test_run_orchestrates_sanitized_trace_and_readback_offline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -137,6 +179,7 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
                 playlist_kind="1055",
                 confirm_owned_file=True,
                 confirm_desktop_upload=True,
+                preflight_only=False,
                 port=9222,
                 target_contains="Yandex",
                 launch_exe=None,
@@ -194,6 +237,7 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
     def test_parser_does_not_enable_live_direct_http_or_secret_input(self) -> None:
         parser = poc.build_parser()
         option_strings = {option for action in parser._actions for option in action.option_strings}  # noqa: SLF001
+        self.assertIn("--preflight-only", option_strings)
         self.assertNotIn("--token", option_strings)
         self.assertNotIn("--oauth-token", option_strings)
         self.assertNotIn("--stage1-base-url", option_strings)

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -21,10 +23,6 @@ _SPEC = importlib.util.spec_from_file_location("yandex_upload_cdp_oauth_probe", 
 assert _SPEC is not None and _SPEC.loader is not None
 probe = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(probe)
-
-
-class _Playlist:
-    kind = 1055
 
 
 class _FakeCdpClient:
@@ -50,9 +48,9 @@ class _FakeCdpClient:
 
 
 class YandexUploadCdpOauthProbeTests(unittest.TestCase):
-    def _args(self, file_path: Path) -> argparse.Namespace:
+    def _args(self, file_path: Path, *, base_dir: Path | None = None) -> argparse.Namespace:
         return argparse.Namespace(
-            base_dir=None,
+            base_dir=str(base_dir) if base_dir is not None else None,
             file=str(file_path),
             playlist_kind="1055",
             stage1_base_url="https://api.music.yandex.net",
@@ -67,13 +65,24 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             timeout=10.0,
         )
 
+    def _context(self, file_path: Path) -> probe._CachedStage1Context:  # noqa: SLF001
+        return probe._CachedStage1Context(  # noqa: SLF001
+            file_path=file_path,
+            uid="uid-secret",
+            playlist_id="playlist-uuid-secret",
+            playlist_id_source="uuid-cache",
+            playlist_id_fallback=False,
+            observed_visibility=None,
+        )
+
     def _patch_common(self, file_path: Path):
         return (
             patch.object(probe.live, "_require_research_opt_in"),
+            patch.object(probe, "_cached_stage1_context", return_value=self._context(file_path)),
             patch.object(
                 probe.live,
                 "_prepare_context",
-                return_value=(object(), _Playlist(), file_path, "uid-secret", "playlist-uuid-secret", None),
+                side_effect=AssertionError("Chromium isolation probe must not initialize the Python Yandex client."),
             ),
             patch.object(probe.live, "_saved_token", return_value="oauth-secret"),
             patch.object(probe.groundtruth, "_launch_desktop"),
@@ -88,6 +97,76 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             ),
             patch.object(probe.cdp, "CdpClient", _FakeCdpClient),
         )
+
+    def _run_with_common_patches(self, file_path: Path):
+        patches = self._patch_common(file_path)
+        with ExitStack() as stack:
+            for item in patches:
+                stack.enter_context(item)
+            return probe.run(self._args(file_path))
+
+    def _write_cache(self, root: Path, *, include_uuid: bool) -> Path:
+        config_dir = root / ".musicark"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        database_path = config_dir / "musicark.db"
+        (config_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "database_path": ".musicark/musicark.db",
+                    "experimental_yandex_upload": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE provider_collection_snapshots(
+                    provider_id TEXT,
+                    collection_id TEXT,
+                    account_json TEXT,
+                    metadata_json TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE provider_playlists(
+                    provider_id TEXT,
+                    external_id TEXT,
+                    payload_json TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO provider_collection_snapshots VALUES (?, 'liked', ?, '{}')",
+                ("yandex_music", json.dumps({"providerUserId": "uid-secret"})),
+            )
+            conn.execute(
+                "INSERT INTO provider_collection_snapshots VALUES (?, ?, '{}', ?)",
+                (
+                    "yandex_music",
+                    "playlist:1055",
+                    json.dumps({"externalId": "1055", "visibility": "private"}),
+                ),
+            )
+            if include_uuid:
+                conn.execute(
+                    "INSERT INTO provider_playlists VALUES (?, ?, ?, datetime('now'))",
+                    (
+                        "yandex_music",
+                        "1055",
+                        json.dumps(
+                            {
+                                "visibility": "private",
+                                "raw_data": {"playlist_uuid": "playlist-uuid-secret"},
+                            }
+                        ),
+                    ),
+                )
+            conn.commit()
+        return database_path
 
     def test_success_proves_chromium_path_without_exposing_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,9 +187,7 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
                 "pollResultPresent": True,
                 "ugcTrackIdPresent": True,
             }
-            patches = self._patch_common(file_path)
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-                payload, code = probe.run(self._args(file_path))
+            payload, code = self._run_with_common_patches(file_path)
 
             self.assertEqual(code, 0)
             self.assertEqual(payload["status"], "upload_url_obtained")
@@ -118,6 +195,8 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             self.assertTrue(payload["stage1"]["uploadUrlPresent"])
             self.assertFalse(payload["network"]["stage2Sent"])
             self.assertEqual(payload["network"]["browserCredentialsMode"], "omit")
+            self.assertFalse(payload["stage1"]["pythonYandexClientInitialized"])
+            self.assertEqual(payload["playlist"]["contextSource"], "musicark-local-cache")
             self.assertTrue(payload["safety"]["audio_bytes_sent"] is False)
 
             serialized = json.dumps(payload, ensure_ascii=False)
@@ -139,9 +218,7 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
                 "pollResultPresent": False,
                 "ugcTrackIdPresent": False,
             }
-            patches = self._patch_common(file_path)
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-                payload, code = probe.run(self._args(file_path))
+            payload, code = self._run_with_common_patches(file_path)
 
             self.assertEqual(code, 3)
             self.assertTrue(payload["stage1"]["httpResponseReceived"])
@@ -157,14 +234,39 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
                 "networkCompleted": False,
                 "errorName": "TypeError",
             }
-            patches = self._patch_common(file_path)
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
-                payload, code = probe.run(self._args(file_path))
+            payload, code = self._run_with_common_patches(file_path)
 
             self.assertEqual(code, 3)
             self.assertEqual(payload["diagnosis"], "chromium-network-path-failed")
             self.assertEqual(payload["stage1"]["networkErrorClass"], "TypeError")
             self.assertIsNone(payload["stage1"]["httpStatus"])
+
+    def test_cached_context_uses_account_and_playlist_uuid_without_network(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_cache(root, include_uuid=True)
+            file_path = root / "owned.mp3"
+            file_path.write_bytes(b"audio")
+            context = probe._cached_stage1_context(self._args(file_path, base_dir=root), root)  # noqa: SLF001
+
+            self.assertEqual(context.uid, "uid-secret")
+            self.assertEqual(context.playlist_id, "playlist-uuid-secret")
+            self.assertEqual(context.playlist_id_source, "uuid-cache")
+            self.assertFalse(context.playlist_id_fallback)
+            self.assertEqual(context.observed_visibility, "private")
+
+    def test_cached_context_falls_back_to_kind_for_network_isolation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_cache(root, include_uuid=False)
+            file_path = root / "owned.mp3"
+            file_path.write_bytes(b"audio")
+            context = probe._cached_stage1_context(self._args(file_path, base_dir=root), root)  # noqa: SLF001
+
+            self.assertEqual(context.uid, "uid-secret")
+            self.assertEqual(context.playlist_id, "1055")
+            self.assertEqual(context.playlist_id_source, "kind-diagnostic-fallback")
+            self.assertTrue(context.playlist_id_fallback)
 
     def test_parser_accepts_no_token_or_cookie_input(self) -> None:
         parser = probe.build_parser()

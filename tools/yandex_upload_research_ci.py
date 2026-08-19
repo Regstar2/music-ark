@@ -22,8 +22,10 @@ import yandex_upload_runtime_config_probe as runtime_config
 import yandex_upload_runtime_dataflow_probe as dataflow
 import yandex_upload_runtime_profile_probe as runtime_profile
 import yandex_upload_runtime_topology_probe as topology
+import yandex_upload_stage1_auth_lineage_probe as auth_lineage
 import yandex_upload_stage1_role_probe as stage1_role
 import yandex_upload_tld_helper_probe as tld_helper
+import yandex_upload_tld_lineage_probe as tld_lineage
 
 
 EXPECTED_ASAR_SHA256 = "8e7f4cec0776c39f194dee0a94086548d13f1465d46aa05d3e00a21624cbe80a"
@@ -39,6 +41,8 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-prefix-factory-v22-ci.json", prefix_factory.build_report),
     ("yandex-upload-tld-helper-v23-ci.json", tld_helper.build_report),
     ("yandex-upload-prefix-import-binding-v24-ci.json", prefix_binding.build_report),
+    ("yandex-upload-tld-lineage-v25-ci.json", tld_lineage.build_report),
+    ("yandex-upload-stage1-auth-lineage-v26-ci.json", auth_lineage.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

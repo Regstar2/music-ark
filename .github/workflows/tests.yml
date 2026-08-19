@@ -157,6 +157,7 @@ jobs:
           retention-days: 7
 
   flutter-tests:
+    needs: [unit-tests, yandex-upload-research]
     runs-on: self-hosted
     defaults:
       run:

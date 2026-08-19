@@ -1,10 +1,12 @@
 """Isolated experimental transport for the recovered Yandex Music UGC upload flow.
 
-Stage two is recovered with high confidence. Static data-flow analysis now also
-shows that the stage-one request class obtains authorization from the normal
-``common.oauth`` request configuration rather than from ``customApiToken``.
-The production stage-one host/prefix is still not ground-truth verified, so the
-normal MusicArk CLI remains fail-closed until an explicit profile is supplied.
+The official desktop runtime has now verified the production stage-one host and
+response contract. Stage one is ``POST /loader/upload-url`` on an explicit
+Yandex HTTPS origin and uses account OAuth authorization. The successful desktop
+response exposes ``post-target``, ``poll-result`` and ``ugc-track-id``.
+
+The transport remains experimental and fail-closed unless a requester is
+injected explicitly. No production upload capability is enabled by this module.
 """
 
 from __future__ import annotations
@@ -34,18 +36,45 @@ class YandexUploadStage1Requester(Protocol):
         """Return the decoded response from the recovered loader/upload-url request."""
 
 
+def _safe_exception_kinds(exc: BaseException) -> str:
+    """Return only exception class names from a transport failure tree.
+
+    ``requests`` often nests urllib3/http.client exceptions inside ``args`` rather
+    than a normal ``__cause__`` chain. Class names are useful for distinguishing
+    HTTP profile failures from TLS/socket/protocol failures without exposing a
+    URL, query value, credential, proxy value, or server response body.
+    """
+
+    names: list[str] = []
+    seen: set[int] = set()
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if depth > 5 or not isinstance(value, BaseException) or id(value) in seen:
+            return
+        seen.add(id(value))
+        name = type(value).__name__
+        if name not in names:
+            names.append(name)
+        cause = value.__cause__ or value.__context__
+        if cause is not None:
+            visit(cause, depth + 1)
+        for arg in getattr(value, "args", ()):
+            visit(arg, depth + 1)
+
+    visit(exc)
+    return "/".join(names) if names else type(exc).__name__
+
+
 class YandexOAuthStage1Requester:
     """Explicit OAuth requester for a ground-truth-verified Yandex stage-one prefix.
 
     The requester deliberately has no default host. A caller must provide the
     exact HTTPS Yandex prefix observed from the official client. Authorization
-    uses the account OAuth credential because the recovered request data-flow
-    links the request class to ``common.oauth`` and does not reference
+    uses the account OAuth credential because recovered request data-flow links
+    the request class to ``common.oauth`` and does not reference
     ``customApiToken`` in that authorization path.
 
     This class performs exactly one POST and has no retry/fallback behavior.
-    It is intentionally not wired into the normal CLI until the host/profile is
-    independently observed at runtime.
     """
 
     def __init__(
@@ -100,11 +129,17 @@ class YandexOAuthStage1Requester:
             response = requests.post(
                 endpoint,
                 params=dict(params),
-                headers={"Authorization": f"OAuth {self._oauth_token}"},
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"OAuth {self._oauth_token}",
+                },
                 timeout=self._timeout_seconds,
             )
         except requests.RequestException as exc:
-            raise YandexUploadProtocolError("Yandex stage-one OAuth request failed.") from exc
+            kind = _safe_exception_kinds(exc)
+            raise YandexUploadProtocolError(
+                f"Yandex stage-one OAuth request failed (transport={kind})."
+            ) from exc
 
         if not 200 <= int(response.status_code) <= 299:
             raise YandexUploadProtocolError(
@@ -130,6 +165,8 @@ class YandexUploadSlot:
 
     upload_url: str
     response_shape: dict[str, Any]
+    poll_url: str | None = None
+    track_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -144,14 +181,9 @@ class YandexUploadTransferResult:
 class YandexUploadTransport:
     """Recovered two-stage upload transport with a fail-closed stage one.
 
-    A stage-one requester must be injected explicitly. MusicArk deliberately has
-    no default requester because the production stage-one host/prefix has not yet
-    been observed from the official desktop runtime. The older Android-oriented
-    ``yandex-music`` request profile already failed live and is not used as a
-    fallback.
-
-    Stage two uses a fresh HTTP request without Music API OAuth/session headers,
-    matching the recovered ``excludeHeaders`` / ``withoutHeaders`` behavior.
+    A stage-one requester must still be injected explicitly. Stage two uses a
+    fresh HTTP request without Music API OAuth/session headers, matching the
+    recovered ``excludeHeaders`` / ``withoutHeaders`` behavior.
     """
 
     def __init__(
@@ -169,11 +201,11 @@ class YandexUploadTransport:
         return self._stage1_requester is not None
 
     def require_stage1_profile(self) -> None:
-        """Fail before an upload mutation when the official stage-one profile is unavailable."""
+        """Fail before an upload mutation when the stage-one requester is unavailable."""
         if self._stage1_requester is None:
             raise YandexUploadStage1UnavailableError(
                 "Yandex single-track upload stage one is BLOCKED: no ground-truth-verified "
-                "desktop stage-one host/profile has been supplied. No upload request was sent."
+                "desktop stage-one requester has been supplied. No upload request was sent."
             )
 
     @staticmethod
@@ -204,15 +236,15 @@ class YandexUploadTransport:
         return {"type": "string"}
 
     @staticmethod
-    def _extract_upload_url(payload: Any) -> str:
+    def _extract_http_url(payload: Any, keys: tuple[str, ...]) -> str | None:
         candidates: list[Any] = []
-        if isinstance(payload, str):
+        if isinstance(payload, str) and "url" in keys:
             candidates.append(payload)
         elif isinstance(payload, dict):
-            candidates.append(payload.get("url"))
+            candidates.extend(payload.get(key) for key in keys)
             result = payload.get("result")
             if isinstance(result, dict):
-                candidates.append(result.get("url"))
+                candidates.extend(result.get(key) for key in keys)
 
         for candidate in candidates:
             if not isinstance(candidate, str):
@@ -221,20 +253,32 @@ class YandexUploadTransport:
             parsed = urlparse(clean)
             if parsed.scheme in {"http", "https"} and parsed.netloc:
                 return clean
+        return None
+
+    @classmethod
+    def _extract_upload_url(cls, payload: Any) -> str:
+        url = cls._extract_http_url(payload, ("post-target", "postTarget", "url"))
+        if url:
+            return url
         raise YandexUploadProtocolError("loader/upload-url returned no usable HTTP(S) upload URL.")
+
+    @classmethod
+    def _extract_poll_url(cls, payload: Any) -> str | None:
+        return cls._extract_http_url(payload, ("poll-result", "pollResult"))
 
     @staticmethod
     def _extract_track_id(payload: Any) -> str | None:
-        """Extract an optional track identity from known shallow response shapes."""
+        """Extract the UGC identity from observed and legacy shallow shapes."""
         if not isinstance(payload, dict):
             return None
-        for key in ("trackId", "track_id", "id"):
+        keys = ("ugc-track-id", "ugcTrackId", "trackId", "track_id", "id")
+        for key in keys:
             value = payload.get(key)
             if value is not None and str(value).strip():
                 return str(value).strip()
         result = payload.get("result")
         if isinstance(result, dict):
-            for key in ("trackId", "track_id", "id"):
+            for key in keys:
                 value = result.get(key)
                 if value is not None and str(value).strip():
                     return str(value).strip()
@@ -248,7 +292,7 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> dict[str, str]:
-        """Build only the statically recovered stage-one query contract."""
+        """Build only the recovered stage-one query contract."""
         clean_path = str(path).strip()
         if not clean_path:
             raise YandexUploadProtocolError("Upload path is empty.")
@@ -282,6 +326,8 @@ class YandexUploadTransport:
         return YandexUploadSlot(
             upload_url=self._extract_upload_url(payload),
             response_shape=self._shape(payload),
+            poll_url=self._extract_poll_url(payload),
+            track_id=self._extract_track_id(payload),
         )
 
     def upload_file(self, slot: YandexUploadSlot, file_path: Path) -> YandexUploadTransferResult:
@@ -303,7 +349,10 @@ class YandexUploadTransport:
                     timeout=self._transfer_timeout_seconds,
                 )
         except requests.RequestException as exc:
-            raise YandexUploadProtocolError("Dynamic Yandex upload request failed.") from exc
+            kind = _safe_exception_kinds(exc)
+            raise YandexUploadProtocolError(
+                f"Dynamic Yandex upload request failed (transport={kind})."
+            ) from exc
 
         response_payload: Any = None
         content_type = str(response.headers.get("Content-Type", "")).lower()

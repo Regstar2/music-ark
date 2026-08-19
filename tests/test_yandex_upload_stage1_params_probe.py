@@ -32,6 +32,9 @@ class YandexUploadStage1ParamsProbeTests(unittest.TestCase):
         self.assertTrue(result["paramsFound"])
         self.assertTrue(result["commonSemanticPresent"])
         self.assertTrue(result["oauthSemanticPresent"])
+        self.assertIn("oauth", result["params"]["common"]["objectKeys"])
+        oauth_source = next(item for item in result["params"]["common"]["propertySources"] if item["key"] == "oauth")
+        self.assertEqual(oauth_source["sourceRefs"], [{"source_module_id": "10", "export_key": "value"}])
         encoded = json.dumps(result, ensure_ascii=False)
         self.assertNotIn("DO_NOT_EMIT", encoded)
         self.assertIn('"source_module_id": "10"', encoded)
@@ -41,6 +44,14 @@ class YandexUploadStage1ParamsProbeTests(unittest.TestCase):
         result = probe.analyze_body(body)
         refs = result["params"]["common"]["sourceRefs"]
         self.assertIn({"source_module_id": "55", "export_key": "common"}, refs)
+
+    def test_sensitive_property_name_is_filtered(self) -> None:
+        body = 'var s=n(12690),a=n(55);new s.S(client,{params:{common:{oauth:a.common,token:a.secret}}});'
+        result = probe.analyze_body(body)
+        keys = result["params"]["common"]["objectKeys"]
+        self.assertIn("oauth", keys)
+        self.assertNotIn("token", keys)
+        self.assertNotIn("secret", json.dumps(result))
 
     def test_no_params_is_reported_without_source_output(self) -> None:
         body = 'var s=n(12690);const secret="DO_NOT_EMIT";new s.S(client,{prefixUrl:p});'

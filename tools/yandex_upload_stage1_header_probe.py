@@ -44,6 +44,21 @@ _ANCHORS = (
     "clientRemoteType",
     "YandexMusicDesktopApp",
 )
+_HEADER_VALUE_SEMANTICS = {
+    "common",
+    "oauth",
+    "language",
+    "client",
+    "device",
+    "requestId",
+    "withoutInvocationInfo",
+    "clientRemoteType",
+}
+_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
+
+
+def _header_value_semantics(expression: str) -> list[str]:
+    return sorted({name for name in _IDENTIFIER_RE.findall(expression) if name in _HEADER_VALUE_SEMANTICS})
 
 
 def _header_bindings(module_id: str, body: str) -> list[dict[str, Any]]:
@@ -59,6 +74,9 @@ def _header_bindings(module_id: str, body: str) -> list[dict[str, Any]]:
                 imports,
                 body=body,
                 before=match.start(),
+            )
+            summary["semanticNames"] = sorted(
+                set(summary.get("semanticNames") or []) | set(_header_value_semantics(rhs))
             )
             record = {"header": header, "value": summary}
             if record not in results:

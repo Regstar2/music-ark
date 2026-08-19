@@ -1,9 +1,10 @@
 """Isolated experimental transport for the recovered Yandex Music UGC upload flow.
 
-Stage two is recovered with high confidence. Stage one remains intentionally
-fail-closed in production/research runtime because the official desktop client
-uses a non-public runtime prefix/authorization profile that has not been
-legitimately reproduced through MusicArk's existing credential boundary.
+Stage two is recovered with high confidence. Static data-flow analysis now also
+shows that the stage-one request class obtains authorization from the normal
+``common.oauth`` request configuration rather than from ``customApiToken``.
+The production stage-one host/prefix is still not ground-truth verified, so the
+normal MusicArk CLI remains fail-closed until an explicit profile is supplied.
 """
 
 from __future__ import annotations
@@ -33,6 +34,96 @@ class YandexUploadStage1Requester(Protocol):
         """Return the decoded response from the recovered loader/upload-url request."""
 
 
+class YandexOAuthStage1Requester:
+    """Explicit OAuth requester for a ground-truth-verified Yandex stage-one prefix.
+
+    The requester deliberately has no default host. A caller must provide the
+    exact HTTPS Yandex prefix observed from the official client. Authorization
+    uses the account OAuth credential because the recovered request data-flow
+    links the request class to ``common.oauth`` and does not reference
+    ``customApiToken`` in that authorization path.
+
+    This class performs exactly one POST and has no retry/fallback behavior.
+    It is intentionally not wired into the normal CLI until the host/profile is
+    independently observed at runtime.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        oauth_token: str,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        self._base_url = self._validate_base_url(base_url)
+        token = str(oauth_token or "").strip()
+        if not token:
+            raise YandexUploadProtocolError("Stage-one OAuth credential is empty.")
+        self._oauth_token = token
+        self._timeout_seconds = float(timeout_seconds)
+        if self._timeout_seconds <= 0:
+            raise YandexUploadProtocolError("Stage-one timeout must be positive.")
+
+    @staticmethod
+    def _validate_base_url(value: str) -> str:
+        clean = str(value or "").strip().rstrip("/")
+        parsed = urlparse(clean)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        yandex_host = any(
+            host == suffix or host.endswith(f".{suffix}")
+            for suffix in ("yandex.ru", "yandex.net", "yandex.com")
+        )
+        if (
+            parsed.scheme != "https"
+            or not host
+            or not yandex_host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise YandexUploadProtocolError(
+                "Stage-one base URL must be an explicit HTTPS Yandex host/prefix without credentials, query, or fragment."
+            )
+        return clean
+
+    @property
+    def sanitized_origin(self) -> str:
+        """Return only scheme/host/path; never credential data."""
+        parsed = urlparse(self._base_url)
+        path = parsed.path.rstrip("/")
+        return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+    def post_upload_url(self, params: dict[str, str]) -> Any:
+        endpoint = f"{self._base_url}/loader/upload-url"
+        try:
+            response = requests.post(
+                endpoint,
+                params=dict(params),
+                headers={"Authorization": f"OAuth {self._oauth_token}"},
+                timeout=self._timeout_seconds,
+            )
+        except requests.RequestException as exc:
+            raise YandexUploadProtocolError("Yandex stage-one OAuth request failed.") from exc
+
+        if not 200 <= int(response.status_code) <= 299:
+            raise YandexUploadProtocolError(
+                f"Yandex stage-one endpoint returned HTTP {int(response.status_code)}."
+            )
+
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if "json" in content_type:
+            try:
+                return response.json()
+            except ValueError as exc:
+                raise YandexUploadProtocolError("Yandex stage-one endpoint returned invalid JSON.") from exc
+
+        text = str(getattr(response, "text", "") or "").strip()
+        if text:
+            return text
+        raise YandexUploadProtocolError("Yandex stage-one endpoint returned an empty response.")
+
+
 @dataclass(slots=True, frozen=True)
 class YandexUploadSlot:
     """Prepared server-side upload slot returned by ``loader/upload-url``."""
@@ -54,11 +145,10 @@ class YandexUploadTransport:
     """Recovered two-stage upload transport with a fail-closed stage one.
 
     A stage-one requester must be injected explicitly. MusicArk deliberately has
-    no default requester because the previously assumed ordinary
-    ``api.music.yandex.net`` / Android-oriented ``yandex-music`` profile failed
-    live and the official desktop runtime uses an opaque custom prefix plus a
-    private token/configuration boundary. This class therefore cannot silently
-    fall back to the normal provider client.
+    no default requester because the production stage-one host/prefix has not yet
+    been observed from the official desktop runtime. The older Android-oriented
+    ``yandex-music`` request profile already failed live and is not used as a
+    fallback.
 
     Stage two uses a fresh HTTP request without Music API OAuth/session headers,
     matching the recovered ``excludeHeaders`` / ``withoutHeaders`` behavior.
@@ -82,9 +172,8 @@ class YandexUploadTransport:
         """Fail before an upload mutation when the official stage-one profile is unavailable."""
         if self._stage1_requester is None:
             raise YandexUploadStage1UnavailableError(
-                "Yandex single-track upload stage one is BLOCKED: the official desktop request "
-                "uses a non-public runtime prefix/authorization profile that is not available "
-                "through MusicArk's existing credential boundary. No upload request was sent."
+                "Yandex single-track upload stage one is BLOCKED: no ground-truth-verified "
+                "desktop stage-one host/profile has been supplied. No upload request was sent."
             )
 
     @staticmethod

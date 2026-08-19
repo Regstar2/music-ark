@@ -2,10 +2,18 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.9.7 — Settings, Help & About UI Polish.**  
+**Текущая версия кода: 0.10.0 — Yandex Upload Feasibility (BLOCKED).**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.9.7 завершает текущую v0.9.x UI-полировку переработкой Settings, расширенной offline Help и диагностического About без изменения музыкальной бизнес-логики.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. Ветка v0.9.x завершена. v0.10.0 исследует возможность загрузки пользовательского локального файла в Яндекс Музыку и фиксирует результат `BLOCKED`: воспроизводимый programmatic upload protocol через существующую авторизацию MusicArk не подтверждён.
+
+## Yandex Upload Feasibility v0.10.0
+
+Официальная справка Яндекс Музыки подтверждает пользовательский workflow загрузки собственных треков через сайт или desktop-приложение: пользователь выбирает/создаёт свой плейлист и загружает локальные файлы. Загрузка напрямую в `Мне нравится`, чужие и редакторские плейлисты не поддерживается; обложка, название и исполнитель берутся из файла.
+
+При этом проверенные первичные источники и закреплённый `yandex-music==3.0.0` не дают MusicArk подтверждённого HTTP upload contract: endpoint, method, request body/content type, достаточность текущего token, дополнительные cookies/session artifacts и response identity остаются неизвестными. Поэтому v0.10.0 не содержит production Upload UI, queue, reverse Sync, Matching/Coverage integration или guessed transport implementation.
+
+`YandexMusicProvider.can_upload_tracks` и `supports_user_uploads` остаются `false`. Существующий старый experimental compatibility path теперь fail-closed: он не читает candidate file, не пишет его путь в audit и не отправляет upload request. Полная evidence table: `docs/versions/v0.10.0.md`.
 
 ## Settings / Help / About v0.9.7
 
@@ -220,7 +228,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.9.7 не повышает SQLite schema. Utility UI использует существующие settings/session/version contracts и не добавляет таблицы или колонки. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.10.0 не повышает SQLite schema. Feasibility milestone не добавляет таблицы, upload history или persisted upload tasks. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -254,8 +262,10 @@ v0.9.3 — Matching UI Redesign                          complete
 v0.9.4 — Coverage / Missing UI Polish                  complete
 v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
 v0.9.6 — Sync Page UI Polish                           complete
-v0.9.7 — Settings, Help & About UI Polish              current
-v0.10.x — Yandex Upload                                next
+v0.9.7 — Settings, Help & About UI Polish              complete
+v0.9.x — UI improvement line                           complete
+v0.10.0 — Yandex Upload Feasibility                    complete / blocked
+next — upload architecture decision                    decision required
 ```
 
-Yandex Upload в v0.9.7 не реализован. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.9.7.md`, `docs/versions/v0.9.6.md`, `docs/architecture/ui-design-system.md`, `docs/architecture/app-shell-settings.md`, `docs/architecture/metadata-editor.md`, `docs/architecture/content-labels.md` и `docs/architecture/variant-acceptance.md`.
+Production Yandex Upload в v0.10.0 не реализован. Milestone подтверждает только наличие пользовательского UI-workflow у Яндекса и документирует отсутствие доказанного programmatic protocol для MusicArk. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.10.0.md`.

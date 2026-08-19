@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.9.7"
+version = "0.10.0"
 description = "MusicArk cache-first Yandex, local library, identity matching, coverage, controlled sync, authorized download, explicit local metadata editing, and desktop settings app"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]
 dependencies = [
+  "httpx[http2]>=0.28,<1",
   "imageio-ffmpeg==0.6.0",
   "keyring==25.7.0",
   "mutagen>=1.47.0",

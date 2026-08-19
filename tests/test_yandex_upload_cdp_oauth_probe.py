@@ -22,6 +22,7 @@ _TOOL = _TOOLS / "yandex_upload_cdp_oauth_probe.py"
 _SPEC = importlib.util.spec_from_file_location("yandex_upload_cdp_oauth_probe", _TOOL)
 assert _SPEC is not None and _SPEC.loader is not None
 probe = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = probe
 _SPEC.loader.exec_module(probe)
 
 

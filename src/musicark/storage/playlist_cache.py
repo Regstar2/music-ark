@@ -61,8 +61,19 @@ def _playlist_track_count(playlist: ProviderPlaylist) -> int:
     return len(playlist.track_external_ids)
 
 
+def _playlist_uuid(playlist: ProviderPlaylist) -> str | None:
+    """Return the provider playlist UUID without persisting unrelated raw payload."""
+    raw = playlist.raw_data
+    for key in ("playlist_uuid", "playlistUuid", "uuid"):
+        value = raw.get(key)
+        clean = str(value or "").strip()
+        if clean:
+            return clean
+    return None
+
+
 def _playlist_metadata(playlist: ProviderPlaylist) -> dict[str, Any]:
-    return {
+    metadata = {
         "providerId": playlist.provider_id,
         "externalId": playlist.external_id,
         "title": playlist.title,
@@ -70,6 +81,10 @@ def _playlist_metadata(playlist: ProviderPlaylist) -> dict[str, Any]:
         "visibility": playlist.visibility,
         "trackCount": _playlist_track_count(playlist),
     }
+    playlist_uuid = _playlist_uuid(playlist)
+    if playlist_uuid:
+        metadata["playlistUuid"] = playlist_uuid
+    return metadata
 
 
 def _unique_playlists(playlists: Iterable[ProviderPlaylist]) -> list[ProviderPlaylist]:

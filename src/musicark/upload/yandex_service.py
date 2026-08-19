@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 import json
 from pathlib import Path
 import time
@@ -23,7 +23,7 @@ from musicark.storage.audit_log import AuditEvent, AuditLogRepository
 from musicark.storage.local_library_storage import LocalLibraryStorageRepository
 
 
-class YandexUploadStatus(StrEnum):
+class YandexUploadStatus(str, Enum):
     """Stable result states exposed to bridges and Flutter."""
 
     VERIFIED = "verified"

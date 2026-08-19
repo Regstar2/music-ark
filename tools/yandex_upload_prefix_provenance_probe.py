@@ -6,7 +6,7 @@ containing ``prefixUrl``. This probe normalizes only that RHS and nearby alias
 assignments.
 
 The normalized expression may contain operators, numeric module IDs, stable
-webpack export keys, allowlisted config-property names, hashed local aliases and
+webpack export keys, allowlisted config/method names, hashed local aliases and
 public Yandex URL/domain fragments. Ordinary string values, credential values,
 raw local identifiers and JavaScript source are never emitted.
 """
@@ -38,6 +38,24 @@ TARGET_PROPERTIES = {
     "authorization",
     "headers",
     "clientRemoteType",
+}
+ALLOWLISTED_MEMBERS = {
+    "getApiPrefixUrl",
+    "getClientSafeConfig",
+    "getApiToken",
+    "getApiTokenValue",
+    "customApiPrefixUrl",
+    "customApiToken",
+    "apiPrefixUrl",
+    "apiToken",
+    "prefixUrl",
+    "clientSafeConfig",
+    "clientRemoteType",
+    "createRequestHeaders",
+    "createSessionRequestHeaders",
+    "createHttpOptions",
+    "authorization",
+    "headers",
 }
 _SAFE_EXPORT_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,80}$")
 _SAFE_YANDEX_FRAGMENT_RE = re.compile(r"^[A-Za-z0-9_:/.-]{1,200}yandex[A-Za-z0-9_:/.-]{0,200}$", re.IGNORECASE)
@@ -89,6 +107,12 @@ def _read_js_string(text: str, index: int) -> tuple[str, int]:
     return "".join(chars), index
 
 
+def _member_token(module_id: str, base: str, member: str) -> str:
+    if member in ALLOWLISTED_MEMBERS:
+        return f"{base}.member:{member}"
+    return f"{base}.member:{dataflow_probe._alias(module_id, member)}"  # noqa: SLF001
+
+
 def _normalized_expression(
     module_id: str,
     expression: str,
@@ -115,7 +139,9 @@ def _normalized_expression(
             while index < len(expression) and (expression[index].isalnum() or expression[index] in "_$"):
                 index += 1
             identifier = expression[start:index]
-            # Imported module member: alias.exportKey
+
+            # Imported module member: alias.exportKey. Export keys are stable
+            # webpack interface identifiers and are safe to preserve.
             if identifier in import_map and index < len(expression) and expression[index] == ".":
                 member_start = index + 1
                 member_end = member_start
@@ -126,6 +152,20 @@ def _normalized_expression(
                     tokens.append(f"m{import_map[identifier]}.{member}")
                     index = member_end
                     continue
+
+            # Preserve only explicitly allowlisted config/request members on
+            # ``this``. Unknown members are hashed rather than emitted.
+            if identifier == "this" and index < len(expression) and expression[index] == ".":
+                member_start = index + 1
+                member_end = member_start
+                while member_end < len(expression) and (expression[member_end].isalnum() or expression[member_end] in "_$"):
+                    member_end += 1
+                member = expression[member_start:member_end]
+                if _SAFE_EXPORT_RE.fullmatch(member):
+                    tokens.append(_member_token(module_id, "this", member))
+                    index = member_end
+                    continue
+
             if identifier in import_map:
                 tokens.append(f"m{import_map[identifier]}")
             elif identifier in TARGET_PROPERTIES:
@@ -156,7 +196,7 @@ def _normalized_expression(
 
 
 def _slice_rhs(text: str, start: int) -> str:
-    """Slice one assignment/property RHS up to a top-level comma/semicolon/brace."""
+    """Slice one assignment/property RHS up to a top-level separator/closing delimiter."""
     stack: list[str] = []
     pairs = {")": "(", "]": "[", "}": "{"}
     quote: str | None = None
@@ -179,8 +219,13 @@ def _slice_rhs(text: str, start: int) -> str:
             continue
         if char in "([{":
             stack.append(char)
-        elif char in ")]}" and stack and stack[-1] == pairs[char]:
-            stack.pop()
+        elif char in ")]}":
+            if stack and stack[-1] == pairs[char]:
+                stack.pop()
+            elif not stack:
+                break
+            else:
+                break
         elif not stack and char in ",;":
             break
         index += 1
@@ -342,7 +387,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                 }
             )
     return {
-        "format": "musicark-yandex-upload-prefix-provenance-v1",
+        "format": "musicark-yandex-upload-prefix-provenance-v2",
         "source": "asar-stage1-prefix-normalized-provenance",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

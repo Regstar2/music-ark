@@ -3,9 +3,9 @@
 The request class ``31322.X`` is already proven to emit ``OAuth <value>`` while
 not referencing ``customApiToken``. This probe identifies the bare local used in
 that authorization expression and traces its nearest assignment/destructuring
-source within the class/module. Local names are hashed. Exact non-sensitive
-semantic properties such as ``oauth`` or ``config`` may be emitted; values never
-are.
+source within the class/module. Local names are hashed. Exact property names on
+the proven ``this.config.<schema>.common.oauth`` path may be emitted because they
+are schema names rather than scalar credential values.
 """
 
 from __future__ import annotations
@@ -29,8 +29,9 @@ import yandex_upload_target_probe as target_probe
 MODULE_ID = "31322"
 EXPORT_KEY = "X"
 _SEMANTIC_PROPERTIES = {"oauth", "authorization", "config", "httpClient", "headers", "prefixUrl", "clientRemoteType", "account", "user", "common"}
-_SENSITIVE_PROPERTY_RE = re.compile(r"(?:secret|cookie|session|password|credential|signature|customApiToken)", re.IGNORECASE)
+_SENSITIVE_VALUE_RE = re.compile(r"(?:secret|cookie|session|password|credential|signature)", re.IGNORECASE)
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
+_SCHEMA_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,100}$")
 
 
 def _hash(value: str) -> str:
@@ -89,7 +90,7 @@ def _safe_member_path(expression: str) -> list[str] | None:
     if not match:
         return None
     values = [item for item in match.groups() if item]
-    if any(_SENSITIVE_PROPERTY_RE.search(item) for item in values):
+    if any(_SENSITIVE_VALUE_RE.search(item) for item in values):
         return None
     return ["this", *[_safe_property(item) for item in values]]
 
@@ -100,13 +101,10 @@ def _semantic_oauth_sources(expression: str, class_fragment: str) -> list[dict[s
     results: list[dict[str, Any]] = []
     params = _constructor_params(class_fragment)
 
-    # Direct constructor-param.common.oauth path.
     for index, param in enumerate(params):
         if re.search(rf"\b{re.escape(param)}\.common\.oauth\b", compact):
             results.append({"kind": "constructor-param-path", "index": index, "path": ["common", "oauth"]})
 
-    # TypeScript optional-chain lowering commonly assigns a temporary parameter:
-    # `(tmp = source.common) ... tmp.oauth`. Recognize the relation structurally.
     for source_index, source_param in enumerate(params):
         for temp_index, temp_param in enumerate(params):
             if source_index == temp_index:
@@ -118,14 +116,15 @@ def _semantic_oauth_sources(expression: str, class_fragment: str) -> list[dict[s
                 if item not in results:
                     results.append(item)
 
-    # Fallback stored in the request config. The intermediate config key is a
-    # semantic property on an exact OAuth path; emit it only if non-sensitive.
+    # This is an exact schema path, so the intermediate key may be emitted as a
+    # name even if it contains a word such as "token". No value of that property
+    # is ever included.
     pattern = re.compile(r"\bthis\.config\.(?P<key>[A-Za-z_$][A-Za-z0-9_$]*)\.common\.oauth\b")
     for match in pattern.finditer(compact):
         key = match.group("key")
-        if _SENSITIVE_PROPERTY_RE.search(key):
+        if not _SCHEMA_RE.fullmatch(key):
             continue
-        item = {"kind": "request-config-path", "path": ["this", "config", _safe_property(key), "common", "oauth"]}
+        item = {"kind": "request-config-path", "path": ["this", "config", key, "common", "oauth"]}
         if item not in results:
             results.append(item)
     return results[:20]
@@ -243,7 +242,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                     "analysis": analyze_body(module["body"]),
                 })
     return {
-        "format": "musicark-yandex-upload-oauth-binding-v1",
+        "format": "musicark-yandex-upload-oauth-binding-v2",
         "source": "asar-stage1-oauth-local-binding-lineage",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

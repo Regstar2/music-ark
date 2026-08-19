@@ -187,14 +187,24 @@ def _stage1_path(file_path: Path, mode: str) -> str:
     return file_path.name if mode == "name" else str(file_path)
 
 
-def _live_transport(base_dir: Path | None = None, stage1_base_url: str | None = None) -> YandexUploadTransport:
-    """Build a fail-closed transport or one explicit ground-truth OAuth requester."""
+def _live_transport(
+    base_dir: Path | None = None,
+    stage1_base_url: str | None = None,
+    *,
+    transport_mode: str = "requests",
+    client_profile: str = "bare",
+    trust_env: bool = True,
+) -> YandexUploadTransport:
+    """Build a fail-closed transport or one explicit evidence-backed requester."""
     clean_base_url = str(stage1_base_url or "").strip()
     if not clean_base_url:
         return YandexUploadTransport()
     requester = YandexOAuthStage1Requester(
         base_url=clean_base_url,
         oauth_token=_saved_token(base_dir),
+        transport_mode=transport_mode,
+        client_profile=client_profile,
+        trust_env=trust_env,
     )
     return YandexUploadTransport(requester)
 
@@ -204,12 +214,22 @@ def _base_dir_from_args(args: argparse.Namespace) -> Path | None:
     return Path(value) if value else None
 
 
+def _transport_from_args(args: argparse.Namespace, base_dir: Path | None) -> YandexUploadTransport:
+    return _live_transport(
+        base_dir,
+        getattr(args, "stage1_base_url", None),
+        transport_mode=getattr(args, "stage1_transport", "requests"),
+        client_profile=getattr(args, "stage1_client_profile", "bare"),
+        trust_env=not bool(getattr(args, "stage1_ignore_env", False)),
+    )
+
+
 def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
     if not args.confirm_prepare:
         raise YandexUploadProtocolError("prepare mode requires --confirm-prepare.")
 
     base_dir = _base_dir_from_args(args)
-    transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
+    transport = _transport_from_args(args, base_dir)
     transport.require_stage1_profile()
 
     _client, playlist, file_path, uid, playlist_id, observed_visibility = _prepare_context(args)
@@ -237,6 +257,7 @@ def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
             "pollUrlPresent": bool(slot.poll_url),
             "trackIdPresent": bool(slot.track_id),
             "visibilitySent": False,
+            "requestProfile": transport.stage1_profile,
             "responseShape": slot.response_shape,
         },
     }
@@ -251,7 +272,7 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         )
 
     base_dir = _base_dir_from_args(args)
-    transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
+    transport = _transport_from_args(args, base_dir)
     transport.require_stage1_profile()
 
     client, playlist, file_path, uid, playlist_id, observed_visibility = _prepare_context(args)
@@ -293,6 +314,7 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "pollUrlPresent": bool(slot.poll_url),
             "trackIdPresent": bool(slot.track_id),
             "visibilitySent": False,
+            "requestProfile": transport.stage1_profile,
             "responseShape": slot.response_shape,
         },
         "stage2": {
@@ -317,6 +339,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--stage1-base-url",
         default=None,
         help="Explicit ground-truth-verified HTTPS Yandex stage-one prefix. No default or fallback is used.",
+    )
+    parser.add_argument(
+        "--stage1-transport",
+        choices=("requests", "http2"),
+        default="requests",
+        help="Explicit stage-one HTTP stack. http2 uses HTTPX with HTTP/2 enabled; no automatic fallback occurs.",
+    )
+    parser.add_argument(
+        "--stage1-client-profile",
+        choices=("bare", "desktop"),
+        default="bare",
+        help="Public request-header profile. desktop adds only X-Yandex-Music-Client: YandexMusicDesktopApp.",
+    )
+    parser.add_argument(
+        "--stage1-ignore-env",
+        action="store_true",
+        help="Ignore proxy/SSL environment configuration for the stage-one request only.",
     )
     parser.add_argument(
         "--playlist-id-source",

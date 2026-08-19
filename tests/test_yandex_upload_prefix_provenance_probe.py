@@ -36,6 +36,19 @@ class YandexUploadPrefixProvenanceProbeTests(unittest.TestCase):
         self.assertTrue(any(item.startswith("alias:") for item in tokens))
         self.assertNotIn("localPrefix", encoded)
 
+    def test_allowlisted_this_members_survive_unknown_member_is_hashed(self) -> None:
+        tokens = probe._normalized_expression(  # noqa: SLF001
+            "7644",
+            "this.getApiPrefixUrl(this.clientSafeConfig,this.minifiedInternal)",
+            [],
+        )
+        encoded = json.dumps(tokens)
+        self.assertIn("this.member:getApiPrefixUrl", tokens)
+        self.assertIn("this.member:clientSafeConfig", tokens)
+        unknown = [item for item in tokens if item.startswith("this.member:alias:")]
+        self.assertEqual(len(unknown), 1)
+        self.assertNotIn("minifiedInternal", encoded)
+
     def test_public_yandex_literal_is_allowed_but_query_values_are_removed(self) -> None:
         tokens = probe._normalized_expression(  # noqa: SLF001
             "7644",
@@ -73,6 +86,16 @@ class YandexUploadPrefixProvenanceProbeTests(unittest.TestCase):
         self.assertTrue(binding["normalizedRhs"][0].startswith("alias:"))
         self.assertNotIn("privateAlias", encoded)
         self.assertNotIn("SUPER_SECRET", encoded)
+
+    def test_slice_rhs_stops_at_object_closing_brace(self) -> None:
+        text = "customApiToken:privateAlias},nextCall()"
+        start = text.index(":") + 1
+        self.assertEqual(probe._slice_rhs(text, start), "privateAlias")  # noqa: SLF001
+
+    def test_slice_rhs_keeps_nested_closing_braces_but_stops_at_outer_boundary(self) -> None:
+        text = "prefixUrl:factory({x:value})},other"
+        start = text.index(":") + 1
+        self.assertEqual(probe._slice_rhs(text, start), "factory({x:value})")  # noqa: SLF001
 
     def test_assignment_map_does_not_return_raw_alias_names(self) -> None:
         body = "const alpha=beta+gamma;const unrelated='DO_NOT_EMIT';"

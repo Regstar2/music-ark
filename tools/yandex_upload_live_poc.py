@@ -1,14 +1,13 @@
 """Explicit local runner for the experimental Yandex own-track upload PoC.
 
 The runner is intentionally separate from MusicArk Sync/UI. It never accepts a
-Yandex token on the command line, never prints the token or the dynamic upload
-URL, and requires explicit opt-in before any network mutation.
+Yandex token on the command line, never prints the token or dynamic upload URLs,
+and requires explicit opt-in before any network mutation.
 
-Stage one remains fail-closed by default. A direct experiment is available only
-when the caller explicitly supplies a ground-truth-verified HTTPS Yandex
-``--stage1-base-url``; the requester then uses the already-saved MusicArk account
-OAuth credential recovered by the normal credential boundary. There is no
-default host, retry, or host/header fallback.
+The official desktop runtime has verified ``https://api.music.yandex.net`` as the
+stage-one origin and observed a stage-one response containing ``post-target``,
+``poll-result`` and ``ugc-track-id``. Direct HTTP still requires an explicit
+``--stage1-base-url`` so normal MusicArk behavior remains fail-closed.
 """
 
 from __future__ import annotations
@@ -128,7 +127,7 @@ def _classify_readback_identity(
             "verified": True,
             "newTrackIds": sorted(new_ids),
             "verifiedTrackId": clean_reported,
-            "identitySource": "stage2-track-id",
+            "identitySource": "reported-track-id",
             "ambiguous": False,
         }
     if len(new_ids) == 1:
@@ -213,11 +212,14 @@ def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
     transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
     transport.require_stage1_profile()
 
-    client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
+    _client, playlist, file_path, uid, playlist_id, observed_visibility = _prepare_context(args)
+    # The verified desktop stage-one trace contained uid, playlist-id and path,
+    # but no visibility query parameter. Direct experiments therefore follow the
+    # observed request instead of adding the statically optional parameter.
     slot = transport.prepare_upload(
         uid=uid,
         playlist_id=playlist_id,
-        visibility=visibility,
+        visibility=None,
         path=_stage1_path(file_path, args.path_mode),
     )
     return {
@@ -227,10 +229,16 @@ def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
         "playlist": {
             "kind": str(getattr(playlist, "kind", "")),
             "playlistIdSource": args.playlist_id_source,
-            "visibility": visibility,
+            "observedVisibility": observed_visibility,
         },
         "file": _file_summary(file_path),
-        "stage1": {"uploadUrlPresent": bool(slot.upload_url), "responseShape": slot.response_shape},
+        "stage1": {
+            "uploadUrlPresent": bool(slot.upload_url),
+            "pollUrlPresent": bool(slot.poll_url),
+            "trackIdPresent": bool(slot.track_id),
+            "visibilitySent": False,
+            "responseShape": slot.response_shape,
+        },
     }
 
 
@@ -246,23 +254,24 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
     transport.require_stage1_profile()
 
-    client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
+    client, playlist, file_path, uid, playlist_id, observed_visibility = _prepare_context(args)
     before_ids = _playlist_track_ids(playlist)
     slot = transport.prepare_upload(
         uid=uid,
         playlist_id=playlist_id,
-        visibility=visibility,
+        visibility=None,
         path=_stage1_path(file_path, args.path_mode),
     )
     transfer = transport.upload_file(slot, file_path)
+    reported_track_id = transfer.track_id or slot.track_id
 
     attempts_used = 0
-    readback = _classify_readback_identity(before_ids, before_ids, transfer.track_id)
+    readback = _classify_readback_identity(before_ids, before_ids, reported_track_id)
     for attempt in range(1, args.readback_attempts + 1):
         attempts_used = attempt
         current = _refresh_playlist(client, args.playlist_kind, uid)
         current_ids = _playlist_track_ids(current)
-        readback = _classify_readback_identity(before_ids, current_ids, transfer.track_id)
+        readback = _classify_readback_identity(before_ids, current_ids, reported_track_id)
         if readback["verified"] or readback["ambiguous"]:
             break
         if attempt < args.readback_attempts:
@@ -276,10 +285,16 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "playlist": {
             "kind": str(getattr(playlist, "kind", "")),
             "playlistIdSource": args.playlist_id_source,
-            "visibility": visibility,
+            "observedVisibility": observed_visibility,
         },
         "file": _file_summary(file_path),
-        "stage1": {"uploadUrlPresent": bool(slot.upload_url), "responseShape": slot.response_shape},
+        "stage1": {
+            "uploadUrlPresent": bool(slot.upload_url),
+            "pollUrlPresent": bool(slot.poll_url),
+            "trackIdPresent": bool(slot.track_id),
+            "visibilitySent": False,
+            "responseShape": slot.response_shape,
+        },
         "stage2": {
             "httpStatus": transfer.status_code,
             "responseShape": transfer.response_shape,

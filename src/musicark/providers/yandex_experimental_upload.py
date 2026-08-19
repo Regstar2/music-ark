@@ -1,7 +1,7 @@
 """Fail-closed compatibility boundary for the obsolete Yandex upload experiment.
 
 v0.10.0 feasibility is complete and v0.11.0 provides a separate production
-single-track upload service.  This legacy module remains intentionally disabled
+single-track upload service. This legacy module remains intentionally disabled
 so old commands/scripts cannot silently turn into a real upload mutation.
 """
 
@@ -14,9 +14,9 @@ from musicark.providers.yandex_music_provider import YandexMusicError
 
 
 _BLOCKED_MESSAGE = (
-    "The legacy experimental_yandex_upload action is deprecated and disabled. "
-    "Use the explicit v0.11.0 yandex_upload_track production workflow instead. "
-    "No Yandex upload request was sent."
+    "BLOCKED legacy experimental_yandex_upload action: this deprecated compatibility "
+    "entry point is intentionally disabled. Use the explicit v0.11.0 "
+    "yandex_upload_track production workflow instead. No Yandex upload request was sent."
 )
 
 

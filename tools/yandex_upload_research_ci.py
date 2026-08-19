@@ -34,6 +34,7 @@ import yandex_upload_runtime_profile_probe as runtime_profile
 import yandex_upload_runtime_topology_probe as topology
 import yandex_upload_stage1_auth_lineage_probe as auth_lineage
 import yandex_upload_stage1_context_probe as stage1_context
+import yandex_upload_stage1_hooks_export_probe as stage1_hooks_export
 import yandex_upload_stage1_params_probe as stage1_params
 import yandex_upload_stage1_prefix_use_site_probe as stage1_prefix_use_site
 import yandex_upload_stage1_role_probe as stage1_role
@@ -71,6 +72,7 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-passport-host-source-v38-ci.json", passport_host_source.build_report),
     ("yandex-upload-stage1-context-v39-ci.json", stage1_context.build_report),
     ("yandex-upload-stage1-prefix-use-site-v40-ci.json", stage1_prefix_use_site.build_report),
+    ("yandex-upload-stage1-hooks-export-v41-ci.json", stage1_hooks_export.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

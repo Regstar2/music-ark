@@ -29,9 +29,12 @@ _SPEC.loader.exec_module(probe)
 class _FakeCdpClient:
     runtime_value: dict = {}
     last_expression: str = ""
+    events: list[dict] = []
+    response_body_result: dict = {}
 
     def __init__(self, url: str) -> None:
         self.url = url
+        self._events = list(type(self).events)
 
     def __enter__(self):
         return self
@@ -40,15 +43,29 @@ class _FakeCdpClient:
         return None
 
     def call(self, method: str, params=None, *, timeout: float = 5.0):  # noqa: ANN001
-        if method == "Runtime.enable":
+        if method in {"Network.enable", "Runtime.enable"}:
             return {}
         if method == "Runtime.evaluate":
             type(self).last_expression = str((params or {}).get("expression") or "")
             return {"result": {"type": "object", "value": dict(type(self).runtime_value)}}
+        if method == "Network.getResponseBody":
+            return dict(type(self).response_body_result)
         raise AssertionError(f"Unexpected CDP method: {method}")
+
+    def recv_event(self, *, timeout: float = 0.5):
+        _ = timeout
+        if self._events:
+            return self._events.pop(0)
+        return None
 
 
 class YandexUploadCdpOauthProbeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _FakeCdpClient.events = []
+        _FakeCdpClient.response_body_result = {}
+        _FakeCdpClient.runtime_value = {}
+        _FakeCdpClient.last_expression = ""
+
     def _args(self, file_path: Path, *, base_dir: Path | None = None) -> argparse.Namespace:
         return argparse.Namespace(
             base_dir=str(base_dir) if base_dir is not None else None,
@@ -194,6 +211,7 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             self.assertEqual(payload["status"], "upload_url_obtained")
             self.assertEqual(payload["diagnosis"], "python-transport-mismatch-confirmed")
             self.assertTrue(payload["stage1"]["uploadUrlPresent"])
+            self.assertTrue(payload["network"]["stage1Sent"])
             self.assertFalse(payload["network"]["stage2Sent"])
             self.assertEqual(payload["network"]["browserCredentialsMode"], "omit")
             self.assertFalse(payload["stage1"]["pythonYandexClientInitialized"])
@@ -241,6 +259,121 @@ class YandexUploadCdpOauthProbeTests(unittest.TestCase):
             self.assertEqual(payload["diagnosis"], "chromium-network-path-failed")
             self.assertEqual(payload["stage1"]["networkErrorClass"], "TypeError")
             self.assertIsNone(payload["stage1"]["httpStatus"])
+            self.assertFalse(payload["network"]["stage1Sent"])
+
+    def test_cors_preflight_is_not_mislabeled_as_stage1_post(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "owned.mp3"
+            file_path.write_bytes(b"audio")
+            _FakeCdpClient.runtime_value = {"networkCompleted": False, "errorName": "TypeError"}
+            _FakeCdpClient.events = [
+                {
+                    "method": "Network.requestWillBeSent",
+                    "params": {
+                        "requestId": "preflight-secret-id",
+                        "request": {
+                            "url": "https://api.music.yandex.net/loader/upload-url?uid=secret&playlist-id=secret",
+                            "method": "OPTIONS",
+                        },
+                    },
+                },
+                {
+                    "method": "Network.responseReceived",
+                    "params": {
+                        "requestId": "preflight-secret-id",
+                        "response": {
+                            "url": "https://api.music.yandex.net/loader/upload-url?uid=secret&playlist-id=secret",
+                            "status": 204,
+                        },
+                    },
+                },
+                {
+                    "method": "Network.loadingFailed",
+                    "params": {
+                        "requestId": "preflight-secret-id",
+                        "blockedReason": "origin",
+                        "corsErrorStatus": {
+                            "corsError": "HeaderDisallowedByPreflightResponse",
+                            "failedParameter": "do-not-return-this-header-name",
+                        },
+                    },
+                },
+            ]
+            payload, code = self._run_with_common_patches(file_path)
+
+            self.assertEqual(code, 3)
+            self.assertFalse(payload["network"]["stage1Sent"])
+            self.assertFalse(payload["network"]["stage1PostObservedByCdp"])
+            self.assertTrue(payload["network"]["corsPreflightObservedByCdp"])
+            self.assertEqual(payload["diagnosis"], "chromium-renderer-policy-blocked-stage1")
+            self.assertEqual(payload["stage1"]["cdpNetwork"]["preflightHttpStatus"], 204)
+            self.assertEqual(payload["stage1"]["cdpNetwork"]["blockedReason"], "origin")
+            self.assertEqual(
+                payload["stage1"]["cdpNetwork"]["corsError"],
+                "HeaderDisallowedByPreflightResponse",
+            )
+            serialized = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("preflight-secret-id", serialized)
+            self.assertNotIn("do-not-return-this-header-name", serialized)
+            self.assertNotIn("uid=secret", serialized)
+
+    def test_cdp_http_200_can_recover_slot_when_renderer_fetch_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "owned.mp3"
+            file_path.write_bytes(b"audio")
+            _FakeCdpClient.runtime_value = {"networkCompleted": False, "errorName": "TypeError"}
+            _FakeCdpClient.events = [
+                {
+                    "method": "Network.requestWillBeSent",
+                    "params": {
+                        "requestId": "post-secret-id",
+                        "request": {
+                            "url": "https://api.music.yandex.net/loader/upload-url?uid=secret&playlist-id=secret",
+                            "method": "POST",
+                        },
+                    },
+                },
+                {
+                    "method": "Network.responseReceived",
+                    "params": {
+                        "requestId": "post-secret-id",
+                        "response": {
+                            "url": "https://api.music.yandex.net/loader/upload-url?uid=secret&playlist-id=secret",
+                            "status": 200,
+                        },
+                    },
+                },
+                {
+                    "method": "Network.loadingFinished",
+                    "params": {"requestId": "post-secret-id"},
+                },
+            ]
+            _FakeCdpClient.response_body_result = {
+                "body": json.dumps(
+                    {
+                        "post-target": "https://signed.example.invalid/upload?secret=value",
+                        "poll-result": "https://signed.example.invalid/poll?secret=value",
+                        "ugc-track-id": "track-secret-id",
+                    }
+                ),
+                "base64Encoded": False,
+            }
+            payload, code = self._run_with_common_patches(file_path)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["status"], "upload_url_obtained")
+            self.assertEqual(payload["diagnosis"], "python-transport-mismatch-confirmed")
+            self.assertTrue(payload["network"]["stage1Sent"])
+            self.assertTrue(payload["network"]["stage1PostObservedByCdp"])
+            self.assertEqual(payload["stage1"]["httpStatus"], 200)
+            self.assertTrue(payload["stage1"]["uploadUrlPresent"])
+            self.assertTrue(payload["stage1"]["pollUrlPresent"])
+            self.assertTrue(payload["stage1"]["trackIdPresent"])
+            self.assertFalse(payload["stage1"]["rendererFetchCompleted"])
+            serialized = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn("signed.example.invalid", serialized)
+            self.assertNotIn("track-secret-id", serialized)
+            self.assertNotIn("post-secret-id", serialized)
 
     def test_cached_context_uses_account_and_playlist_uuid_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

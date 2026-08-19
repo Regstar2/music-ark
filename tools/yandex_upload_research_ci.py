@@ -17,6 +17,8 @@ from typing import Any, Callable
 import yandex_upload_prefix_factory_probe as prefix_factory
 import yandex_upload_prefix_import_binding_probe as prefix_binding
 import yandex_upload_prefix_provenance_probe as prefix_provenance
+import yandex_upload_prefix_template_probe as prefix_template
+import yandex_upload_request_stack_probe as request_stack
 import yandex_upload_runtime_composition_probe as composition
 import yandex_upload_runtime_config_probe as runtime_config
 import yandex_upload_runtime_dataflow_probe as dataflow
@@ -43,6 +45,8 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-prefix-import-binding-v24-ci.json", prefix_binding.build_report),
     ("yandex-upload-tld-lineage-v25-ci.json", tld_lineage.build_report),
     ("yandex-upload-stage1-auth-lineage-v26-ci.json", auth_lineage.build_report),
+    ("yandex-upload-prefix-template-v27-ci.json", prefix_template.build_report),
+    ("yandex-upload-request-stack-v28-ci.json", request_stack.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

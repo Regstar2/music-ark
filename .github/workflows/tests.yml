@@ -16,31 +16,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Select healthy Python
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $selectedVersion = $null
-          if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-            throw "Windows Python launcher 'py' is required on the self-hosted runner."
-          }
+          if (-not (Get-Command py -ErrorAction SilentlyContinue)) { throw "Windows Python launcher 'py' is required on the self-hosted runner." }
           py -0p
           foreach ($version in @("3.13", "3.12", "3.11", "3.10")) {
             & py "-$version" -c "import ctypes, pip" 2>$null
             if ($LASTEXITCODE -eq 0) { $selectedVersion = $version; break }
           }
-          if (-not $selectedVersion) {
-            throw "No healthy Python installation with ctypes and pip was found on the self-hosted runner."
-          }
+          if (-not $selectedVersion) { throw "No healthy Python installation with ctypes and pip was found on the self-hosted runner." }
           "MUSICARK_PYTHON_VERSION=$selectedVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
           & py "-$selectedVersion" --version
           & py "-$selectedVersion" -m pip --version
-
       - name: Install package
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install -e .'
-
       - name: Run unit tests
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
@@ -50,29 +43,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Select healthy Python
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $selectedVersion = $null
-          if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-            throw "Windows Python launcher 'py' is required on the self-hosted runner."
-          }
+          if (-not (Get-Command py -ErrorAction SilentlyContinue)) { throw "Windows Python launcher 'py' is required on the self-hosted runner." }
           foreach ($version in @("3.13", "3.12", "3.11", "3.10")) {
             & py "-$version" -c "import ctypes, pip" 2>$null
             if ($LASTEXITCODE -eq 0) { $selectedVersion = $version; break }
           }
-          if (-not $selectedVersion) {
-            throw "No healthy Python installation with ctypes and pip was found on the self-hosted runner."
-          }
+          if (-not $selectedVersion) { throw "No healthy Python installation with ctypes and pip was found on the self-hosted runner." }
           "MUSICARK_PYTHON_VERSION=$selectedVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
           & py "-$selectedVersion" --version
-
       - name: Install package
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install -e .'
-
       - name: Run upload feasibility tests
         shell: pwsh
         run: |
@@ -80,42 +66,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       - name: Run sanitized runtime profile probes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $asar = Join-Path $env:LOCALAPPDATA "Programs\YandexMusic\resources\app.asar"
-          if (-not (Test-Path -LiteralPath $asar -PathType Leaf)) {
-            throw "Official Yandex Music app.asar is not available on the self-hosted runner."
-          }
+          if (-not (Test-Path -LiteralPath $asar -PathType Leaf)) { throw "Official Yandex Music app.asar is not available on the self-hosted runner." }
           $expected = "8e7f4cec0776c39f194dee0a94086548d13f1465d46aa05d3e00a21624cbe80a"
           $actual = (Get-FileHash -LiteralPath $asar -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) {
-            throw "Yandex Music app.asar SHA-256 does not match the researched desktop build."
-          }
+          if ($actual -ne $expected) { throw "Yandex Music app.asar SHA-256 does not match the researched desktop build." }
 
           $profileOutput = ".musicark\research\yandex-upload-runtime-profile-v15-ci.json"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_profile_probe.py $asar --output $profileOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           $configOutput = ".musicark\research\yandex-upload-runtime-config-v16-ci.json"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_config_probe.py $asar --output $configOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           $dataflowOutput = ".musicark\research\yandex-upload-runtime-dataflow-v17-ci.json"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_dataflow_probe.py $asar --output $dataflowOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           $topologyOutput = ".musicark\research\yandex-upload-runtime-topology-v18-ci.json"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_topology_probe.py $asar --output $topologyOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
           $compositionOutput = ".musicark\research\yandex-upload-runtime-composition-v19-ci.json"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_composition_probe.py $asar --output $compositionOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $stage1RoleOutput = ".musicark\research\yandex-upload-stage1-role-v20-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_stage1_role_probe.py $asar --output $stage1RoleOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          foreach ($output in @($profileOutput, $configOutput, $dataflowOutput, $topologyOutput, $compositionOutput)) {
+          foreach ($output in @($profileOutput, $configOutput, $dataflowOutput, $topologyOutput, $compositionOutput, $stage1RoleOutput)) {
             if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Runtime report was not created." }
             $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($report.input_sha256 -ne $expected) { throw "Runtime report input hash mismatch." }
@@ -126,25 +106,21 @@ jobs:
             if ($report.safety.ordinary_string_values_included -ne $false) { throw "Runtime safety gate failed: ordinary strings." }
             if ($report.safety.source_code_contexts_included -ne $false) { throw "Runtime safety gate failed: source contexts." }
             if ($report.safety.raw_file_contents_included -ne $false) { throw "Runtime safety gate failed: raw file contents." }
-            if (($report.safety.PSObject.Properties.Name -contains "raw_identifiers_included") -and $report.safety.raw_identifiers_included -ne $false) {
-              throw "Runtime safety gate failed: raw identifiers."
-            }
-            if (($report.safety.PSObject.Properties.Name -contains "raw_local_identifiers_included") -and $report.safety.raw_local_identifiers_included -ne $false) {
-              throw "Runtime safety gate failed: raw local identifiers."
-            }
+            if (($report.safety.PSObject.Properties.Name -contains "raw_identifiers_included") -and $report.safety.raw_identifiers_included -ne $false) { throw "Runtime safety gate failed: raw identifiers." }
+            if (($report.safety.PSObject.Properties.Name -contains "raw_local_identifiers_included") -and $report.safety.raw_local_identifiers_included -ne $false) { throw "Runtime safety gate failed: raw local identifiers." }
           }
-
       - name: Upload sanitized runtime profile reports
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-upload-runtime-profile-v19-sanitized
+          name: yandex-upload-runtime-profile-v20-sanitized
           path: |
             .musicark/research/yandex-upload-runtime-profile-v15-ci.json
             .musicark/research/yandex-upload-runtime-config-v16-ci.json
             .musicark/research/yandex-upload-runtime-dataflow-v17-ci.json
             .musicark/research/yandex-upload-runtime-topology-v18-ci.json
             .musicark/research/yandex-upload-runtime-composition-v19-ci.json
+            .musicark/research/yandex-upload-stage1-role-v20-ci.json
           if-no-files-found: error
           retention-days: 7
 

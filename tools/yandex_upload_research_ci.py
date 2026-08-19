@@ -15,10 +15,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yandex_upload_auth_semantics_probe as auth_semantics
+import yandex_upload_oauth_origin_probe as oauth_origin
+import yandex_upload_prefix_argument_probe as prefix_argument
 import yandex_upload_prefix_factory_probe as prefix_factory
 import yandex_upload_prefix_import_binding_probe as prefix_binding
 import yandex_upload_prefix_provenance_probe as prefix_provenance
 import yandex_upload_prefix_template_probe as prefix_template
+import yandex_upload_prefix_use_site_probe as prefix_use_site
 import yandex_upload_request_stack_probe as request_stack
 import yandex_upload_runtime_composition_probe as composition
 import yandex_upload_runtime_config_probe as runtime_config
@@ -51,6 +54,9 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-request-stack-v28-ci.json", request_stack.build_report),
     ("yandex-upload-tld-method-v29-ci.json", tld_method.build_report),
     ("yandex-upload-auth-semantics-v30-ci.json", auth_semantics.build_report),
+    ("yandex-upload-prefix-argument-v31-ci.json", prefix_argument.build_report),
+    ("yandex-upload-prefix-use-site-v32-ci.json", prefix_use_site.build_report),
+    ("yandex-upload-oauth-origin-v33-ci.json", oauth_origin.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

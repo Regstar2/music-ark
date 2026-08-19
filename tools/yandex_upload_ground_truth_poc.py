@@ -44,12 +44,58 @@ def _launch_desktop(executable: Path | None, *, port: int, wait_seconds: float) 
     if not executable.is_file():
         raise assisted.live.YandexUploadProtocolError("Official Yandex Music executable does not exist.")
     subprocess.Popen(  # noqa: S603 - explicit local executable selected by the user.
-        [str(executable), f"--remote-debugging-port={int(port)}"],
+        [
+            str(executable),
+            f"--remote-debugging-port={int(port)}",
+            "--remote-allow-origins=http://localhost",
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     if wait_seconds > 0:
         time.sleep(wait_seconds)
+
+
+def _discover_target(port: int, contains: str | None, *, timeout: float) -> dict[str, Any]:
+    """Wait for the local Electron renderer without exposing target details."""
+    deadline = time.monotonic() + max(0.5, timeout)
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return cdp.select_target(cdp.discover_targets(port), contains)
+        except cdp.CdpProbeError as exc:
+            last_error = exc
+            time.sleep(0.25)
+    detail = str(last_error) if isinstance(last_error, cdp.CdpProbeError) else "No attachable target became ready."
+    raise assisted.live.YandexUploadProtocolError(f"Desktop CDP target discovery failed: {detail}")
+
+
+def _preflight_cdp(websocket_url: str, instrumentation_source: str | None) -> None:
+    """Validate and instrument CDP before asking the user to perform a mutation."""
+    try:
+        with cdp.CdpClient(websocket_url) as client:
+            client.call("Network.enable")
+            client.call("Runtime.enable")
+            if instrumentation_source:
+                client.call(
+                    "Runtime.evaluate",
+                    {"expression": instrumentation_source, "awaitPromise": False, "returnByValue": False},
+                    timeout=10.0,
+                )
+    except cdp.CdpProbeError as exc:
+        raise assisted.live.YandexUploadProtocolError(f"Desktop CDP preflight failed: {exc}") from exc
+    except OSError as exc:
+        raise assisted.live.YandexUploadProtocolError(
+            f"Desktop CDP preflight failed with local I/O error ({type(exc).__name__})."
+        ) from exc
+
+
+def _safe_collector_error(exc: Exception) -> str:
+    if isinstance(exc, cdp.CdpProbeError):
+        return str(exc)
+    if isinstance(exc, OSError):
+        return f"local I/O error ({type(exc).__name__})"
+    return type(exc).__name__
 
 
 def _assisted_args(args: argparse.Namespace) -> argparse.Namespace:
@@ -110,40 +156,54 @@ def run(args: argparse.Namespace, *, prompt: Callable[[str], str] = input) -> tu
         raise assisted.live.YandexUploadProtocolError("Trace duration must be between 0 and 900 seconds.")
 
     _launch_desktop(args.launch_exe, port=args.port, wait_seconds=args.launch_wait)
-    targets = cdp.discover_targets(args.port)
-    target = cdp.select_target(targets, args.target_contains)
+    target = _discover_target(args.port, args.target_contains, timeout=max(5.0, args.launch_wait + 2.0))
     websocket_url = str(target.get("webSocketDebuggerUrl") or "")
     if not websocket_url:
         raise assisted.live.YandexUploadProtocolError("Selected desktop target has no DevTools WebSocket URL.")
 
     instrumentation_source, instrumentation_sha256 = _instrumentation(args.instrumentation_js)
+
+    # Validate the complete CDP command path before the user uploads anything.
+    # The instrumentation remains installed in the renderer after this short
+    # preflight session, so the long-lived collector does not inject it twice.
+    _preflight_cdp(websocket_url, instrumentation_source)
+
     holder: dict[str, Any] = {}
+    collector_started = threading.Event()
 
     def collect() -> None:
         try:
             with cdp.CdpClient(websocket_url) as client:
+                collector_started.set()
                 events = cdp.collect_trace(
                     client,
                     duration=args.trace_duration,
-                    instrumentation_source=instrumentation_source,
+                    instrumentation_source=None,
                 )
             holder["trace"] = cdp.build_report(
                 target,
                 events,
                 instrumentation_sha256=instrumentation_sha256,
             )
-        except Exception as exc:  # noqa: BLE001 - converted to a safe high-level error below.
-            holder["error"] = type(exc).__name__
+        except Exception as exc:  # noqa: BLE001 - sanitized below; no raw values are retained.
+            holder["error"] = _safe_collector_error(exc)
+            collector_started.set()
 
     collector = threading.Thread(target=collect, name="musicark-yandex-cdp", daemon=True)
     collector.start()
+    if not collector_started.wait(timeout=10.0):
+        raise assisted.live.YandexUploadProtocolError("Sanitized desktop trace collector did not start within 10 seconds.")
+    if "error" in holder:
+        raise assisted.live.YandexUploadProtocolError(
+            f"Sanitized desktop trace collection failed before upload: {holder['error']}"
+        )
 
     assisted_payload, assisted_code = assisted.run(_assisted_args(args), prompt=prompt)
     collector.join(timeout=args.trace_duration + 15.0)
     if collector.is_alive():
         raise assisted.live.YandexUploadProtocolError("Sanitized desktop trace did not finish within its bounded window.")
     if "error" in holder:
-        raise assisted.live.YandexUploadProtocolError("Sanitized desktop trace collection failed.")
+        raise assisted.live.YandexUploadProtocolError(f"Sanitized desktop trace collection failed: {holder['error']}")
     trace_report = holder.get("trace")
     if not isinstance(trace_report, dict):
         raise assisted.live.YandexUploadProtocolError("Sanitized desktop trace produced no report.")

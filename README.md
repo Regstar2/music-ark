@@ -2,18 +2,41 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.10.0 — Yandex Upload Feasibility (BLOCKED).**  
+**Текущая версия кода: 0.11.0 — Production Single-Track Yandex Upload.**  
 **Текущая схема SQLite: 1.8.4.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. Ветка v0.9.x завершена. v0.10.0 исследует возможность загрузки пользовательского локального файла в Яндекс Музыку и фиксирует результат `BLOCKED`: воспроизводимый programmatic upload protocol через существующую авторизацию MusicArk не подтверждён.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. Ветка v0.9.x завершена. v0.10.0 завершила feasibility-фазу и подтвердила direct-Python загрузку end-to-end; v0.11.0 переносит этот доказанный протокол в production manual workflow для одного локального MP3.
 
-## Yandex Upload Feasibility v0.10.0
+## Production Single-Track Yandex Upload v0.11.0
 
-Официальная справка Яндекс Музыки подтверждает пользовательский workflow загрузки собственных треков через сайт или desktop-приложение: пользователь выбирает/создаёт свой плейлист и загружает локальные файлы. Загрузка напрямую в `Мне нравится`, чужие и редакторские плейлисты не поддерживается; обложка, название и исполнитель берутся из файла.
+Проверенный live-контракт v0.10.0:
 
-При этом проверенные первичные источники и закреплённый `yandex-music==3.0.0` не дают MusicArk подтверждённого HTTP upload contract: endpoint, method, request body/content type, достаточность текущего token, дополнительные cookies/session artifacts и response identity остаются неизвестными. Поэтому v0.10.0 не содержит production Upload UI, queue, reverse Sync, Matching/Coverage integration или guessed transport implementation.
+```text
+Stage 1 HTTP 200
+Stage 2 HTTP 201
+playlist read-back verified=true
+ambiguous=false
+attemptsUsed=1
+```
 
-`YandexMusicProvider.can_upload_tracks` и `supports_user_uploads` остаются `false`. Существующий старый experimental compatibility path теперь fail-closed: он не читает candidate file, не пишет его путь в audit и не отправляет upload request. Полная evidence table: `docs/versions/v0.10.0.md`.
+Production Stage 1 использует фиксированный endpoint:
+
+```text
+POST https://api.music.yandex.net/loader/upload-url
+uid=<authenticated uid>
+playlist-id=<uid>:<playlist kind>
+path=<filename only>
+```
+
+MusicArk не добавляет `visibility`, Authorization, OAuth или Cookie. Stage 2 отправляет ровно один multipart `file` на dynamic `post-target` после проверки HTTPS/Yandex host. HTTPX работает с `http1=True`, `http2=True`, `trust_env=False`, `follow_redirects=False`, bounded timeout и без automatic retry.
+
+В Local Library доступно явное действие **«Загрузить в Яндекс Музыку»** для одного трека. Пользователь выбирает собственный Yandex playlist и подтверждает право на загрузку файла. Backend принимает `local_file_id`, сам получает путь из локального индекса и до Stage 1 проверяет auth/UID, ownership плейлиста, существование и непустой MP3-файл, `confirm=true` и `rights_confirmed=true`.
+
+После Stage 2 выполняется bounded playlist read-back. Сетевой сбой Stage 2 **не повторяет отправку автоматически**: MusicArk проверяет `ugc-track-id`; если результат нельзя подтвердить, возвращается `delivery_unknown` с требованием сначала проверить плейлист вручную. Это снижает риск duplicate UGC tracks.
+
+`YandexMusicProvider.can_upload_tracks` и `supports_user_uploads` теперь `true`, но Controlled Sync по-прежнему не генерирует upload operations. Старый `experimental_yandex_upload` остаётся отдельным deprecated research/compatibility path и не превращается в production mutation. Подробности: `docs/versions/v0.11.0.md`.
+
+Ограничения v0.11.0: MP3 only, один трек за действие, без bulk/queue/auto-sync upload/automatic retry/conversion/censorship replacement/background worker. Production release/installer в этой версии не создаётся.
 
 ## Settings / Help / About v0.9.7
 
@@ -196,7 +219,7 @@ App-level метки **ОРИГИНАЛ / ЦЕНЗУРА** можно задав
 
 ## Форматы
 
-Архитектура использует format adapters. Полноценная безопасная запись реализована для **MP3/ID3**. Другие аудиоформаты остаются read-only в Metadata Editor.
+Архитектура использует format adapters. Полноценная безопасная запись реализована для **MP3/ID3**. Другие аудиоформаты остаются read-only в Metadata Editor. Manual Yandex upload v0.11.0 также ограничен MP3; конвертация форматов не входит в эту версию.
 
 ## Controlled Sync
 
@@ -206,10 +229,10 @@ Sync не является двунаправленным filesystem mirror. С�
 deleted local files = 0
 renamed/moved local files = 0
 modified existing local files/tags = 0
-Yandex mutations = 0
+Yandex mutations from Controlled Sync = 0
 ```
 
-v0.9.6 меняет только presentation: plan filters работают над уже полученным operation snapshot, а Apply по-прежнему требует confirmation. Metadata Editor — отдельный explicit-write workflow и не вызывается Scan/Matching/Coverage/Sync автоматически.
+v0.9.6 меняет только presentation: plan filters работают над уже полученным operation snapshot, а Apply по-прежнему требует confirmation. Metadata Editor — отдельный explicit-write workflow и не вызывается Scan/Matching/Coverage/Sync автоматически. Manual upload v0.11.0 также является отдельным явным workflow и не вызывается SyncPlanner.
 
 ## SQLite
 
@@ -228,7 +251,7 @@ Forward-only schema:
 1.8.4 — variant user acceptance
 ```
 
-v0.10.0 не повышает SQLite schema. Feasibility milestone не добавляет таблицы, upload history или persisted upload tasks. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
+v0.10.0 и v0.11.0 не повышают SQLite schema. Manual one-track upload не добавляет upload queue/history tables и не сохраняет signed upload targets. Инициализация БД остаётся idempotent и не требует удаления существующей `.musicark/musicark.db`.
 
 ## Запуск для разработки на Windows
 
@@ -264,8 +287,9 @@ v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
 v0.9.6 — Sync Page UI Polish                           complete
 v0.9.7 — Settings, Help & About UI Polish              complete
 v0.9.x — UI improvement line                           complete
-v0.10.0 — Yandex Upload Feasibility                    complete / blocked
-next — upload architecture decision                    decision required
+v0.10.0 — Yandex Upload Feasibility / live proof       complete
+v0.11.0 — Production Single-Track Yandex Upload        current
+v0.12.0 — Upload queue / batch safety                  planned
 ```
 
-Production Yandex Upload в v0.10.0 не реализован. Milestone подтверждает только наличие пользовательского UI-workflow у Яндекса и документирует отсутствие доказанного programmatic protocol для MusicArk. Это состояние исходного кода, а не заявление об опубликованном GitHub Release. См. `docs/versions/v0.10.0.md`.
+v0.11.0 — это production-контур ручной загрузки одного MP3, а не GitHub Release. Bulk upload, upload queue, auto-sync upload, conversion и automatic retry остаются за пределами версии. См. `docs/versions/v0.11.0.md`.

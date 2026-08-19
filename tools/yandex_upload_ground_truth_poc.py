@@ -149,11 +149,28 @@ def combine_results(
     }
 
 
+def _preflight_payload(target: dict[str, Any], instrumentation_sha256: str | None) -> dict[str, Any]:
+    report = cdp.build_report(target, [], instrumentation_sha256=instrumentation_sha256)
+    return {
+        "format": "musicark-yandex-upload-cdp-preflight-v1",
+        "mode": "cdp-preflight",
+        "status": "ready",
+        "target": report.get("target"),
+        "instrumentationSha256": instrumentation_sha256,
+        "probe": report.get("probe"),
+        "safety": report.get("safety"),
+    }
+
+
 def run(args: argparse.Namespace, *, prompt: Callable[[str], str] = input) -> tuple[dict[str, Any], int]:
     if args.port <= 0 or args.port > 65535:
         raise assisted.live.YandexUploadProtocolError("CDP port must be a valid TCP port.")
     if args.trace_duration <= 0 or args.trace_duration > 900:
         raise assisted.live.YandexUploadProtocolError("Trace duration must be between 0 and 900 seconds.")
+    if not args.preflight_only and (not args.file or not args.playlist_kind):
+        raise assisted.live.YandexUploadProtocolError(
+            "Full ground-truth PoC requires both --file and --playlist-kind."
+        )
 
     _launch_desktop(args.launch_exe, port=args.port, wait_seconds=args.launch_wait)
     target = _discover_target(args.port, args.target_contains, timeout=max(5.0, args.launch_wait + 2.0))
@@ -167,6 +184,8 @@ def run(args: argparse.Namespace, *, prompt: Callable[[str], str] = input) -> tu
     # The instrumentation remains installed in the renderer after this short
     # preflight session, so the long-lived collector does not inject it twice.
     _preflight_cdp(websocket_url, instrumentation_source)
+    if args.preflight_only:
+        return _preflight_payload(target, instrumentation_sha256), 0
 
     holder: dict[str, Any] = {}
     collector_started = threading.Event()
@@ -230,10 +249,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Observe and verify one visible official Yandex Music desktop upload end-to-end."
     )
     parser.add_argument("--base-dir", default=None)
-    parser.add_argument("--file", required=True)
-    parser.add_argument("--playlist-kind", required=True)
+    parser.add_argument("--file", default=None)
+    parser.add_argument("--playlist-kind", default=None)
     parser.add_argument("--confirm-owned-file", action="store_true")
     parser.add_argument("--confirm-desktop-upload", action="store_true")
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate sanitized local CDP/runtime instrumentation and exit without any upload/read-back mutation.",
+    )
     parser.add_argument("--port", type=int, default=9222)
     parser.add_argument("--target-contains", default="Yandex")
     parser.add_argument("--launch-exe", type=Path, default=None)

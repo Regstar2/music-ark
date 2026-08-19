@@ -7,13 +7,17 @@ only the runtime/static-ground-truth Stage1 contract:
 - ``playlist-id`` = ``<uid>:<playlistKind>``;
 - ``path`` = selected file name only;
 - no Stage1 Authorization or cookies;
-- Stage2 is one multipart ``file`` POST to the dynamic Yandex target.
+- Stage2 is exactly one multipart ``file`` POST to the dynamic Yandex target.
 
 Before sending audio bytes it authenticates through MusicArk's existing Yandex
 credential boundary only to verify the current account uid, target playlist and
 pre-upload membership. The saved credential is not used for Stage1 or Stage2.
 The dynamic target must be HTTPS on a Yandex domain. Production upload remains
 disabled; this CLI requires two explicit research/live opt-ins and confirmation.
+
+Stage1 and Stage2 transports are selected independently. ``--ignore-env`` applies
+to both, so a transport differential never silently re-enables environment proxy
+settings. There is no fallback and no automatic upload retry.
 """
 
 from __future__ import annotations
@@ -40,7 +44,8 @@ from musicark.providers.yandex_upload_transport import (
 )
 
 
-_FORMAT = "musicark-yandex-upload-python-composite-live-poc-v1"
+_FORMAT = "musicark-yandex-upload-python-composite-live-poc-v2"
+_STAGE2_TRANSPORTS = {"requests", "http2"}
 
 
 def _enabled(value: str | None) -> bool:
@@ -148,6 +153,152 @@ def _stage1_slot(
     return slot, status, stage1._http_version(response, args.transport)  # noqa: SLF001
 
 
+def _stage2_post_once(
+    slot: YandexUploadSlot,
+    file_path: Path,
+    *,
+    transport: str,
+    trust_env: bool,
+    timeout: float,
+) -> Any:
+    """Send exactly one multipart Stage2 request with no auth, fallback or retry."""
+    path = Path(file_path)
+    if not path.is_file():
+        raise YandexUploadProtocolError(f"Upload file does not exist: {path}")
+    if path.stat().st_size <= 0:
+        raise YandexUploadProtocolError("Refusing to upload an empty file.")
+
+    clean_transport = str(transport or "").strip().lower()
+    if clean_transport not in _STAGE2_TRANSPORTS:
+        raise YandexUploadProtocolError("Unsupported Python Stage2 transport mode.")
+
+    with path.open("rb") as stream:
+        files = {"file": (path.name, stream)}
+        if clean_transport == "http2":
+            with httpx.Client(
+                http1=True,
+                http2=True,
+                trust_env=trust_env,
+                timeout=timeout,
+                follow_redirects=False,
+            ) as client:
+                return client.post(slot.upload_url, files=files)
+
+        kwargs = {
+            "files": files,
+            "timeout": timeout,
+            "allow_redirects": False,
+        }
+        if trust_env:
+            return requests.post(slot.upload_url, **kwargs)
+        with requests.Session() as session:
+            session.trust_env = False
+            return session.post(slot.upload_url, **kwargs)
+
+
+def _stage2_http_version(response: Any, transport: str) -> str | None:
+    if str(transport).lower() == "http2":
+        value = str(getattr(response, "http_version", "") or "").strip()
+        return value or None
+    raw = getattr(response, "raw", None)
+    version = getattr(raw, "version", None)
+    if version == 11:
+        return "HTTP/1.1"
+    if version == 10:
+        return "HTTP/1.0"
+    return None
+
+
+def _decode_stage2(response: Any) -> tuple[dict[str, Any], str | None]:
+    payload: Any = None
+    content_type = str(response.headers.get("Content-Type", "")).lower()
+    if "json" in content_type:
+        try:
+            payload = response.json()
+        except (TypeError, ValueError):
+            payload = None
+    return (
+        YandexUploadTransport._shape(payload),  # noqa: SLF001 - sanitized response shape only.
+        YandexUploadTransport._extract_track_id(payload),  # noqa: SLF001
+    )
+
+
+def _stage2_failure_payload(
+    *,
+    args: argparse.Namespace,
+    context: Any,
+    playlist_kind: str,
+    slot: YandexUploadSlot,
+    stage1_status: int,
+    stage1_http_version: str | None,
+    exc: BaseException,
+) -> dict[str, Any]:
+    return {
+        "format": _FORMAT,
+        "mode": "upload",
+        "status": "stage2_network_failed",
+        "network": {
+            "stage1Sent": True,
+            "stage2Sent": True,
+            "readBackSent": False,
+            "pythonNetworkStack": True,
+        },
+        "playlist": {
+            "kind": playlist_kind,
+            "playlistIdFormula": "uid:playlistKind",
+            "playlistIdSourceUsed": "uid-colon-kind-static-ground-truth",
+            "authenticatedUidMatch": True,
+        },
+        "file": {**live._file_summary(context.file_path), "stage1PathMode": "name"},  # noqa: SLF001
+        "stage1": {
+            "origin": stage1._validate_base_url(args.stage1_base_url),  # noqa: SLF001
+            "httpStatus": stage1_status,
+            "httpVersion": stage1_http_version,
+            "uploadUrlPresent": bool(slot.upload_url),
+            "pollUrlPresent": bool(slot.poll_url),
+            "trackIdPresent": bool(slot.track_id),
+            "responseShape": slot.response_shape,
+            "authorizationSource": "none",
+            "transport": str(args.transport),
+            "clientProfile": str(args.client_profile),
+            "trustEnv": not bool(args.ignore_env),
+        },
+        "stage2": {
+            "httpResponseReceived": False,
+            "httpStatus": None,
+            "httpVersion": None,
+            "multipartField": "file",
+            "targetHostValidated": True,
+            "transport": str(args.stage2_transport),
+            "trustEnv": not bool(args.ignore_env),
+            "transportFailureClasses": _safe_exception_kinds(exc),
+        },
+        "probe": {
+            "stage1RequestCount": 1,
+            "stage2RequestCount": 1,
+            "automaticUploadRetry": False,
+            "automaticTransportFallback": False,
+            "differentialVariable": "stage2-python-http-stack-and-shared-trust-env",
+        },
+        "safety": {
+            "credential_values_included": False,
+            "credential_store_read_for_authenticated_preflight": True,
+            "stage1_authorization_header_sent": False,
+            "stage2_authorization_header_sent": False,
+            "cookie_values_included": False,
+            "query_values_included": False,
+            "uid_value_included": False,
+            "playlist_composite_value_included": False,
+            "signed_urls_included": False,
+            "raw_response_bodies_included": False,
+            "audio_submission_attempted": True,
+            "audio_delivery_confirmed": False,
+            "automatic_upload_retry": False,
+            "automatic_transport_fallback": False,
+        },
+    }
+
+
 def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     base_dir = Path(args.base_dir) if args.base_dir else None
     _require_live_confirmation(args, base_dir)
@@ -177,10 +328,54 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         playlist_kind=playlist_kind,
     )
 
-    transfer = YandexUploadTransport(
-        transfer_timeout_seconds=float(args.transfer_timeout)
-    ).upload_file(slot, file_path)
-    reported_track_id = transfer.track_id or slot.track_id
+    try:
+        stage2_response = _stage2_post_once(
+            slot,
+            file_path,
+            transport=args.stage2_transport,
+            trust_env=not bool(args.ignore_env),
+            timeout=float(args.transfer_timeout),
+        )
+    except (requests.RequestException, httpx.HTTPError) as exc:
+        return (
+            _stage2_failure_payload(
+                args=args,
+                context=context,
+                playlist_kind=playlist_kind,
+                slot=slot,
+                stage1_status=stage1_status,
+                stage1_http_version=stage1_http_version,
+                exc=exc,
+            ),
+            3,
+        )
+
+    stage2_status = int(stage2_response.status_code)
+    stage2_shape, stage2_track_id = _decode_stage2(stage2_response)
+    if not 200 <= stage2_status <= 299:
+        payload = _stage2_failure_payload(
+            args=args,
+            context=context,
+            playlist_kind=playlist_kind,
+            slot=slot,
+            stage1_status=stage1_status,
+            stage1_http_version=stage1_http_version,
+            exc=YandexUploadProtocolError("Stage2 returned a non-success HTTP status."),
+        )
+        payload["status"] = "stage2_http_failed"
+        payload["stage2"].update(
+            {
+                "httpResponseReceived": True,
+                "httpStatus": stage2_status,
+                "httpVersion": _stage2_http_version(stage2_response, args.stage2_transport),
+                "responseShape": stage2_shape,
+                "transportFailureClasses": [],
+            }
+        )
+        payload["safety"]["audio_delivery_confirmed"] = True
+        return payload, 3
+
+    reported_track_id = stage2_track_id or slot.track_id
 
     attempts_used = 0
     readback = live._classify_readback_identity(before_ids, before_ids, reported_track_id)  # noqa: SLF001
@@ -226,17 +421,22 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "trustEnv": not bool(args.ignore_env),
         },
         "stage2": {
-            "httpStatus": transfer.status_code,
-            "responseShape": transfer.response_shape,
-            "trackIdPresent": transfer.track_id is not None,
+            "httpResponseReceived": True,
+            "httpStatus": stage2_status,
+            "httpVersion": _stage2_http_version(stage2_response, args.stage2_transport),
+            "responseShape": stage2_shape,
+            "trackIdPresent": stage2_track_id is not None,
             "multipartField": "file",
             "targetHostValidated": True,
+            "transport": str(args.stage2_transport),
+            "trustEnv": not bool(args.ignore_env),
         },
         "readBack": {**readback, "attemptsUsed": attempts_used},
         "probe": {
             "stage1RequestCount": 1,
             "stage2RequestCount": 1,
             "automaticUploadRetry": False,
+            "automaticTransportFallback": False,
             "formulaEvidence": "official-desktop-runtime-and-asar-v46-v47",
         },
         "safety": {
@@ -250,9 +450,10 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "playlist_composite_value_included": False,
             "signed_urls_included": False,
             "raw_response_bodies_included": False,
-            "audio_bytes_sent": True,
-            "stage2_sent": True,
+            "audio_submission_attempted": True,
+            "audio_delivery_confirmed": True,
             "automatic_upload_retry": False,
+            "automatic_transport_fallback": False,
         },
     }
     return payload, (0 if verified else 3)
@@ -267,6 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--file", required=True)
     parser.add_argument("--playlist-kind", required=True)
     parser.add_argument("--transport", choices=("requests", "http2"), default="http2")
+    parser.add_argument("--stage2-transport", choices=("requests", "http2"), default="http2")
     parser.add_argument("--client-profile", choices=("bare", "desktop"), default="desktop")
     parser.add_argument("--ignore-env", action="store_true")
     parser.add_argument("--timeout", type=float, default=30.0)

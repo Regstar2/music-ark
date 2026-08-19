@@ -55,6 +55,13 @@ def _call_args(body: str) -> list[str] | None:
 
 def _safe_chain(expression: str) -> list[str] | None:
     clean = re.sub(r"\s+", "", expression)
+    # Preserve only static property names. Optional chaining is semantically the
+    # same property path and bracket notation is accepted only for a plain
+    # identifier property, never an arbitrary string/value.
+    clean = clean.replace("?.", ".")
+    clean = re.sub(r"\[['\"]([A-Za-z_$][A-Za-z0-9_$]{0,100})['\"]\]", r".\1", clean)
+    while clean.startswith("(") and clean.endswith(")"):
+        clean = clean[1:-1]
     if not clean.startswith("this."):
         return None
     parts = clean.split(".")

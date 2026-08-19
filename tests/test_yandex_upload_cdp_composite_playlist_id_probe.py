@@ -73,6 +73,8 @@ class YandexUploadCdpCompositePlaylistIdProbeTests(unittest.TestCase):
             return (
                 {
                     "format": "old",
+                    "status": "upload_url_obtained",
+                    "diagnosis": "python-transport-mismatch-confirmed",
                     "playlist": {
                         "playlistIdSourceUsed": "uuid-cache-metadata",
                         "playlistIdDiagnosticFallback": False,
@@ -87,21 +89,23 @@ class YandexUploadCdpCompositePlaylistIdProbeTests(unittest.TestCase):
                         "audio_bytes_sent": False,
                     },
                 },
-                3,
+                0,
             )
 
         with mock.patch.object(probe.path_probe, "run", side_effect=fake_path_run):
             payload, code = probe.run(self._args())
 
-        self.assertEqual(code, 3)
+        self.assertEqual(code, 0)
         self.assertIs(captured["hook"], probe._composite_context)  # noqa: SLF001
         self.assertIs(probe.path_probe.uuid_probe._uuid_context, original_hook)  # noqa: SLF001
+        self.assertEqual(payload["diagnosis"], "chromium-stage1-contract-confirmed")
         self.assertEqual(payload["playlist"]["playlistIdSourceUsed"], probe._SOURCE)  # noqa: SLF001
         self.assertEqual(payload["playlist"]["playlistIdFormula"], "uid:playlistKind")
         self.assertEqual(
             payload["probe"]["differentialVariable"],
             "playlist-id-cached-uuid-to-uid-colon-kind",
         )
+        self.assertFalse(payload["probe"]["directPythonTransportTestedByThisProbe"])
         self.assertFalse(payload["safety"]["playlist_composite_value_included"])
         self.assertFalse(payload["safety"]["authorization_header_sent"])
         self.assertFalse(payload["safety"]["audio_bytes_sent"])

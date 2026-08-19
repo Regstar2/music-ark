@@ -2,9 +2,10 @@
 
 V35 proves that ``31322.X`` falls back to ``this.config.params.common.oauth``.
 This probe inspects the second object argument supplied to ``new 12690.S`` and
-emits safe schema keys, stable webpack source module/export references, and
-normalized structural expression tokens. No OAuth value, credential, arbitrary
-string or raw local name is emitted.
+emits safe schema keys, stable non-sensitive webpack source module/export
+references, and normalized structural expression tokens. No OAuth value,
+credential, arbitrary string, sensitive member name, or raw local name is
+emitted.
 """
 
 from __future__ import annotations
@@ -26,6 +27,11 @@ import yandex_upload_target_probe as target_probe
 COMPOSITION_MODULE_ID = "7644"
 STAGE1_MODULE_ID = "12690"
 _SEMANTIC_KEYS = {"params", "common", "oauth", "prefixUrl", "headers", "clientRemoteType"}
+_SENSITIVE_NAME_RE = re.compile(
+    r"(?:authorization|cookie|token|secret|session|csrf|xsrf|passport|credential|password|signature)",
+    re.IGNORECASE,
+)
+_MODULE_MEMBER_TOKEN_RE = re.compile(r"^(?P<prefix>m\d+)\.(?P<member>[A-Za-z_$][A-Za-z0-9_$]{0,100})$")
 
 
 def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
@@ -64,7 +70,11 @@ def _import_refs(expression: str, imports: list[dict[str, str]]) -> list[dict[st
         member_pattern = re.compile(rf"\b{re.escape(item['local'])}\.(?P<member>[A-Za-z_$][A-Za-z0-9_$]{{0,100}})")
         found_member = False
         for match in member_pattern.finditer(expression):
-            record = {"source_module_id": item["source_module_id"], "export_key": match.group("member")}
+            member = match.group("member")
+            if _SENSITIVE_NAME_RE.search(member):
+                found_member = True
+                continue
+            record = {"source_module_id": item["source_module_id"], "export_key": member}
             if record not in results:
                 results.append(record)
             found_member = True
@@ -73,6 +83,18 @@ def _import_refs(expression: str, imports: list[dict[str, str]]) -> list[dict[st
             if record not in results:
                 results.append(record)
     return results[:100]
+
+
+def _safe_normalized(expression: str, imports: list[dict[str, str]]) -> list[str]:
+    tokens = prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, expression, imports)  # noqa: SLF001
+    sanitized: list[str] = []
+    for token in tokens:
+        match = _MODULE_MEMBER_TOKEN_RE.fullmatch(token)
+        if match and _SENSITIVE_NAME_RE.search(match.group("member")):
+            sanitized.append(f"{match.group('prefix')}.<redacted-sensitive-member>")
+        else:
+            sanitized.append(token)
+    return sanitized
 
 
 def _safe_object_properties(expression: str, imports: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -92,7 +114,7 @@ def _safe_object_properties(expression: str, imports: list[dict[str, str]]) -> l
         results.append({
             "key": key,
             "sourceRefs": _import_refs(rhs, imports),
-            "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, rhs, imports),  # noqa: SLF001
+            "normalized": _safe_normalized(rhs, imports),
         })
     return results[:100]
 
@@ -105,7 +127,7 @@ def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[st
         "objectKeys": contract_probe._object_keys(value) if value.startswith("{") else [],  # noqa: SLF001
         "propertySources": _safe_object_properties(value, imports),
         "sourceRefs": _import_refs(value, imports),
-        "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, value, imports),  # noqa: SLF001
+        "normalized": _safe_normalized(value, imports),
     }
     common_rhs = prefix_probe._object_property_rhs(value, "common")  # noqa: SLF001
     if common_rhs is not None:
@@ -114,7 +136,7 @@ def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[st
             "objectKeys": contract_probe._object_keys(common_rhs) if common_rhs.strip().startswith("{") else [],  # noqa: SLF001
             "propertySources": _safe_object_properties(common_rhs, imports),
             "sourceRefs": _import_refs(common_rhs, imports),
-            "normalized": prefix_probe._normalized_expression(COMPOSITION_MODULE_ID, common_rhs, imports),  # noqa: SLF001
+            "normalized": _safe_normalized(common_rhs, imports),
         }
     return result
 

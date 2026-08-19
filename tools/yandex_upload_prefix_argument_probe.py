@@ -40,15 +40,13 @@ def _find_call(body: str) -> dict[str, Any] | None:
         marker = re.search(rf"{re.escape(alias)}\.getTldHost", body)
         if not marker:
             continue
+        # Works for both `alias.getTldHost(a,b,c)` and the minified
+        # `(0,alias.getTldHost)(a,b,c)` form: the first opening parenthesis after
+        # the member token is the invocation parenthesis in either case.
         open_paren = body.find("(", marker.end())
         if open_paren < 0:
             continue
-        # In minified code the function may be wrapped in `(0, fn)`; skip the
-        # wrapper close and locate the invocation paren if necessary.
-        between = body[marker.end():open_paren]
-        if ")" in between:
-            open_paren = body.find("(", open_paren + 1)
-        end = contract_probe._find_matching(body, open_paren, "(", ")") if open_paren >= 0 else None  # noqa: SLF001
+        end = contract_probe._find_matching(body, open_paren, "(", ")")  # noqa: SLF001
         if end is None:
             continue
         args = contract_probe._split_top_level(body[open_paren + 1:end])  # noqa: SLF001

@@ -2,9 +2,9 @@
 
 The exact stage-one call is already proven to pass an expression shaped like
 ``this.config.<property>.host`` and ``this.tld``. Property names on this exact
-configuration path are not local identifiers and are emitted only when they are
-plain non-sensitive JavaScript identifiers. No values or source contexts are
-included.
+configuration path are schema names, not scalar values, and may be emitted even
+when their names contain words such as ``token``. No property value, credential,
+header value or source context is included.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ import yandex_upload_target_probe as target_probe
 MODULE_ID = "7644"
 HELPER_MODULE_ID = "91953"
 _SAFE_PROPERTY_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,100}$")
-_SENSITIVE_RE = re.compile(r"(?:token|secret|authorization|cookie|session|csrf|xsrf|passport|credential|password|signature)", re.IGNORECASE)
 
 
 def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
@@ -54,11 +53,7 @@ def _call_args(body: str) -> list[str] | None:
 
 
 def _safe_chain(expression: str) -> list[str] | None:
-    clean = re.sub(r"\s+", "", expression)
-    # Preserve only static property names. Optional chaining is semantically the
-    # same property path and bracket notation is accepted only for a plain
-    # identifier property, never an arbitrary string/value.
-    clean = clean.replace("?.", ".")
+    clean = re.sub(r"\s+", "", expression).replace("?.", ".")
     clean = re.sub(r"\[['\"]([A-Za-z_$][A-Za-z0-9_$]{0,100})['\"]\]", r".\1", clean)
     while clean.startswith("(") and clean.endswith(")"):
         clean = clean[1:-1]
@@ -67,17 +62,38 @@ def _safe_chain(expression: str) -> list[str] | None:
     parts = clean.split(".")
     if parts[0] != "this" or len(parts) < 2:
         return None
-    for part in parts[1:]:
-        if not _SAFE_PROPERTY_RE.fullmatch(part) or _SENSITIVE_RE.search(part):
-            return None
+    if not all(_SAFE_PROPERTY_RE.fullmatch(part) for part in parts[1:]):
+        return None
     return parts
+
+
+def _semantic_config_host_path(expression: str) -> list[str] | None:
+    direct = _safe_chain(expression)
+    if direct and len(direct) >= 4 and direct[1] == "config" and direct[-1] == "host":
+        return direct
+
+    # Handle TypeScript/Babel optional-chain lowering while emitting only the
+    # exact static config schema key and the terminal host property.
+    compact = re.sub(r"\s+", "", expression).replace("?.", ".")
+    matches = re.findall(r"this\.config\.([A-Za-z_$][A-Za-z0-9_$]{0,100})", compact)
+    if not matches:
+        return None
+    unique = list(dict.fromkeys(matches))
+    if len(unique) != 1:
+        return None
+    key = unique[0]
+    # Ground the terminal relation either through the direct source expression
+    # or a temporary `.host` access used by the lowering.
+    if ".host" not in compact:
+        return None
+    return ["this", "config", key, "host"]
 
 
 def analyze_body(body: str) -> dict[str, Any]:
     args = _call_args(body)
     if not args:
         return {"callFound": False}
-    host_path = _safe_chain(args[0])
+    host_path = _semantic_config_host_path(args[0])
     tld_path = _safe_chain(args[1])
     host_shape_valid = bool(host_path and len(host_path) >= 4 and host_path[1] == "config" and host_path[-1] == "host")
     tld_shape_valid = tld_path == ["this", "tld"]
@@ -108,7 +124,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                     "analysis": analyze_body(module["body"]),
                 })
     return {
-        "format": "musicark-yandex-upload-prefix-semantic-path-v1",
+        "format": "musicark-yandex-upload-prefix-semantic-path-v2",
         "source": "asar-stage1-prefix-semantic-config-path",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

@@ -3,9 +3,9 @@
 V35 proves that ``31322.X`` falls back to ``this.config.params.common.oauth``.
 This probe inspects the second object argument supplied to ``new 12690.S`` and
 emits safe schema keys, stable non-sensitive webpack source module/export
-references, and normalized structural expression tokens. No OAuth value,
-credential, arbitrary string, sensitive member name, or raw local name is
-emitted.
+references, normalized structural expression tokens, and getter property names.
+No OAuth value, credential, arbitrary string, sensitive member name, or raw
+local name is emitted.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ _SENSITIVE_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 _MODULE_MEMBER_TOKEN_RE = re.compile(r"^(?P<prefix>m\d+)\.(?P<member>[A-Za-z_$][A-Za-z0-9_$]{0,100})$")
+_GETTER_RE = re.compile(r"\bget\s+(?P<key>[A-Za-z_$][A-Za-z0-9_$]{0,100})\s*\(\s*\)\s*\{")
 
 
 def _read_member(path: Path, entry: dict[str, Any]) -> bytes:
@@ -119,6 +120,36 @@ def _safe_object_properties(expression: str, imports: list[dict[str, str]]) -> l
     return results[:100]
 
 
+def _safe_getters(expression: str, imports: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Return getter schema names and structural return provenance only."""
+    value = expression.strip()
+    if not (value.startswith("{") and value.endswith("}")):
+        return []
+    results: list[dict[str, Any]] = []
+    for match in _GETTER_RE.finditer(value):
+        key = contract_probe._safe_key(match.group("key"))  # noqa: SLF001
+        if key is None:
+            continue
+        brace = value.find("{", match.start(), match.end())
+        end = contract_probe._find_matching(value, brace, "{", "}") if brace >= 0 else None  # noqa: SLF001
+        if end is None:
+            continue
+        fragment = value[brace + 1:end]
+        returns: list[dict[str, Any]] = []
+        for return_match in re.finditer(r"\breturn\b", fragment):
+            rhs = prefix_probe._slice_rhs(fragment, return_match.end())  # noqa: SLF001
+            if not rhs:
+                continue
+            item = {
+                "sourceRefs": _import_refs(rhs, imports),
+                "normalized": _safe_normalized(rhs, imports),
+            }
+            if item not in returns:
+                returns.append(item)
+        results.append({"key": key, "returns": returns[:20]})
+    return results[:100]
+
+
 def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[str, Any]:
     value = expression.strip()
     result: dict[str, Any] = {
@@ -126,6 +157,7 @@ def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[st
         "semanticKeys": _semantic_keys(value),
         "objectKeys": contract_probe._object_keys(value) if value.startswith("{") else [],  # noqa: SLF001
         "propertySources": _safe_object_properties(value, imports),
+        "getters": _safe_getters(value, imports),
         "sourceRefs": _import_refs(value, imports),
         "normalized": _safe_normalized(value, imports),
     }
@@ -135,6 +167,7 @@ def _object_semantics(expression: str, imports: list[dict[str, str]]) -> dict[st
             "semanticKeys": _semantic_keys(common_rhs),
             "objectKeys": contract_probe._object_keys(common_rhs) if common_rhs.strip().startswith("{") else [],  # noqa: SLF001
             "propertySources": _safe_object_properties(common_rhs, imports),
+            "getters": _safe_getters(common_rhs, imports),
             "sourceRefs": _import_refs(common_rhs, imports),
             "normalized": _safe_normalized(common_rhs, imports),
         }
@@ -175,7 +208,7 @@ def build_report(path: Path, *, max_member_size: int = 8_000_000) -> dict[str, A
                     "analysis": analyze_body(module["body"]),
                 })
     return {
-        "format": "musicark-yandex-upload-stage1-params-v2",
+        "format": "musicark-yandex-upload-stage1-params-v3",
         "source": "asar-stage1-params-common-oauth-provenance",
         "input_name": path.name,
         "input_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

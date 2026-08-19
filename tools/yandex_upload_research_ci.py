@@ -18,6 +18,7 @@ import yandex_upload_auth_semantics_probe as auth_semantics
 import yandex_upload_oauth_binding_probe as oauth_binding
 import yandex_upload_oauth_origin_probe as oauth_origin
 import yandex_upload_passport_credentials_probe as passport_credentials
+import yandex_upload_passport_host_source_probe as passport_host_source
 import yandex_upload_prefix_argument_probe as prefix_argument
 import yandex_upload_prefix_factory_probe as prefix_factory
 import yandex_upload_prefix_import_binding_probe as prefix_binding
@@ -65,6 +66,7 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-oauth-binding-v35-ci.json", oauth_binding.build_report),
     ("yandex-upload-passport-credentials-v36-ci.json", passport_credentials.build_report),
     ("yandex-upload-stage1-params-v37-ci.json", stage1_params.build_report),
+    ("yandex-upload-passport-host-source-v38-ci.json", passport_host_source.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

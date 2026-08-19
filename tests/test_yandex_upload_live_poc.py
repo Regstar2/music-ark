@@ -63,6 +63,28 @@ class YandexUploadLivePocTests(unittest.TestCase):
                     poc.run_upload(args)
         prepare_context.assert_not_called()
 
+    def test_explicit_ground_truth_base_url_enables_oauth_stage1_transport(self) -> None:
+        with patch.object(poc, "_saved_token", return_value="saved-account-oauth") as saved_token:
+            transport = poc._live_transport(None, "https://music.yandex.ru")  # noqa: SLF001
+        self.assertTrue(transport.stage1_available)
+        saved_token.assert_called_once_with(None)
+
+    def test_non_yandex_stage1_base_url_is_rejected_before_network(self) -> None:
+        with patch.object(poc, "_saved_token", return_value="saved-account-oauth"):
+            with self.assertRaisesRegex(Exception, "HTTPS Yandex"):
+                poc._live_transport(None, "https://example.test")  # noqa: SLF001
+
+    def test_parser_has_no_default_stage1_host(self) -> None:
+        parser = poc.build_parser()
+        args = parser.parse_args([
+            "prepare",
+            "--file",
+            "owned.mp3",
+            "--playlist-kind",
+            "1055",
+        ])
+        self.assertIsNone(args.stage1_base_url)
+
 
 if __name__ == "__main__":
     unittest.main()

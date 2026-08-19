@@ -56,6 +56,12 @@ def run(args: Any) -> tuple[dict[str, Any], int]:
         path_probe.uuid_probe._uuid_context = original_uuid_context  # noqa: SLF001
 
     payload["format"] = _FORMAT
+    if payload.get("status") == "upload_url_obtained":
+        # A Chromium success with the corrected query proves the recovered
+        # Stage1 contract, not a Python transport mismatch. Direct Python must
+        # be tested separately with the same uid:kind + filename contract.
+        payload["diagnosis"] = "chromium-stage1-contract-confirmed"
+
     playlist = payload.get("playlist") if isinstance(payload.get("playlist"), dict) else {}
     playlist["playlistIdSourceUsed"] = _SOURCE
     playlist["playlistIdDiagnosticFallback"] = False
@@ -65,6 +71,7 @@ def run(args: Any) -> tuple[dict[str, Any], int]:
     probe = payload.get("probe") if isinstance(payload.get("probe"), dict) else {}
     probe["differentialVariable"] = "playlist-id-cached-uuid-to-uid-colon-kind"
     probe["formulaEvidence"] = "official-desktop-asar-v46-v47"
+    probe["directPythonTransportTestedByThisProbe"] = False
     payload["probe"] = probe
 
     safety = payload.get("safety") if isinstance(payload.get("safety"), dict) else {}

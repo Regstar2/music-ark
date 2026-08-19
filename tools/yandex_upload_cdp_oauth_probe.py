@@ -10,13 +10,20 @@ with ``credentials: 'omit'`` so browser cookies/session state are not attached.
 It performs stage one only: no dynamic upload target is followed and no audio
 bytes are sent. Raw CDP messages, OAuth values, query values, response bodies and
 signed URLs are never written to disk or returned in the sanitized result.
+
+Unlike the direct Python PoC, this isolation probe deliberately does not
+initialize the ``yandex-music`` Python client before the browser request. The uid
+and playlist context are recovered from MusicArk's local SQLite cache so a
+Python/Yandex transport failure cannot prevent the Chromium experiment itself.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
+import sqlite3
 import sys
 from typing import Any
 from urllib.parse import urlencode
@@ -24,6 +31,7 @@ from urllib.parse import urlencode
 import yandex_upload_cdp_probe as cdp
 import yandex_upload_ground_truth_poc as groundtruth
 import yandex_upload_live_poc as live
+from musicark.core.config import load_config
 from musicark.providers.yandex_upload_transport import (
     YandexOAuthStage1Requester,
     YandexUploadProtocolError,
@@ -32,6 +40,17 @@ from musicark.providers.yandex_upload_transport import (
 
 _FORMAT = "musicark-yandex-upload-cdp-oauth-probe-v1"
 _DESKTOP_CLIENT_LABEL = "YandexMusicDesktopApp"
+_PROVIDER_ID = "yandex_music"
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedStage1Context:
+    file_path: Path
+    uid: str
+    playlist_id: str
+    playlist_id_source: str
+    playlist_id_fallback: bool
+    observed_visibility: str | None
 
 
 def _runtime_value(result: dict[str, Any]) -> dict[str, Any]:
@@ -55,6 +74,154 @@ def _safe_shape(value: Any) -> dict[str, Any]:
             continue
         safe_keys[str(key)[:120]] = {"type": str(descriptor.get("type") or "unknown")[:40]}
     return {"type": "object", "keys": safe_keys}
+
+
+def _resolve_database_path(base_dir: Path | None) -> Path:
+    config = load_config(base_dir)
+    raw = Path(config.database_path)
+    if raw.is_absolute():
+        return raw
+    root = base_dir if base_dir is not None else Path.home()
+    return root / raw
+
+
+def _json_object(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _playlist_uuid_from_payload(payload: dict[str, Any]) -> str | None:
+    raw_data = payload.get("raw_data")
+    if not isinstance(raw_data, dict):
+        raw_data = payload.get("rawData")
+    if not isinstance(raw_data, dict):
+        raw_data = {}
+    for source in (raw_data, payload):
+        for key in ("playlist_uuid", "playlistUuid", "uuid"):
+            value = source.get(key)
+            clean = str(value or "").strip()
+            if clean:
+                return clean
+    return None
+
+
+def _cached_stage1_context(args: argparse.Namespace, base_dir: Path | None) -> _CachedStage1Context:
+    """Resolve stage-one context without any Yandex network call."""
+    file_path = Path(args.file).expanduser().resolve()
+    if not file_path.is_file():
+        raise YandexUploadProtocolError("Selected upload file does not exist.")
+    if file_path.stat().st_size <= 0:
+        raise YandexUploadProtocolError("Selected upload file is empty.")
+
+    playlist_kind = str(args.playlist_kind or "").strip()
+    if not playlist_kind:
+        raise YandexUploadProtocolError("Playlist kind is empty.")
+
+    database_path = _resolve_database_path(base_dir)
+    if not database_path.is_file():
+        raise YandexUploadProtocolError(
+            "MusicArk local cache is unavailable; Chromium OAuth probe will not fall back to the Python Yandex client."
+        )
+
+    account: dict[str, Any] = {}
+    playlist_payload: dict[str, Any] = {}
+    playlist_metadata: dict[str, Any] = {}
+    try:
+        with sqlite3.connect(database_path) as conn:
+            account_row = conn.execute(
+                """
+                SELECT account_json
+                FROM provider_collection_snapshots
+                WHERE provider_id=? AND collection_id='liked'
+                LIMIT 1
+                """,
+                (_PROVIDER_ID,),
+            ).fetchone()
+            if account_row:
+                account = _json_object(account_row[0])
+
+            try:
+                playlist_row = conn.execute(
+                    """
+                    SELECT payload_json
+                    FROM provider_playlists
+                    WHERE provider_id=? AND external_id=?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (_PROVIDER_ID, playlist_kind),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                playlist_row = None
+            if playlist_row:
+                playlist_payload = _json_object(playlist_row[0])
+
+            try:
+                metadata_row = conn.execute(
+                    """
+                    SELECT metadata_json
+                    FROM provider_collection_snapshots
+                    WHERE provider_id=? AND collection_id=?
+                    LIMIT 1
+                    """,
+                    (_PROVIDER_ID, f"playlist:{playlist_kind}"),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                metadata_row = None
+            if metadata_row:
+                playlist_metadata = _json_object(metadata_row[0])
+    except sqlite3.Error as exc:
+        raise YandexUploadProtocolError(
+            f"Failed to read MusicArk local cache for Chromium OAuth probe ({type(exc).__name__})."
+        ) from exc
+
+    uid = ""
+    for key in ("providerUserId", "provider_user_id", "uid"):
+        clean = str(account.get(key) or "").strip()
+        if clean:
+            uid = clean
+            break
+    if not uid:
+        raise YandexUploadProtocolError(
+            "MusicArk cached account uid is unavailable; Chromium OAuth probe will not initialize the Python Yandex client."
+        )
+
+    requested_source = str(args.playlist_id_source or "uuid").strip().lower()
+    playlist_id_fallback = False
+    if requested_source == "uuid":
+        cached_uuid = _playlist_uuid_from_payload(playlist_payload)
+        if cached_uuid:
+            playlist_id = cached_uuid
+            actual_source = "uuid-cache"
+        else:
+            # For this isolation experiment an HTTP response is already useful.
+            # Falling back to the known playlist kind may yield a 4xx, but it
+            # still proves whether Chromium can reach the stage-one endpoint.
+            playlist_id = playlist_kind
+            actual_source = "kind-diagnostic-fallback"
+            playlist_id_fallback = True
+    else:
+        playlist_id = playlist_kind
+        actual_source = "kind"
+
+    visibility_value = playlist_metadata.get("visibility")
+    if visibility_value is None:
+        visibility_value = playlist_payload.get("visibility")
+    observed_visibility = str(visibility_value).strip() if visibility_value else None
+
+    return _CachedStage1Context(
+        file_path=file_path,
+        uid=uid,
+        playlist_id=playlist_id,
+        playlist_id_source=actual_source,
+        playlist_id_fallback=playlist_id_fallback,
+        observed_visibility=observed_visibility,
+    )
 
 
 def _expression(*, endpoint: str, oauth_token: str) -> str:
@@ -145,8 +312,7 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 
     base_dir = Path(args.base_dir) if args.base_dir else None
     live._require_research_opt_in(base_dir)  # noqa: SLF001 - shared research safety gate.
-    client, playlist, file_path, uid, playlist_id, observed_visibility = live._prepare_context(args)  # noqa: SLF001
-    del client
+    context = _cached_stage1_context(args, base_dir)
 
     token = live._saved_token(base_dir)  # noqa: SLF001 - existing credential boundary; never returned.
     requester = YandexOAuthStage1Requester(
@@ -157,9 +323,9 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         trust_env=False,
     )
     params = {
-        "uid": uid,
-        "playlist-id": playlist_id,
-        "path": live._stage1_path(file_path, args.path_mode),  # noqa: SLF001
+        "uid": context.uid,
+        "playlist-id": context.playlist_id,
+        "path": live._stage1_path(context.file_path, args.path_mode),  # noqa: SLF001
     }
     endpoint = f"{requester.sanitized_origin}/loader/upload-url?{urlencode(params)}"
 
@@ -212,11 +378,14 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "browserCredentialsMode": "omit",
         },
         "playlist": {
-            "kind": str(getattr(playlist, "kind", "")),
-            "playlistIdSource": args.playlist_id_source,
-            "observedVisibility": observed_visibility,
+            "kind": str(args.playlist_kind),
+            "playlistIdSourceRequested": args.playlist_id_source,
+            "playlistIdSourceUsed": context.playlist_id_source,
+            "playlistIdDiagnosticFallback": context.playlist_id_fallback,
+            "contextSource": "musicark-local-cache",
+            "observedVisibility": context.observed_visibility,
         },
-        "file": live._file_summary(file_path),  # noqa: SLF001
+        "file": live._file_summary(context.file_path),  # noqa: SLF001
         "stage1": {
             "origin": requester.sanitized_origin,
             "httpResponseReceived": network_completed,
@@ -227,6 +396,7 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "responseShape": _safe_shape(value.get("responseShape")),
             "authorizationSource": "musicark-saved-oauth",
             "desktopSessionCredentialsAttached": False,
+            "pythonYandexClientInitialized": False,
         },
         "probe": {
             "mutation": "stage1-upload-slot-only",

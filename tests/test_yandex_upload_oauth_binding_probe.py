@@ -43,6 +43,23 @@ class YandexUploadOauthBindingProbeTests(unittest.TestCase):
         result = probe.analyze_body(body)
         self.assertEqual(result["source"], {"kind": "this-member", "path": ["this", "oauth"]})
 
+    def test_lowered_oauth_fallback_exposes_schema_key_not_value(self) -> None:
+        body = (
+            'n.d(e,{X:()=>C});C=class{constructor(http,cfg){this.config=cfg;}'
+            'createRequestHeaders(){let x=(null==(tmp=http.common)?void 0:tmp.oauth)'
+            '||this.config.loaderApi.common.oauth;'
+            'return {authorization:"OAuth ".concat(x)}}};'
+        )
+        result = probe.analyze_body(body)
+        source = result["source"]
+        self.assertEqual(source["kind"], "expression")
+        self.assertIn(
+            {"kind": "request-config-path", "path": ["this", "config", "loaderApi", "common", "oauth"]},
+            source["semanticOAuthSources"],
+        )
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("OAuth ", encoded)
+
     def test_sensitive_scalar_and_local_name_never_emit(self) -> None:
         body = (
             'n.d(e,{X:()=>C});C=class{createRequestHeaders(){let privateLocal="DO_NOT_EMIT";'

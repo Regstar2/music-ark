@@ -20,6 +20,7 @@ Python/Yandex transport failure cannot prevent the Chromium experiment itself.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -132,7 +133,7 @@ def _cached_stage1_context(args: argparse.Namespace, base_dir: Path | None) -> _
     playlist_payload: dict[str, Any] = {}
     playlist_metadata: dict[str, Any] = {}
     try:
-        with sqlite3.connect(database_path) as conn:
+        with closing(sqlite3.connect(database_path)) as conn:
             account_row = conn.execute(
                 """
                 SELECT account_json

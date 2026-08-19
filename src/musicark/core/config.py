@@ -19,6 +19,8 @@ class AppConfig:
 
     database_path: str = ".musicark/musicark.db"
     log_level: str = "INFO"
+    # Deprecated v0.10 research compatibility flag. Production manual upload in
+    # v0.11.0 deliberately does not read this field as an enablement gate.
     experimental_yandex_upload: bool = False
 
 
@@ -54,7 +56,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
 
 
 def _apply_experimental_upload_env_override(config: AppConfig) -> AppConfig:
-    """MUSICARK_EXPERIMENTAL_YANDEX_UPLOAD=1 forces the flag on for v0.11 experiments."""
+    """Preserve the deprecated research env override for backward compatibility."""
     raw = os.getenv("MUSICARK_EXPERIMENTAL_YANDEX_UPLOAD", "").strip().lower()
     if raw in ("1", "true", "yes", "on"):
         return AppConfig(

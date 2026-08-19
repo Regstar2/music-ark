@@ -128,7 +128,13 @@ jobs:
             --output $dataflowOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          foreach ($output in @($profileOutput, $configOutput, $dataflowOutput)) {
+          $topologyOutput = ".musicark\research\yandex-upload-runtime-topology-v18-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_topology_probe.py `
+            $asar `
+            --output $topologyOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          foreach ($output in @($profileOutput, $configOutput, $dataflowOutput, $topologyOutput)) {
             if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Runtime report was not created." }
             $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($report.input_sha256 -ne $expected) { throw "Runtime report input hash mismatch." }
@@ -148,11 +154,12 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-upload-runtime-profile-v17-sanitized
+          name: yandex-upload-runtime-profile-v18-sanitized
           path: |
             .musicark/research/yandex-upload-runtime-profile-v15-ci.json
             .musicark/research/yandex-upload-runtime-config-v16-ci.json
             .musicark/research/yandex-upload-runtime-dataflow-v17-ci.json
+            .musicark/research/yandex-upload-runtime-topology-v18-ci.json
           if-no-files-found: error
           retention-days: 7
 

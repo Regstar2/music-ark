@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TOOLS = _ROOT / "tools"
@@ -25,12 +25,22 @@ _SPEC.loader.exec_module(poc)
 class _FakeCdpClient:
     def __init__(self, url: str) -> None:
         self.url = url
+        self.calls: list[str] = []
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         return None
+
+    def call(self, method: str, params=None, *, timeout: float = 5.0):  # noqa: ANN001
+        self.calls.append(method)
+        return {}
+
+
+class _FailingCdpClient(_FakeCdpClient):
+    def __enter__(self):
+        raise poc.cdp.CdpProbeError("DevTools WebSocket handshake failed.")
 
 
 class YandexUploadGroundTruthPocTests(unittest.TestCase):
@@ -65,6 +75,56 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
             assisted_payload={"readBack": {"verified": False, "ambiguous": True}},
         )
         self.assertEqual(result["status"], "uploaded_unverified")
+
+    def test_launch_enables_localhost_devtools_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "YandexMusic.exe"
+            executable.write_bytes(b"exe")
+            process = Mock()
+            with patch.object(poc.subprocess, "Popen", return_value=process) as popen:
+                poc._launch_desktop(executable, port=9222, wait_seconds=0.0)  # noqa: SLF001
+            command = popen.call_args.args[0]
+            self.assertIn("--remote-debugging-port=9222", command)
+            self.assertIn("--remote-allow-origins=http://localhost", command)
+
+    def test_preflight_failure_happens_before_desktop_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            instrument = root / "instrument.js"
+            instrument.write_text("(()=>{})();", encoding="utf-8")
+            target = {
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/1",
+                "type": "page",
+                "url": "https://music.yandex.ru",
+            }
+            args = argparse.Namespace(
+                base_dir=None,
+                file=str(root / "owned.mp3"),
+                playlist_kind="1055",
+                confirm_owned_file=True,
+                confirm_desktop_upload=True,
+                port=9222,
+                target_contains="Yandex",
+                launch_exe=None,
+                launch_wait=0.0,
+                trace_duration=0.05,
+                instrumentation_js=instrument,
+                readback_attempts=1,
+                readback_delay=0.0,
+                trace_output=root / "trace.json",
+                decision_output=root / "decision.json",
+                output=root / "result.json",
+            )
+            Path(args.file).write_bytes(b"audio")
+            with patch.object(poc, "_discover_target", return_value=target), \
+                 patch.object(poc.cdp, "CdpClient", _FailingCdpClient), \
+                 patch.object(poc.assisted, "run") as assisted_run:
+                with self.assertRaisesRegex(
+                    poc.assisted.live.YandexUploadProtocolError,
+                    "Desktop CDP preflight failed: DevTools WebSocket handshake failed",
+                ):
+                    poc.run(args, prompt=lambda _: "")
+            assisted_run.assert_not_called()
 
     def test_run_orchestrates_sanitized_trace_and_readback_offline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -117,8 +177,7 @@ class YandexUploadGroundTruthPocTests(unittest.TestCase):
                 "readBack": {"verified": True, "ambiguous": False, "verifiedTrackId": "ugc-1"},
             }
 
-            with patch.object(poc.cdp, "discover_targets", return_value=[target]), \
-                 patch.object(poc.cdp, "select_target", return_value=target), \
+            with patch.object(poc, "_discover_target", return_value=target), \
                  patch.object(poc.cdp, "CdpClient", _FakeCdpClient), \
                  patch.object(poc.cdp, "collect_trace", return_value=[]), \
                  patch.object(poc.cdp, "build_report", return_value=trace_report), \

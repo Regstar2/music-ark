@@ -46,6 +46,54 @@ SOURCE_TARGET_PAIRS = (
 )
 _TEXT_SUFFIXES = {".js"}
 _PUNCTUATION = set(".=:+-*/,;(){}[]?!<>")
+_JS_KEYWORDS = {
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "get",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "null",
+    "of",
+    "return",
+    "set",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+}
 
 
 def _is_identifier_start(char: str) -> bool:
@@ -127,6 +175,8 @@ def _alias(module_id: str, identifier: str) -> str:
 def _node(module_id: str, token: str) -> str | None:
     if token in TARGETS:
         return token
+    if token in _JS_KEYWORDS:
+        return None
     if token == "<string>" or not token or not _is_identifier_start(token[0]):
         return None
     if all(_is_identifier_part(char) for char in token):
@@ -142,12 +192,12 @@ def build_local_graph(module_id: str, tokens: list[str], *, radius: int = 16) ->
             continue
         left = index
         steps = 0
-        while left > 0 and steps < radius and tokens[left - 1] not in {";", "{" , "}"}:
+        while left > 0 and steps < radius and tokens[left - 1] not in {";", "{", "}"}:
             left -= 1
             steps += 1
         right = index
         steps = 0
-        while right + 1 < len(tokens) and steps < radius and tokens[right + 1] not in {";", "{" , "}"}:
+        while right + 1 < len(tokens) and steps < radius and tokens[right + 1] not in {";", "{", "}"}:
             right += 1
             steps += 1
         center = token

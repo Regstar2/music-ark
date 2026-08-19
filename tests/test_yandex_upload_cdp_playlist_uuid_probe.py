@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
+from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
@@ -31,18 +31,19 @@ class YandexUploadCdpPlaylistUuidProbeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.database = Path(self.tmp.name) / "musicark.db"
-        with sqlite3.connect(self.database) as conn:
-            conn.execute(
-                """
-                CREATE TABLE provider_collection_snapshots (
-                    provider_id TEXT NOT NULL,
-                    collection_id TEXT NOT NULL,
-                    metadata_json TEXT,
-                    collection_type TEXT NOT NULL,
-                    active INTEGER NOT NULL
+        with closing(sqlite3.connect(self.database)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE provider_collection_snapshots (
+                        provider_id TEXT NOT NULL,
+                        collection_id TEXT NOT NULL,
+                        metadata_json TEXT,
+                        collection_type TEXT NOT NULL,
+                        active INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -52,15 +53,16 @@ class YandexUploadCdpPlaylistUuidProbeTests(unittest.TestCase):
         return argparse.Namespace(playlist_kind="1055", playlist_id_source="uuid")
 
     def _insert_metadata(self, metadata: dict) -> None:
-        with sqlite3.connect(self.database) as conn:
-            conn.execute(
-                """
-                INSERT INTO provider_collection_snapshots(
-                    provider_id, collection_id, metadata_json, collection_type, active
-                ) VALUES ('yandex_music', 'playlist:1055', ?, 'playlist', 1)
-                """,
-                (json.dumps(metadata),),
-            )
+        with closing(sqlite3.connect(self.database)) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO provider_collection_snapshots(
+                        provider_id, collection_id, metadata_json, collection_type, active
+                    ) VALUES ('yandex_music', 'playlist:1055', ?, 'playlist', 1)
+                    """,
+                    (json.dumps(metadata),),
+                )
 
     def test_cached_playlist_uuid_reads_metadata_without_returning_unrelated_fields(self) -> None:
         self._insert_metadata(

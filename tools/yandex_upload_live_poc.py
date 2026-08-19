@@ -4,9 +4,11 @@ The runner is intentionally separate from MusicArk Sync/UI. It never accepts a
 Yandex token on the command line, never prints the token or the dynamic upload
 URL, and requires explicit opt-in before any network mutation.
 
-Current state: stage one is deliberately fail-closed before account/network
-access because no legitimate public desktop runtime prefix/authorization
-profile has been established.
+Stage one remains fail-closed by default. A direct experiment is available only
+when the caller explicitly supplies a ground-truth-verified HTTPS Yandex
+``--stage1-base-url``; the requester then uses the already-saved MusicArk account
+OAuth credential recovered by the normal credential boundary. There is no
+default host, retry, or host/header fallback.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from musicark.core.config import load_config
 from musicark.credentials import CredentialStoreError, SystemCredentialStore
 from musicark.providers.yandex_music_provider import YandexMusicProvider, YandexTokenMissingError
 from musicark.providers.yandex_upload_transport import (
+    YandexOAuthStage1Requester,
     YandexUploadProtocolError,
     YandexUploadTransport,
 )
@@ -185,17 +188,29 @@ def _stage1_path(file_path: Path, mode: str) -> str:
     return file_path.name if mode == "name" else str(file_path)
 
 
-def _live_transport() -> YandexUploadTransport:
-    """Return the CLI transport; no private desktop requester is ever injected."""
-    return YandexUploadTransport()
+def _live_transport(base_dir: Path | None = None, stage1_base_url: str | None = None) -> YandexUploadTransport:
+    """Build a fail-closed transport or one explicit ground-truth OAuth requester."""
+    clean_base_url = str(stage1_base_url or "").strip()
+    if not clean_base_url:
+        return YandexUploadTransport()
+    requester = YandexOAuthStage1Requester(
+        base_url=clean_base_url,
+        oauth_token=_saved_token(base_dir),
+    )
+    return YandexUploadTransport(requester)
+
+
+def _base_dir_from_args(args: argparse.Namespace) -> Path | None:
+    value = getattr(args, "base_dir", None)
+    return Path(value) if value else None
 
 
 def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
     if not args.confirm_prepare:
         raise YandexUploadProtocolError("prepare mode requires --confirm-prepare.")
 
-    # Fail before credential resolution, playlist reads, or any upload request.
-    transport = _live_transport()
+    base_dir = _base_dir_from_args(args)
+    transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
     transport.require_stage1_profile()
 
     client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
@@ -227,8 +242,8 @@ def run_upload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "Live mutation is disabled. Set MUSICARK_YANDEX_UPLOAD_LIVE=1 for this explicit local PoC."
         )
 
-    # Even with the live flag, do not reach credentials/network without a verified stage-one profile.
-    transport = _live_transport()
+    base_dir = _base_dir_from_args(args)
+    transport = _live_transport(base_dir, getattr(args, "stage1_base_url", None))
     transport.require_stage1_profile()
 
     client, playlist, file_path, uid, playlist_id, visibility = _prepare_context(args)
@@ -283,6 +298,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-dir", default=None)
     parser.add_argument("--file", required=True, help="Explicit local audio file owned/authorized by the user.")
     parser.add_argument("--playlist-kind", required=True, help="Existing user playlist kind used for read-back.")
+    parser.add_argument(
+        "--stage1-base-url",
+        default=None,
+        help="Explicit ground-truth-verified HTTPS Yandex stage-one prefix. No default or fallback is used.",
+    )
     parser.add_argument(
         "--playlist-id-source",
         choices=("uuid", "kind"),

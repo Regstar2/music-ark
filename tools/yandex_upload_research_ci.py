@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+import yandex_upload_auth_semantics_probe as auth_semantics
 import yandex_upload_prefix_factory_probe as prefix_factory
 import yandex_upload_prefix_import_binding_probe as prefix_binding
 import yandex_upload_prefix_provenance_probe as prefix_provenance
@@ -28,6 +29,7 @@ import yandex_upload_stage1_auth_lineage_probe as auth_lineage
 import yandex_upload_stage1_role_probe as stage1_role
 import yandex_upload_tld_helper_probe as tld_helper
 import yandex_upload_tld_lineage_probe as tld_lineage
+import yandex_upload_tld_method_probe as tld_method
 
 
 EXPECTED_ASAR_SHA256 = "8e7f4cec0776c39f194dee0a94086548d13f1465d46aa05d3e00a21624cbe80a"
@@ -47,6 +49,8 @@ _PROBES: tuple[tuple[str, Callable[[Path], dict[str, Any]]], ...] = (
     ("yandex-upload-stage1-auth-lineage-v26-ci.json", auth_lineage.build_report),
     ("yandex-upload-prefix-template-v27-ci.json", prefix_template.build_report),
     ("yandex-upload-request-stack-v28-ci.json", request_stack.build_report),
+    ("yandex-upload-tld-method-v29-ci.json", tld_method.build_report),
+    ("yandex-upload-auth-semantics-v30-ci.json", auth_semantics.build_report),
 )
 
 _REQUIRED_FALSE_SAFETY_FLAGS = {

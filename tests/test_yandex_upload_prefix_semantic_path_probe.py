@@ -30,12 +30,22 @@ class YandexUploadPrefixSemanticPathProbeTests(unittest.TestCase):
         self.assertTrue(result["hostShapeValid"])
         self.assertTrue(result["tldShapeValid"])
 
-    def test_sensitive_property_path_is_rejected(self) -> None:
+    def test_optional_chain_lowering_recovers_static_schema_key(self) -> None:
+        body = (
+            'var h=n(91953);const x=(0,h.getTldHost)('
+            '(null==(q=this.config.loaderApi)?void 0:q.host),this.tld,h.TLD_MARK);'
+        )
+        result = probe.analyze_body(body)
+        self.assertEqual(result["hostConfigPath"], ["this", "config", "loaderApi", "host"])
+        self.assertTrue(result["hostShapeValid"])
+
+    def test_schema_name_may_contain_token_word_but_no_value_is_emitted(self) -> None:
         body = 'var h=n(91953);(0,h.getTldHost)(this.config.customApiToken.host,this.tld,h.TLD_MARK);'
         result = probe.analyze_body(body)
-        self.assertIsNone(result["hostConfigPath"])
-        self.assertFalse(result["hostShapeValid"])
-        self.assertNotIn("customApiToken", json.dumps(result))
+        self.assertEqual(result["hostConfigPath"], ["this", "config", "customApiToken", "host"])
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertIn("customApiToken", encoded)
+        self.assertNotIn("OAuth ", encoded)
 
     def test_ordinary_string_is_never_part_of_output(self) -> None:
         body = 'var h=n(91953);const q="DO_NOT_EMIT";(0,h.getTldHost)(q,this.tld,h.TLD_MARK);'

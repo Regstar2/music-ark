@@ -64,6 +64,18 @@ def _alias_refs(module_id: str, expression: str, *, excluded: set[str]) -> list[
     return refs[:40]
 
 
+def _safe_expression_kind(expression: str) -> dict[str, Any]:
+    """Keep only expression class and allowlisted protocol enum names."""
+    classification = config_probe._expression_kind(expression)  # noqa: SLF001
+    kind = str(classification.get("kind") or "unknown")
+    result: dict[str, Any] = {"kind": kind}
+    if kind == "protocol-enum":
+        name = classification.get("name")
+        if name in {"YandexMusicDesktopApp", "YandexMusicWebNext"}:
+            result["name"] = name
+    return result
+
+
 def _expression_summary(
     module_id: str,
     expression: str,
@@ -79,7 +91,7 @@ def _expression_summary(
         if item not in source_refs:
             source_refs.append(item)
     return {
-        "kind": config_probe._expression_kind(expression),  # noqa: SLF001
+        "kind": _safe_expression_kind(expression),
         "config_properties": _target_properties(expression),
         "source_module_refs": source_refs,
         "alias_refs": _alias_refs(module_id, expression, excluded=import_locals),
@@ -158,30 +170,17 @@ def _bare_member_uses(body: str, imports: list[dict[str, str]]) -> list[dict[str
     return results[:300]
 
 
-def _binding_summaries(module_id: str, body: str, imports: list[dict[str, str]]) -> list[dict[str, Any]]:
-    import_map = {item["local"]: item["source_module_id"] for item in imports}
-    import_locals = set(import_map)
+def _binding_summaries(body: str) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for binding in config_probe._all_interesting_object_bindings(body):  # noqa: SLF001
-        key = str(binding.get("key") or "")
+        path = str(binding.get("path") or "")
+        key = path.rsplit(".", 1)[-1] if path else ""
         if key not in CONFIG_PROPERTIES:
             continue
-        expression = str(binding.get("expression") or "")
-        result = {
-            "key": key,
-            "value_kind": binding.get("value_kind") or config_probe._expression_kind(expression),  # noqa: SLF001
-        }
-        # Older helper versions may expose a structural expression label rather
-        # than raw source. Re-summarize only if an expression is present.
-        if expression:
-            result["value"] = _expression_summary(
-                module_id,
-                expression,
-                import_locals=import_locals,
-                import_map=import_map,
-            )
-        if result not in results:
-            results.append(result)
+        value = binding.get("value") if isinstance(binding.get("value"), dict) else {}
+        record: dict[str, Any] = {"key": key, "value_kind": str(value.get("kind") or "unknown")}
+        if record not in results:
+            results.append(record)
     return results[:120]
 
 
@@ -198,7 +197,7 @@ def analyze_module(body: str) -> dict[str, Any]:
         "config_properties_present": sorted({name for name in CONFIG_PROPERTIES if name in body}),
         "imported_member_uses": _bare_member_uses(body, imports),
         "imported_calls": _call_uses(COMPOSITION_MODULE_ID, body, imports),
-        "config_bindings": _binding_summaries(COMPOSITION_MODULE_ID, body, imports),
+        "config_bindings": _binding_summaries(body),
     }
 
 

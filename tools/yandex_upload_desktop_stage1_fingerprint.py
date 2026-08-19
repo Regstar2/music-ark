@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import threading
 import time
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -302,10 +303,13 @@ def _collect(
     *,
     duration: float,
     collector: _FingerprintCollector,
+    started: threading.Event | None = None,
 ) -> None:
     try:
         with cdp.CdpClient(websocket_url) as client:
             client.call("Network.enable")
+            if started is not None:
+                started.set()
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
                 message = client.recv_event(timeout=min(0.5, max(0.05, deadline - time.monotonic())))
@@ -356,13 +360,35 @@ def run(args: argparse.Namespace, *, prompt=input) -> tuple[dict[str, Any], int]
         visibility=context.observed_visibility,
     )
 
+    started = threading.Event()
+    holder: dict[str, Exception] = {}
+
+    def worker() -> None:
+        try:
+            _collect(websocket_url, duration=args.duration, collector=collector, started=started)
+        except Exception as exc:  # noqa: BLE001 - raised on caller thread after sanitization boundary.
+            holder["error"] = exc
+            started.set()
+
+    thread = threading.Thread(target=worker, name="musicark-stage1-fingerprint", daemon=True)
+    thread.start()
+    if not started.wait(timeout=10.0):
+        raise YandexUploadProtocolError("Desktop fingerprint collector did not arm within 10 seconds.")
+    if "error" in holder:
+        raise holder["error"]
+
     print(
-        "Fingerprint collector ready. In the official Yandex Music desktop UI, upload exactly the selected owned file "
-        "to the selected playlist. Press Enter immediately after starting the visible desktop upload.",
+        "Fingerprint collector is armed. In the official Yandex Music desktop UI, upload exactly the selected owned "
+        "file to the selected playlist. Press Enter immediately after starting the visible desktop upload.",
         file=sys.stderr,
     )
     prompt("")
-    _collect(websocket_url, duration=args.duration, collector=collector)
+    thread.join(timeout=args.duration + 5.0)
+    if thread.is_alive():
+        raise YandexUploadProtocolError("Desktop fingerprint collector exceeded its bounded observation window.")
+    if "error" in holder:
+        raise holder["error"]
+
     summary = collector.summary()
     fingerprint = summary.get("successfulFingerprint")
     status = "captured" if isinstance(fingerprint, dict) else "no-successful-stage1-observed"
@@ -408,9 +434,19 @@ def run(args: argparse.Namespace, *, prompt=input) -> tuple[dict[str, Any], int]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = uuid_probe.language.noauth.base.build_parser()
-    parser.description = "Capture a secret-free fingerprint of one successful official desktop stage-one upload request."
+    parser = argparse.ArgumentParser(
+        description="Capture a secret-free fingerprint of one successful official desktop stage-one upload request."
+    )
+    parser.add_argument("--base-dir", default=None)
+    parser.add_argument("--file", required=True)
+    parser.add_argument("--playlist-kind", required=True)
+    parser.add_argument("--playlist-id-source", choices=("uuid",), default="uuid")
+    parser.add_argument("--confirm-owned-file", action="store_true")
     parser.add_argument("--confirm-desktop-upload", action="store_true")
+    parser.add_argument("--port", type=int, default=9222)
+    parser.add_argument("--target-contains", default="Yandex")
+    parser.add_argument("--launch-exe", type=Path, default=None)
+    parser.add_argument("--launch-wait", type=float, default=5.0)
     parser.add_argument("--duration", type=float, default=120.0)
     return parser
 

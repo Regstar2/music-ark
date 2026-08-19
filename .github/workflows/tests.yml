@@ -122,7 +122,13 @@ jobs:
             --output $configOutput
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          foreach ($output in @($profileOutput, $configOutput)) {
+          $dataflowOutput = ".musicark\research\yandex-upload-runtime-dataflow-v17-ci.json"
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_runtime_dataflow_probe.py `
+            $asar `
+            --output $dataflowOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          foreach ($output in @($profileOutput, $configOutput, $dataflowOutput)) {
             if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Runtime report was not created." }
             $report = Get-Content -LiteralPath $output -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($report.input_sha256 -ne $expected) { throw "Runtime report input hash mismatch." }
@@ -133,16 +139,20 @@ jobs:
             if ($report.safety.ordinary_string_values_included -ne $false) { throw "Runtime safety gate failed: ordinary strings." }
             if ($report.safety.source_code_contexts_included -ne $false) { throw "Runtime safety gate failed: source contexts." }
             if ($report.safety.raw_file_contents_included -ne $false) { throw "Runtime safety gate failed: raw file contents." }
+            if (($report.safety.PSObject.Properties.Name -contains "raw_identifiers_included") -and $report.safety.raw_identifiers_included -ne $false) {
+              throw "Runtime safety gate failed: raw identifiers."
+            }
           }
 
       - name: Upload sanitized runtime profile reports
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: yandex-upload-runtime-profile-v16-sanitized
+          name: yandex-upload-runtime-profile-v17-sanitized
           path: |
             .musicark/research/yandex-upload-runtime-profile-v15-ci.json
             .musicark/research/yandex-upload-runtime-config-v16-ci.json
+            .musicark/research/yandex-upload-runtime-dataflow-v17-ci.json
           if-no-files-found: error
           retention-days: 7
 

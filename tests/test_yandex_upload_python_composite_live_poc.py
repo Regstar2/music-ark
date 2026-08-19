@@ -11,6 +11,8 @@ import sys
 import unittest
 from unittest import mock
 
+from musicark.providers.yandex_upload_transport import YandexUploadTransferResult
+
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TOOLS = _ROOT / "tools"
@@ -102,7 +104,7 @@ class YandexUploadPythonCompositeLivePocTests(unittest.TestCase):
             poll_url="https://api.music.yandex.net/poll?opaque=signed-secret",
             track_id="new-track-id",
         )
-        transfer = poc.YandexUploadTransferResult(
+        transfer = YandexUploadTransferResult(
             status_code=200,
             response_shape={"type": "null"},
             track_id=None,

@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from musicark.providers.yandex_upload_transport import (
+    YandexOAuthStage1Requester,
     YandexUploadProtocolError,
     YandexUploadSlot,
     YandexUploadStage1UnavailableError,
@@ -26,16 +27,68 @@ class _FakeStage1Requester:
 
 
 class _FakeResponse:
-    def __init__(self, status_code=200, payload=None, content_type="application/json"):
+    def __init__(self, status_code=200, payload=None, content_type="application/json", text=""):
         self.status_code = status_code
         self._payload = payload
         self.headers = {"Content-Type": content_type}
+        self.text = text
 
     def json(self):
         return self._payload
 
 
 class YandexUploadTransportTests(unittest.TestCase):
+    def test_oauth_stage1_requester_requires_explicit_https_yandex_prefix(self) -> None:
+        for invalid in (
+            "",
+            "http://api.music.yandex.net",
+            "https://example.com",
+            "https://user:pass@api.music.yandex.net",
+            "https://api.music.yandex.net?token=secret",
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(YandexUploadProtocolError):
+                    YandexOAuthStage1Requester(base_url=invalid, oauth_token="owned-oauth")
+
+    def test_oauth_stage1_requester_posts_exact_recovered_endpoint_once(self) -> None:
+        requester = YandexOAuthStage1Requester(
+            base_url="https://music.yandex.ru/api",
+            oauth_token="owned-oauth-secret",
+            timeout_seconds=9,
+        )
+        observed = []
+
+        def fake_post(url, **kwargs):
+            observed.append((url, kwargs))
+            return _FakeResponse(payload={"url": "https://upload.example.test/signed"})
+
+        with patch("musicark.providers.yandex_upload_transport.requests.post", side_effect=fake_post):
+            payload = requester.post_upload_url({"uid": "1", "playlist-id": "2", "path": "owned.mp3"})
+
+        self.assertEqual(payload, {"url": "https://upload.example.test/signed"})
+        self.assertEqual(len(observed), 1)
+        url, kwargs = observed[0]
+        self.assertEqual(url, "https://music.yandex.ru/api/loader/upload-url")
+        self.assertEqual(kwargs["params"], {"uid": "1", "playlist-id": "2", "path": "owned.mp3"})
+        self.assertEqual(kwargs["headers"], {"Authorization": "OAuth owned-oauth-secret"})
+        self.assertEqual(kwargs["timeout"], 9.0)
+        self.assertNotIn("cookies", kwargs)
+
+    def test_oauth_stage1_requester_error_does_not_expose_credential(self) -> None:
+        requester = YandexOAuthStage1Requester(
+            base_url="https://music.yandex.ru/api",
+            oauth_token="do-not-leak-this-token",
+        )
+        with patch(
+            "musicark.providers.yandex_upload_transport.requests.post",
+            return_value=_FakeResponse(status_code=403, payload={"error": "secret body"}),
+        ):
+            with self.assertRaises(YandexUploadProtocolError) as caught:
+                requester.post_upload_url({"uid": "1"})
+        self.assertIn("HTTP 403", str(caught.exception))
+        self.assertNotIn("do-not-leak-this-token", str(caught.exception))
+        self.assertNotIn("secret body", str(caught.exception))
+
     def test_default_stage1_fails_closed_before_request(self) -> None:
         transport = YandexUploadTransport()
         self.assertFalse(transport.stage1_available)

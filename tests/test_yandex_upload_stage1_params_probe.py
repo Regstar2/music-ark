@@ -45,6 +45,21 @@ class YandexUploadStage1ParamsProbeTests(unittest.TestCase):
         refs = result["params"]["common"]["sourceRefs"]
         self.assertIn({"source_module_id": "55", "export_key": "common"}, refs)
 
+    def test_common_oauth_getter_is_mapped_without_value(self) -> None:
+        body = (
+            'var s=n(12690),a=n(55);'
+            'new s.S(client,{params:{common:{client:a.client,get oauth(){return a.WA.getOauth()},language:a.lang}}});'
+        )
+        result = probe.analyze_body(body)
+        getters = result["params"]["common"]["getters"]
+        oauth_getter = next(item for item in getters if item["key"] == "oauth")
+        self.assertEqual(
+            oauth_getter["returns"][0]["sourceRefs"],
+            [{"source_module_id": "55", "export_key": "WA"}],
+        )
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("getOauth", encoded)
+
     def test_sensitive_property_name_is_filtered(self) -> None:
         body = 'var s=n(12690),a=n(55);new s.S(client,{params:{common:{oauth:a.common,token:a.secret}}});'
         result = probe.analyze_body(body)

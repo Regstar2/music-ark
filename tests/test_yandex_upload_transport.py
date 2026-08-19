@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from musicark.providers.yandex_upload_transport import (
     YandexOAuthStage1Requester,
     YandexUploadProtocolError,
@@ -60,17 +62,23 @@ class YandexUploadTransportTests(unittest.TestCase):
 
         def fake_post(url, **kwargs):
             observed.append((url, kwargs))
-            return _FakeResponse(payload={"url": "https://upload.example.test/signed"})
+            return _FakeResponse(payload={"post-target": "https://upload.example.test/signed"})
 
         with patch("musicark.providers.yandex_upload_transport.requests.post", side_effect=fake_post):
             payload = requester.post_upload_url({"uid": "1", "playlist-id": "2", "path": "owned.mp3"})
 
-        self.assertEqual(payload, {"url": "https://upload.example.test/signed"})
+        self.assertEqual(payload, {"post-target": "https://upload.example.test/signed"})
         self.assertEqual(len(observed), 1)
         url, kwargs = observed[0]
         self.assertEqual(url, "https://music.yandex.ru/api/loader/upload-url")
         self.assertEqual(kwargs["params"], {"uid": "1", "playlist-id": "2", "path": "owned.mp3"})
-        self.assertEqual(kwargs["headers"], {"Authorization": "OAuth owned-oauth-secret"})
+        self.assertEqual(
+            kwargs["headers"],
+            {
+                "Accept": "application/json",
+                "Authorization": "OAuth owned-oauth-secret",
+            },
+        )
         self.assertEqual(kwargs["timeout"], 9.0)
         self.assertNotIn("cookies", kwargs)
 
@@ -88,6 +96,25 @@ class YandexUploadTransportTests(unittest.TestCase):
         self.assertIn("HTTP 403", str(caught.exception))
         self.assertNotIn("do-not-leak-this-token", str(caught.exception))
         self.assertNotIn("secret body", str(caught.exception))
+
+    def test_oauth_stage1_transport_failure_reports_only_exception_kinds(self) -> None:
+        requester = YandexOAuthStage1Requester(
+            base_url="https://api.music.yandex.net",
+            oauth_token="do-not-leak-this-token",
+        )
+        nested = requests.exceptions.ProxyError("sensitive proxy details")
+        failure = requests.exceptions.ConnectionError(nested)
+        with patch(
+            "musicark.providers.yandex_upload_transport.requests.post",
+            side_effect=failure,
+        ):
+            with self.assertRaises(YandexUploadProtocolError) as caught:
+                requester.post_upload_url({"uid": "1", "path": "sensitive-local-path.mp3"})
+        message = str(caught.exception)
+        self.assertIn("transport=ConnectionError/ProxyError", message)
+        self.assertNotIn("do-not-leak-this-token", message)
+        self.assertNotIn("sensitive proxy details", message)
+        self.assertNotIn("sensitive-local-path", message)
 
     def test_default_stage1_fails_closed_before_request(self) -> None:
         transport = YandexUploadTransport()
@@ -112,7 +139,32 @@ class YandexUploadTransportTests(unittest.TestCase):
             },
         )
 
-    def test_injected_stage1_requester_can_validate_recovered_contract_offline(self) -> None:
+    def test_observed_stage1_response_extracts_post_target_poll_and_ugc_id(self) -> None:
+        requester = _FakeStage1Requester(
+            {
+                "post-target": "https://upload.example.test/signed?opaque=upload",
+                "poll-result": "https://upload.example.test/poll?opaque=poll",
+                "ugc-track-id": "ugc-ground-truth-123",
+            }
+        )
+        transport = YandexUploadTransport(requester)
+        slot = transport.prepare_upload(
+            uid="100",
+            playlist_id="playlist-uuid",
+            visibility=None,
+            path=r"C:\Music\owned.mp3",
+        )
+        self.assertEqual(slot.upload_url, "https://upload.example.test/signed?opaque=upload")
+        self.assertEqual(slot.poll_url, "https://upload.example.test/poll?opaque=poll")
+        self.assertEqual(slot.track_id, "ugc-ground-truth-123")
+        self.assertNotIn("upload.example.test", str(slot.response_shape))
+        self.assertNotIn("ugc-ground-truth-123", str(slot.response_shape))
+        self.assertEqual(
+            set(slot.response_shape["keys"]),
+            {"post-target", "poll-result", "ugc-track-id"},
+        )
+
+    def test_injected_stage1_requester_keeps_legacy_url_shape_compatible(self) -> None:
         requester = _FakeStage1Requester({"url": "https://upload.example.test/signed?opaque=value"})
         transport = YandexUploadTransport(requester)
         slot = transport.prepare_upload(
@@ -156,7 +208,7 @@ class YandexUploadTransportTests(unittest.TestCase):
             self.assertEqual(filename, "owned.mp3")
             self.assertEqual(stream.read(), b"audio")
             stream.seek(0)
-            return _FakeResponse(payload={"trackId": "ugc-123"})
+            return _FakeResponse(payload={"ugc-track-id": "ugc-123"})
 
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "owned.mp3"

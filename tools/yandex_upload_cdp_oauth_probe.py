@@ -1,9 +1,9 @@
 """Probe Yandex upload stage one through the official desktop Chromium network stack.
 
-This diagnostic intentionally separates two remaining hypotheses after Python
-``requests`` and HTTPX both observed a remote protocol close before any HTTP
-status. The request is initiated by MusicArk through a localhost-only CDP
-session, but Chromium/Electron performs the network operation.
+This diagnostic intentionally separates the remaining transport/auth hypotheses
+after direct Python HTTP clients observed a remote protocol close before any HTTP
+status. The request is initiated by MusicArk through a localhost-only CDP session,
+but Chromium/Electron performs the network operation.
 
 The probe uses only the OAuth credential already stored by MusicArk and sends it
 with ``credentials: 'omit'`` so browser cookies/session state are not attached.
@@ -15,23 +15,32 @@ Unlike the direct Python PoC, this isolation probe deliberately does not
 initialize the ``yandex-music`` Python client before the browser request. The uid
 and playlist context are recovered from MusicArk's local SQLite cache so a
 Python/Yandex transport failure cannot prevent the Chromium experiment itself.
+
+Renderer ``fetch()`` failures are correlated with CDP ``Network.*`` events. This
+is important because Chromium exposes CORS and renderer-policy failures as a
+JavaScript ``TypeError`` even when the underlying network stack observed a
+preflight or HTTP response. Only request method, status, safe CDP policy enums and
+response structure are retained; request IDs and raw values are discarded.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import closing
 from dataclasses import dataclass
 import json
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import yandex_upload_cdp_probe as cdp
 import yandex_upload_ground_truth_poc as groundtruth
 import yandex_upload_live_poc as live
+import yandex_upload_runtime_trace as runtime_trace
 from musicark.core.config import load_config
 from musicark.providers.yandex_upload_transport import (
     YandexOAuthStage1Requester,
@@ -42,6 +51,7 @@ from musicark.providers.yandex_upload_transport import (
 _FORMAT = "musicark-yandex-upload-cdp-oauth-probe-v1"
 _DESKTOP_CLIENT_LABEL = "YandexMusicDesktopApp"
 _PROVIDER_ID = "yandex_music"
+_STAGE1_PATH = "/loader/upload-url"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +62,22 @@ class _CachedStage1Context:
     playlist_id_source: str
     playlist_id_fallback: bool
     observed_visibility: str | None
+
+
+@dataclass(slots=True)
+class _Stage1NetworkObservation:
+    post_request_observed: bool = False
+    preflight_request_observed: bool = False
+    post_http_status: int | None = None
+    preflight_http_status: int | None = None
+    post_loading_failed: bool = False
+    preflight_loading_failed: bool = False
+    blocked_reason: str | None = None
+    cors_error: str | None = None
+    response_shape: dict[str, Any] | None = None
+    post_target_present: bool = False
+    poll_result_present: bool = False
+    ugc_track_id_present: bool = False
 
 
 def _runtime_value(result: dict[str, Any]) -> dict[str, Any]:
@@ -75,6 +101,16 @@ def _safe_shape(value: Any) -> dict[str, Any]:
             continue
         safe_keys[str(key)[:120]] = {"type": str(descriptor.get("type") or "unknown")[:40]}
     return {"type": "object", "keys": safe_keys}
+
+
+def _safe_policy_label(value: Any) -> str | None:
+    """Keep only stable CDP enum-like labels, never arbitrary error text."""
+    clean = str(value or "").strip()
+    if not clean or len(clean) > 120:
+        return None
+    if not all(character.isalnum() or character in {"-", "_"} for character in clean):
+        return None
+    return clean
 
 
 def _resolve_database_path(base_dir: Path | None) -> Path:
@@ -200,9 +236,9 @@ def _cached_stage1_context(args: argparse.Namespace, base_dir: Path | None) -> _
             playlist_id = cached_uuid
             actual_source = "uuid-cache"
         else:
-            # For this isolation experiment an HTTP response is already useful.
-            # Falling back to the known playlist kind may yield a 4xx, but it
-            # still proves whether Chromium can reach the stage-one endpoint.
+            # Any HTTP response is already useful for this isolation experiment.
+            # A kind fallback may yield 4xx, but still distinguishes network path
+            # behavior from a renderer-policy failure.
             playlist_id = playlist_kind
             actual_source = "kind-diagnostic-fallback"
             playlist_id_fallback = True
@@ -292,14 +328,152 @@ def _expression(*, endpoint: str, oauth_token: str) -> str:
 """.strip()
 
 
-def _diagnosis(value: dict[str, Any]) -> str:
-    if not bool(value.get("networkCompleted")):
-        return "chromium-network-path-failed"
-    status = int(value.get("httpStatus") or 0)
-    if 200 <= status <= 299 and bool(value.get("postTargetPresent")):
+def _is_stage1_url(value: Any, *, expected_origin: str) -> bool:
+    try:
+        actual = urlsplit(str(value or ""))
+        expected = urlsplit(expected_origin)
+    except ValueError:
+        return False
+    return bool(
+        actual.scheme == expected.scheme
+        and actual.hostname == expected.hostname
+        and (actual.path or "/") == _STAGE1_PATH
+    )
+
+
+def _decode_stage1_body(result: dict[str, Any]) -> tuple[dict[str, Any], bool, bool, bool]:
+    body = str(result.get("body") or "")
+    base64_encoded = bool(result.get("base64Encoded"))
+    shape = runtime_trace.response_body_shape(body, base64_encoded=base64_encoded)
+    raw = body
+    if base64_encoded:
+        try:
+            raw = base64.b64decode(body, validate=True).decode("utf-8", errors="replace")
+        except (ValueError, UnicodeDecodeError):
+            return shape, False, False, False
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return shape, False, False, False
+    if not isinstance(payload, dict):
+        return shape, False, False, False
+    return (
+        shape,
+        isinstance(payload.get("post-target"), str) and bool(payload.get("post-target")),
+        isinstance(payload.get("poll-result"), str) and bool(payload.get("poll-result")),
+        isinstance(payload.get("ugc-track-id"), str) and bool(payload.get("ugc-track-id")),
+    )
+
+
+def _observe_stage1_network(
+    client: cdp.CdpClient,
+    *,
+    expected_origin: str,
+    duration: float = 1.5,
+) -> _Stage1NetworkObservation:
+    """Drain sanitized evidence for the one stage-one fetch already initiated."""
+    observation = _Stage1NetworkObservation()
+    request_methods: dict[str, str] = {}
+    post_request_ids: set[str] = set()
+    deadline = time.monotonic() + max(0.05, min(float(duration), 5.0))
+
+    while time.monotonic() < deadline:
+        message = client.recv_event(timeout=min(0.25, max(0.05, deadline - time.monotonic())))
+        if message is None:
+            continue
+        method = str(message.get("method") or "")
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        request_id = str(params.get("requestId") or "")
+
+        if method == "Network.requestWillBeSent":
+            request = params.get("request") if isinstance(params.get("request"), dict) else {}
+            if not _is_stage1_url(request.get("url"), expected_origin=expected_origin):
+                continue
+            request_method = str(request.get("method") or "").upper()
+            if request_id:
+                request_methods[request_id] = request_method
+            if request_method == "POST":
+                observation.post_request_observed = True
+                if request_id:
+                    post_request_ids.add(request_id)
+            elif request_method == "OPTIONS":
+                observation.preflight_request_observed = True
+            continue
+
+        if method == "Network.responseReceived":
+            response = params.get("response") if isinstance(params.get("response"), dict) else {}
+            if not _is_stage1_url(response.get("url"), expected_origin=expected_origin):
+                continue
+            status = int(response.get("status")) if isinstance(response.get("status"), (int, float)) else None
+            request_method = request_methods.get(request_id)
+            if request_method == "POST":
+                observation.post_http_status = status
+            elif request_method == "OPTIONS":
+                observation.preflight_http_status = status
+            continue
+
+        if method == "Network.loadingFailed" and request_id in request_methods:
+            request_method = request_methods.get(request_id)
+            if request_method == "POST":
+                observation.post_loading_failed = True
+            elif request_method == "OPTIONS":
+                observation.preflight_loading_failed = True
+            blocked_reason = _safe_policy_label(params.get("blockedReason"))
+            if blocked_reason:
+                observation.blocked_reason = blocked_reason
+            cors_status = params.get("corsErrorStatus") if isinstance(params.get("corsErrorStatus"), dict) else {}
+            cors_error = _safe_policy_label(cors_status.get("corsError"))
+            if cors_error:
+                observation.cors_error = cors_error
+            continue
+
+        if method == "Network.loadingFinished" and request_id in post_request_ids:
+            try:
+                body_result = client.call("Network.getResponseBody", {"requestId": request_id}, timeout=2.0)
+            except cdp.CdpProbeError:
+                continue
+            shape, post_target, poll_result, ugc_track_id = _decode_stage1_body(body_result)
+            observation.response_shape = shape
+            observation.post_target_present = post_target
+            observation.poll_result_present = poll_result
+            observation.ugc_track_id_present = ugc_track_id
+
+    return observation
+
+
+def _network_observation_payload(observation: _Stage1NetworkObservation) -> dict[str, Any]:
+    return {
+        "postRequestObserved": observation.post_request_observed,
+        "preflightRequestObserved": observation.preflight_request_observed,
+        "postHttpStatus": observation.post_http_status,
+        "preflightHttpStatus": observation.preflight_http_status,
+        "postLoadingFailed": observation.post_loading_failed,
+        "preflightLoadingFailed": observation.preflight_loading_failed,
+        "blockedReason": observation.blocked_reason,
+        "corsError": observation.cors_error,
+        "responseBodyShape": _safe_shape(observation.response_shape),
+    }
+
+
+def _diagnosis(value: dict[str, Any], observation: _Stage1NetworkObservation | None = None) -> str:
+    network = observation or _Stage1NetworkObservation()
+    runtime_completed = bool(value.get("networkCompleted"))
+    runtime_status = int(value.get("httpStatus") or 0) if runtime_completed else None
+    status = runtime_status if runtime_status is not None else network.post_http_status
+    post_target_present = bool(value.get("postTargetPresent")) or network.post_target_present
+
+    if status is not None and 200 <= status <= 299 and post_target_present:
         return "python-transport-mismatch-confirmed"
     if status in {401, 403}:
         return "credential-or-required-request-profile-rejected"
+    if network.cors_error or network.blocked_reason:
+        return "chromium-renderer-policy-blocked-stage1"
+    if network.preflight_request_observed and not network.post_request_observed:
+        return "chromium-cors-preflight-blocked-stage1"
+    if status is not None:
+        return "chromium-network-path-confirmed-without-upload-slot"
+    if not runtime_completed:
+        return "chromium-network-path-failed"
     return "chromium-network-path-confirmed-without-upload-slot"
 
 
@@ -328,7 +502,7 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "playlist-id": context.playlist_id,
         "path": live._stage1_path(context.file_path, args.path_mode),  # noqa: SLF001
     }
-    endpoint = f"{requester.sanitized_origin}/loader/upload-url?{urlencode(params)}"
+    endpoint = f"{requester.sanitized_origin}{_STAGE1_PATH}?{urlencode(params)}"
 
     groundtruth._launch_desktop(args.launch_exe, port=args.port, wait_seconds=args.launch_wait)  # noqa: SLF001
     target = groundtruth._discover_target(  # noqa: SLF001
@@ -341,8 +515,10 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         raise YandexUploadProtocolError("Selected desktop target has no DevTools WebSocket URL.")
 
     expression = _expression(endpoint=endpoint, oauth_token=token)
+    observation = _Stage1NetworkObservation()
     try:
         with cdp.CdpClient(websocket_url) as cdp_client:
+            cdp_client.call("Network.enable")
             cdp_client.call("Runtime.enable")
             result = cdp_client.call(
                 "Runtime.evaluate",
@@ -353,6 +529,10 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 },
                 timeout=args.timeout,
             )
+            observation = _observe_stage1_network(
+                cdp_client,
+                expected_origin=requester.sanitized_origin,
+            )
     except cdp.CdpProbeError as exc:
         raise YandexUploadProtocolError(f"Chromium OAuth stage-one probe failed: {exc}") from exc
     except OSError as exc:
@@ -361,11 +541,19 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         ) from exc
 
     value = _runtime_value(result)
-    network_completed = bool(value.get("networkCompleted"))
-    http_status = int(value.get("httpStatus") or 0) if network_completed else None
-    upload_url_present = bool(value.get("postTargetPresent"))
-    diagnosis = _diagnosis(value)
-    verified_slot = bool(network_completed and http_status is not None and 200 <= http_status <= 299 and upload_url_present)
+    runtime_completed = bool(value.get("networkCompleted"))
+    runtime_http_status = int(value.get("httpStatus") or 0) if runtime_completed else None
+    http_status = runtime_http_status if runtime_http_status is not None else observation.post_http_status
+    upload_url_present = bool(value.get("postTargetPresent")) or observation.post_target_present
+    poll_url_present = bool(value.get("pollResultPresent")) or observation.poll_result_present
+    track_id_present = bool(value.get("ugcTrackIdPresent")) or observation.ugc_track_id_present
+    response_shape = _safe_shape(value.get("responseShape"))
+    if response_shape.get("type") == "unavailable" and observation.response_shape is not None:
+        response_shape = _safe_shape(observation.response_shape)
+
+    diagnosis = _diagnosis(value, observation)
+    verified_slot = bool(http_status is not None and 200 <= http_status <= 299 and upload_url_present)
+    stage1_post_observed = bool(observation.post_request_observed or runtime_completed)
 
     payload = {
         "format": _FORMAT,
@@ -373,7 +561,9 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "status": "upload_url_obtained" if verified_slot else "diagnostic_complete",
         "diagnosis": diagnosis,
         "network": {
-            "stage1Sent": True,
+            "stage1Sent": stage1_post_observed,
+            "stage1PostObservedByCdp": observation.post_request_observed,
+            "corsPreflightObservedByCdp": observation.preflight_request_observed,
             "stage2Sent": False,
             "chromiumNetworkStack": True,
             "browserCredentialsMode": "omit",
@@ -389,15 +579,17 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "file": live._file_summary(context.file_path),  # noqa: SLF001
         "stage1": {
             "origin": requester.sanitized_origin,
-            "httpResponseReceived": network_completed,
+            "rendererFetchCompleted": runtime_completed,
+            "httpResponseReceived": http_status is not None,
             "httpStatus": http_status,
             "uploadUrlPresent": upload_url_present,
-            "pollUrlPresent": bool(value.get("pollResultPresent")),
-            "trackIdPresent": bool(value.get("ugcTrackIdPresent")),
-            "responseShape": _safe_shape(value.get("responseShape")),
+            "pollUrlPresent": poll_url_present,
+            "trackIdPresent": track_id_present,
+            "responseShape": response_shape,
             "authorizationSource": "musicark-saved-oauth",
             "desktopSessionCredentialsAttached": False,
             "pythonYandexClientInitialized": False,
+            "cdpNetwork": _network_observation_payload(observation),
         },
         "probe": {
             "mutation": "stage1-upload-slot-only",
@@ -413,10 +605,12 @@ def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "signed_urls_included": False,
             "raw_response_bodies_included": False,
             "raw_cdp_messages_included": False,
+            "cdp_request_ids_included": False,
+            "cors_failed_parameter_included": False,
             "audio_bytes_sent": False,
         },
     }
-    if not network_completed:
+    if not runtime_completed:
         payload["stage1"]["networkErrorClass"] = str(value.get("errorName") or "Error")[:80]
     return payload, (0 if verified_slot else 3)
 

@@ -202,6 +202,10 @@ class ProductionServiceTests(unittest.TestCase):
         self.assertEqual(1, tx.stage2_calls)
         self.assertEqual(["upload_started", "upload_verified"], [event.event_type for event in audit.events])
         self.assertEqual("track.mp3", tx.prepare_kwargs["file_path"].name)
+        verified_details = json.loads(audit.events[-1].details or "{}")
+        self.assertEqual(200, verified_details["stage1HttpStatus"])
+        self.assertEqual(201, verified_details["stage2HttpStatus"])
+        self.assertEqual(1, verified_details["readBackAttempts"])
 
     def test_stage2_network_exception_verified_by_readback_never_retries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,19 +256,49 @@ class ProductionServiceTests(unittest.TestCase):
             path = Path(tmp) / "track.mp3"
             path.write_bytes(b"audio")
             tx = _Transport(stage1=YandexUploadHttpError("stage1", 403))
-            service, _, _, _ = self._service(path, transport=tx)
+            service, _, audit, _ = self._service(path, transport=tx)
             result = service.upload_track(local_file_id=10, playlist_kind="7", confirm=True, rights_confirmed=True)
             self.assertEqual(YandexUploadStatus.STAGE1_FAILED, result.status)
             self.assertEqual(403, result.stage1_http_status)
             self.assertEqual(1, tx.stage1_calls)
             self.assertEqual(0, tx.stage2_calls)
+            self.assertEqual(403, json.loads(audit.events[-1].details or "{}")["stage1HttpStatus"])
 
             tx = _Transport(stage2=YandexUploadHttpError("stage2", 400))
-            service, _, _, _ = self._service(path, transport=tx)
+            service, _, audit, _ = self._service(
+                path,
+                provider=_Provider(readbacks=[["old"], ["old"], ["old"]]),
+                transport=tx,
+            )
             result = service.upload_track(local_file_id=10, playlist_kind="7", confirm=True, rights_confirmed=True)
             self.assertEqual(YandexUploadStatus.STAGE2_HTTP_FAILED, result.status)
             self.assertEqual(400, result.stage2_http_status)
+            self.assertEqual(3, result.read_back_attempts)
             self.assertEqual(1, tx.stage2_calls)
+            failure_details = json.loads(audit.events[-1].details or "{}")
+            self.assertEqual(200, failure_details["stage1HttpStatus"])
+            self.assertEqual(400, failure_details["stage2HttpStatus"])
+            self.assertEqual(3, failure_details["readBackAttempts"])
+
+    def test_stage2_http_failure_verified_by_readback_never_retries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "track.mp3"
+            path.write_bytes(b"audio")
+            tx = _Transport(stage2=YandexUploadHttpError("stage2", 500))
+            service, _, audit, _ = self._service(
+                path,
+                provider=_Provider(readbacks=[["old", "ugc-1"]]),
+                transport=tx,
+            )
+            result = service.upload_track(local_file_id=10, playlist_kind="7", confirm=True, rights_confirmed=True)
+        self.assertEqual(YandexUploadStatus.VERIFIED, result.status)
+        self.assertTrue(result.read_back_verified)
+        self.assertEqual(500, result.stage2_http_status)
+        self.assertEqual(1, result.read_back_attempts)
+        self.assertEqual(1, tx.stage2_calls)
+        self.assertEqual("upload_verified", audit.events[-1].event_type)
+        details = json.loads(audit.events[-1].details or "{}")
+        self.assertEqual(500, details["stage2HttpStatus"])
 
     def test_result_and_audit_never_serialize_uid_path_or_signed_urls(self):
         with tempfile.TemporaryDirectory() as tmp:

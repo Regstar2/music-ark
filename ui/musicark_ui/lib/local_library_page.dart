@@ -1506,14 +1506,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         child: Chip(
           key: Key('local-content-label-${track['id']}'),
           visualDensity: VisualDensity.compact,
-          label: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(text),
-              const SizedBox(width: 2),
-              const Icon(Icons.arrow_drop_down, size: 16),
-            ],
-          ),
+          label: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ),
     );

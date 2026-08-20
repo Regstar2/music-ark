@@ -187,6 +187,9 @@ class YandexSingleTrackUploadService:
         playlist_kind: str,
         status: str,
         error_code: str | None = None,
+        stage1_http_status: int | None = None,
+        stage2_http_status: int | None = None,
+        read_back_attempts: int | None = None,
     ) -> None:
         details: dict[str, Any] = {
             "localFileId": local_file_id,
@@ -194,6 +197,12 @@ class YandexSingleTrackUploadService:
         }
         if error_code:
             details["errorCode"] = error_code
+        if stage1_http_status is not None:
+            details["stage1HttpStatus"] = int(stage1_http_status)
+        if stage2_http_status is not None:
+            details["stage2HttpStatus"] = int(stage2_http_status)
+        if read_back_attempts is not None:
+            details["readBackAttempts"] = int(read_back_attempts)
         self._audit.append(
             AuditEvent(
                 event_type=event_type,
@@ -379,6 +388,7 @@ class YandexSingleTrackUploadService:
                 playlist_kind=kind,
                 status="failed",
                 error_code=result.error_code,
+                stage1_http_status=exc.status_code,
             )
             return result
         except (YandexUploadNetworkError, YandexUploadProtocolError):
@@ -423,6 +433,8 @@ class YandexSingleTrackUploadService:
                     local_file_id=local_file_id,
                     playlist_kind=kind,
                     status="verified",
+                    stage1_http_status=slot.status_code,
+                    read_back_attempts=attempts,
                 )
                 return result
             if verification == YandexUploadStatus.AMBIGUOUS:
@@ -442,6 +454,8 @@ class YandexSingleTrackUploadService:
                     playlist_kind=kind,
                     status="ambiguous",
                     error_code=result.error_code,
+                    stage1_http_status=slot.status_code,
+                    read_back_attempts=attempts,
                 )
                 return result
             result = YandexUploadResult(
@@ -463,9 +477,68 @@ class YandexSingleTrackUploadService:
                 playlist_kind=kind,
                 status="delivery_unknown",
                 error_code=result.error_code,
+                stage1_http_status=slot.status_code,
+                read_back_attempts=attempts,
             )
             return result
         except YandexUploadHttpError as exc:
+            verification, verified_track_id, attempts = self._verify_read_back(
+                provider,
+                playlist_kind=kind,
+                before_track_ids=before_track_ids,
+                ugc_track_id=slot.ugc_track_id,
+            )
+            if verification == YandexUploadStatus.VERIFIED:
+                result = YandexUploadResult(
+                    status=YandexUploadStatus.VERIFIED,
+                    local_file_id=local_file_id,
+                    playlist_kind=kind,
+                    track_id=verified_track_id,
+                    stage1_http_status=slot.status_code,
+                    stage2_http_status=exc.status_code,
+                    read_back_verified=True,
+                    read_back_attempts=attempts,
+                    safe_message=(
+                        "Yandex Music returned an unexpected HTTP status, but the uploaded track "
+                        "was verified in the selected playlist."
+                    ),
+                )
+                self._audit_event(
+                    "upload_verified",
+                    local_file_id=local_file_id,
+                    playlist_kind=kind,
+                    status="verified",
+                    stage1_http_status=slot.status_code,
+                    stage2_http_status=exc.status_code,
+                    read_back_attempts=attempts,
+                )
+                return result
+            if verification == YandexUploadStatus.AMBIGUOUS:
+                result = YandexUploadResult(
+                    status=YandexUploadStatus.AMBIGUOUS,
+                    local_file_id=local_file_id,
+                    playlist_kind=kind,
+                    track_id=slot.ugc_track_id,
+                    stage1_http_status=slot.status_code,
+                    stage2_http_status=exc.status_code,
+                    read_back_attempts=attempts,
+                    error_code="stage2_http_read_back_ambiguous",
+                    safe_message=(
+                        "Yandex Music returned an unexpected HTTP status and playlist read-back "
+                        "was ambiguous. Check the target playlist before trying again."
+                    ),
+                )
+                self._audit_event(
+                    "upload_failed",
+                    local_file_id=local_file_id,
+                    playlist_kind=kind,
+                    status="ambiguous",
+                    error_code=result.error_code,
+                    stage1_http_status=slot.status_code,
+                    stage2_http_status=exc.status_code,
+                    read_back_attempts=attempts,
+                )
+                return result
             result = YandexUploadResult(
                 status=YandexUploadStatus.STAGE2_HTTP_FAILED,
                 local_file_id=local_file_id,
@@ -473,8 +546,12 @@ class YandexSingleTrackUploadService:
                 track_id=slot.ugc_track_id,
                 stage1_http_status=slot.status_code,
                 stage2_http_status=exc.status_code,
+                read_back_attempts=attempts,
                 error_code="stage2_http_failed",
-                safe_message="Yandex Music did not accept the upload.",
+                safe_message=(
+                    "Yandex Music returned an unexpected HTTP status while transferring the file. "
+                    "The upload was not retried automatically, and no new track was verified during read-back."
+                ),
             )
             self._audit_event(
                 "upload_failed",
@@ -482,6 +559,9 @@ class YandexSingleTrackUploadService:
                 playlist_kind=kind,
                 status="failed",
                 error_code=result.error_code,
+                stage1_http_status=slot.status_code,
+                stage2_http_status=exc.status_code,
+                read_back_attempts=attempts,
             )
             return result
         except YandexUploadProtocolError:
@@ -500,6 +580,7 @@ class YandexSingleTrackUploadService:
                 playlist_kind=kind,
                 status="failed",
                 error_code=result.error_code,
+                stage1_http_status=slot.status_code,
             )
             return result
 
@@ -526,6 +607,9 @@ class YandexSingleTrackUploadService:
                 local_file_id=local_file_id,
                 playlist_kind=kind,
                 status="verified",
+                stage1_http_status=slot.status_code,
+                stage2_http_status=transfer.status_code,
+                read_back_attempts=attempts,
             )
             return result
         if verification == YandexUploadStatus.AMBIGUOUS:
@@ -546,6 +630,9 @@ class YandexSingleTrackUploadService:
                 playlist_kind=kind,
                 status="ambiguous",
                 error_code=result.error_code,
+                stage1_http_status=slot.status_code,
+                stage2_http_status=transfer.status_code,
+                read_back_attempts=attempts,
             )
             return result
 
@@ -564,5 +651,8 @@ class YandexSingleTrackUploadService:
             local_file_id=local_file_id,
             playlist_kind=kind,
             status="processing",
+            stage1_http_status=slot.status_code,
+            stage2_http_status=transfer.status_code,
+            read_back_attempts=attempts,
         )
         return result

@@ -9,7 +9,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Any, Callable
-from urllib.parse import urlsplit, urlunsplit, quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -26,6 +26,7 @@ class NetworkMode(StrEnum):
 @dataclass(slots=True)
 class NetworkSettings:
     mode: NetworkMode = NetworkMode.AUTO
+    proxy_configured: bool = False
     proxy_scheme: str = "socks5"
     proxy_host: str = "127.0.0.1"
     proxy_port: int = 1080
@@ -36,6 +37,7 @@ class NetworkSettings:
     def public_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["mode"] = self.mode.value
+        result["proxyConfigured"] = self.proxy_configured
         result["proxyPasswordConfigured"] = False
         return result
 
@@ -59,6 +61,7 @@ class NetworkSettingsStore:
             mode = NetworkMode.AUTO
         return NetworkSettings(
             mode=mode,
+            proxy_configured=bool(raw.get("proxyConfigured", False)),
             proxy_scheme=str(raw.get("proxyScheme", "socks5")),
             proxy_host=str(raw.get("proxyHost", "127.0.0.1")),
             proxy_port=int(raw.get("proxyPort", 1080)),
@@ -80,8 +83,14 @@ class NetworkSettingsStore:
         username = str(payload.get("proxyUsername", current.proxy_username)).strip()
         if "proxyPassword" in payload:
             self.credentials.set("proxy_password", str(payload.get("proxyPassword") or ""))
+        explicitly_updated = any(
+            key in payload
+            for key in ("proxyScheme", "proxyHost", "proxyPort", "proxyUsername", "proxyPassword")
+        )
+        proxy_configured = bool(payload.get("proxyConfigured", current.proxy_configured or explicitly_updated))
         settings = NetworkSettings(
             mode=mode,
+            proxy_configured=proxy_configured,
             proxy_scheme=scheme,
             proxy_host=host,
             proxy_port=port,
@@ -89,11 +98,14 @@ class NetworkSettingsStore:
             warp_proxy_host=str(payload.get("warpProxyHost", current.warp_proxy_host)).strip() or "127.0.0.1",
             warp_proxy_port=int(payload.get("warpProxyPort", current.warp_proxy_port)),
         )
+        if not 1 <= settings.warp_proxy_port <= 65535:
+            raise ValueError("WARP proxy port is invalid.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps({
                 "schemaVersion": 1,
                 "networkMode": settings.mode.value,
+                "proxyConfigured": settings.proxy_configured,
                 "proxyScheme": settings.proxy_scheme,
                 "proxyHost": settings.proxy_host,
                 "proxyPort": settings.proxy_port,
@@ -159,11 +171,16 @@ class ExternalNetworkTransport:
         if settings.mode is NetworkMode.DIRECT:
             return [("direct", None)]
         if settings.mode is NetworkMode.CUSTOM_PROXY:
+            if not settings.proxy_configured:
+                raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
             return [("custom_proxy", self._custom_proxy_url(settings))]
         if settings.mode is NetworkMode.WARP:
             return [("warp", self._warp_proxy_url(settings))]
+
+        # AUTO is intentionally cheap: an untouched default proxy field is not a
+        # configured route and therefore does not add another failing timeout.
         routes: list[tuple[str, str | None]] = [("direct", None)]
-        if settings.proxy_host:
+        if settings.proxy_configured:
             routes.append(("custom_proxy", self._custom_proxy_url(settings)))
         routes.append(("warp", self._warp_proxy_url(settings)))
         with self._lock:
@@ -174,7 +191,18 @@ class ExternalNetworkTransport:
 
     @staticmethod
     def _is_network_failure(exc: Exception) -> bool:
-        return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.WriteError, httpx.PoolTimeout))
+        return isinstance(
+            exc,
+            (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.WriteError,
+                httpx.WriteTimeout,
+                httpx.PoolTimeout,
+            ),
+        )
 
     def request(self, method: str, url: str, *, force_direct: bool = False, **kwargs: Any) -> httpx.Response:
         host = urlsplit(url).hostname or ""

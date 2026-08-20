@@ -101,7 +101,7 @@ class MatchingMigrationV05Tests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='download_settings'"
                 ).fetchone()
 
-            self.assertEqual(version, "1.8.4")
+            self.assertEqual(version, "1.9.0")
             self.assertEqual(cache_count, 1)
             self.assertEqual(local[0], "Song")
             self.assertEqual(local[1], '["Artist"]')

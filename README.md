@@ -2,10 +2,24 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.11.0 — Production Single-Track Yandex Upload.**  
-**Текущая схема SQLite: 1.8.4.**
+**Текущая версия кода: 0.11.1 — Bulk Upload, Recovery Sync & Explicit Scope Context.**  
+**Текущая схема SQLite: 1.9.0.**
 
-MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. Ветка v0.9.x завершена. v0.10.0 завершила feasibility-фазу и подтвердила direct-Python загрузку end-to-end; v0.11.0 переносит этот доказанный протокол в production manual workflow для одного локального MP3.
+MusicArk — Windows desktop-приложение, связывающее cache-first библиотеку Яндекс Музыки с локальной музыкальной коллекцией. Local Library, Identity Matching, Variant, Coverage, Download и Controlled Sync остаются отдельными слоями. v0.11.0 доказала production-загрузку одного MP3; v0.11.1 использует тот же `YandexSingleTrackUploadService` как единственный primitive передачи файла и расширяет его до безопасной массовой загрузки и восстановления целостности коллекции.
+
+## Bulk Upload & Recovery Sync v0.11.1
+
+Local Library поддерживает выбор по стабильному `local_file_id`, `Выбрать все видимые`, массовую панель и последовательную загрузку (`concurrency=1`). Одиночная кнопка загрузки перенесена из меню `...` прямо в действия строки рядом с Play/Edit. Ручная массовая загрузка по умолчанию использует управляемый плейлист **ЗАГРУЖЕННЫЕ ТРЕКИ**, если он настроен.
+
+MusicArk хранит три роли управляемых плейлистов по `playlist kind`, а не по названию: **ЦЕНЗУРА**, **ЗАГРУЖЕННЫЕ ТРЕКИ**, **НЕДОСТУПНЫЕ**. Создание плейлистов остаётся fail-closed до отдельного ручного live-proof; без него пользователь назначает существующие собственные плейлисты. Реальный playlist API никогда не мутируется в CI.
+
+Доступность трека Яндекс Музыки теперь отдельна от локального Coverage: `available / unavailable / unknown`. `available=false` является явным сигналом; простое исчезновение из плейлиста не считается недоступностью без дополнительного доказательства. История last-known state позволяет отслеживать переходы unavailable/available-again без сохранения сырых provider responses.
+
+Controlled Sync умеет формировать `UPLOAD_LOCAL_TO_YANDEX` только для детерминированных случаев: недоступный provider track + существующий локальный MP3 → **НЕДОСТУПНЫЕ**; явно `censored` provider track + явно `original` локальный MP3 → **ЦЕНЗУРА**. `altered`, `different_version` и `uncertain` сами по себе не являются доказательством цензуры. Upload-only Sync не требует папку загрузок, но upload portion всегда требует новое подтверждение прав.
+
+`YandexBatchUploadService` не содержит второго transport: каждый элемент проходит через `YandexSingleTrackUploadService`. Ошибка одного элемента не останавливает остальные; `delivery_unknown` не повторяется автоматически и требует сначала проверить плейлист. Persistent upload mapping + read-back делают повторный Sync идемпотентным для verified upload.
+
+Подробности и ограничения: `docs/versions/v0.11.1.md`.
 
 ## Production Single-Track Yandex Upload v0.11.0
 

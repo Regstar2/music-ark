@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'app_localizations_ext.dart';
 import 'app_ui_tokens.dart';
 import 'folder_picker.dart';
+import 'scope_context_bar.dart';
 import 'sync_bridge.dart';
 import 'sync_localizations_ext.dart';
+import 'v0111_localizations_ext.dart';
+import 'yandex_batch_upload_bridge.dart';
 
 enum SyncPlanFilter { all, download, decision, matching, variant, localOnly }
 
@@ -15,12 +18,14 @@ class SyncPage extends StatefulWidget {
     this.folderPicker = const SystemLocalFolderPicker(),
     this.onOpenDownloads,
     this.onOpenMatching,
+    this.managedPlaylistBridge,
   });
 
   final SyncBridgeClient bridge;
   final LocalFolderPicker folderPicker;
   final VoidCallback? onOpenDownloads;
   final VoidCallback? onOpenMatching;
+  final YandexBatchUploadBridgeClient? managedPlaylistBridge;
 
   @override
   State<SyncPage> createState() => _SyncPageState();
@@ -36,6 +41,9 @@ class _SyncPageState extends State<SyncPage> {
   String _scopeType = 'all';
   String? _scopeId;
   SyncPlanFilter? _planFilter;
+  Map<String, dynamic> _recovery = const {};
+  Map<String, dynamic> _managed = const {};
+  String _recoveryFilter = 'all';
 
   @override
   void initState() {
@@ -55,14 +63,20 @@ class _SyncPageState extends State<SyncPage> {
         widget.bridge.scopes(),
         widget.bridge.target(),
         widget.bridge.current(),
+        widget.bridge.recoveryTracks(),
+        widget.managedPlaylistBridge?.managedPlaylists() ??
+            Future<Map<String, dynamic>>.value(const {}),
       ]);
       if (!mounted) return;
 
       final scopes = _maps(results[0]['items']);
       final target = Map<String, dynamic>.from(results[1]);
       final rawCurrent = results[2]['plan'];
-      final current =
-          rawCurrent is Map ? Map<String, dynamic>.from(rawCurrent) : null;
+      final current = rawCurrent is Map
+          ? Map<String, dynamic>.from(rawCurrent)
+          : null;
+      final recovery = Map<String, dynamic>.from(results[3]);
+      final managed = Map<String, dynamic>.from(results[4]);
 
       var scopeType = 'all';
       String? scopeId;
@@ -84,7 +98,11 @@ class _SyncPageState extends State<SyncPage> {
         _target = target;
         _scopeType = scopeType;
         _scopeId = scopeId;
-        _diff = _currentCanBeShown(current, scopeType, scopeId) ? current : null;
+        _diff = _currentCanBeShown(current, scopeType, scopeId)
+            ? current
+            : null;
+        _recovery = recovery;
+        _managed = managed;
         _loading = false;
       });
 
@@ -162,10 +180,6 @@ class _SyncPageState extends State<SyncPage> {
 
   Future<void> _synchronize() async {
     if (_busy) return;
-    if (_target['targetConfigured'] != true) {
-      setState(() => _error = context.l10n.syncSelectFolderFirst);
-      return;
-    }
 
     Map<String, dynamic>? fresh;
     await _run(() async {
@@ -179,59 +193,125 @@ class _SyncPageState extends State<SyncPage> {
 
     final summary = _summary(fresh!);
     final downloads = _int(summary['readyToDownload']);
+    final uploads = _int(summary['readyToUpload']);
     final queued = _int(summary['alreadyQueued']);
     final blockers = _blockerCount(summary);
     final l10n = context.l10n;
 
-    if (downloads == 0) {
+    if (downloads > 0 && _target['targetConfigured'] != true) {
+      setState(() => _error = l10n.syncSelectFolderFirst);
+      return;
+    }
+
+    if (downloads == 0 && uploads == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             queued > 0
                 ? l10n.syncNothingNewQueued
                 : blockers > 0
-                    ? l10n.syncNothingNewAttention
-                    : l10n.syncNothingNewComplete,
+                ? l10n.syncNothingNewAttention
+                : l10n.syncNothingNewComplete,
           ),
         ),
       );
       return;
     }
 
+    var rightsConfirmed = uploads == 0;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        final dialogL10n = dialogContext.l10n;
-        return AlertDialog(
-          key: const Key('sync-confirmation'),
-          title: Text(dialogL10n.syncConfirmTitle),
-          content: Text(
-            '${dialogL10n.syncConfirmQueueCount(downloads)}\n\n'
-            '${dialogL10n.syncSafetyNote}',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(dialogL10n.cancel),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final dialogL10n = dialogContext.l10n;
+          final uploadByRole = summary['uploadByRole'] is Map
+              ? Map<String, dynamic>.from(summary['uploadByRole'] as Map)
+              : const <String, dynamic>{};
+          return AlertDialog(
+            key: const Key('sync-confirmation'),
+            title: Text(dialogL10n.syncConfirmTitle),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(dialogL10n.v0111ConfirmDownloads(downloads)),
+                  const SizedBox(height: 6),
+                  Text(dialogL10n.v0111ConfirmUploads(uploads)),
+                  if (uploads > 0) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      dialogL10n.v0111ConfirmRole(
+                        dialogL10n.v0111RoleCensored,
+                        _int(uploadByRole['censored']),
+                      ),
+                    ),
+                    Text(
+                      dialogL10n.v0111ConfirmRole(
+                        dialogL10n.v0111RoleUnavailable,
+                        _int(uploadByRole['unavailable']),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  ScopeContextBar(
+                    collection: _selectedScopeTitle(),
+                    localFolders: _syncLocalContext(summary),
+                    localFoldersTooltip: _target['targetConfigured'] == true
+                        ? '${_target['targetPath'] ?? ''}'
+                        : null,
+                    localNotRequired:
+                        downloads == 0 && _target['targetConfigured'] != true,
+                  ),
+                  if (uploads > 0) ...[
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      key: const Key('sync-upload-rights'),
+                      contentPadding: EdgeInsets.zero,
+                      value: rightsConfirmed,
+                      onChanged: (value) =>
+                          setDialogState(() => rightsConfirmed = value == true),
+                      title: Text(dialogL10n.v0111SyncRights),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Text(dialogL10n.syncSafetyNote),
+                ],
+              ),
             ),
-            FilledButton(
-              key: const Key('sync-confirm'),
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: Text(dialogL10n.syncConfirmAction),
-            ),
-          ],
-        );
-      },
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(dialogL10n.cancel),
+              ),
+              FilledButton(
+                key: const Key('sync-confirm'),
+                onPressed: uploads == 0 || rightsConfirmed
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                child: Text(dialogL10n.syncConfirmAction),
+              ),
+            ],
+          );
+        },
+      ),
     );
     if (confirmed != true) return;
 
     Map<String, dynamic>? result;
     await _run(() async {
-      result = await widget.bridge.apply('${fresh!['id']}', confirm: true);
+      result = await widget.bridge.apply(
+        '${fresh!['id']}',
+        confirm: true,
+        rightsConfirmed: uploads > 0 && rightsConfirmed,
+      );
       _diff = await widget.bridge.createPlan(
         scopeType: _scopeType,
         scopeId: _scopeType == 'all' ? null : _scopeId,
       );
+      await _reloadRecoveryAndManaged();
     });
     if (!mounted || result == null) return;
 
@@ -239,21 +319,425 @@ class _SyncPageState extends State<SyncPage> {
     final data = rawResult is Map
         ? Map<String, dynamic>.from(rawResult)
         : const <String, dynamic>{};
+    final downloadResult = data['downloads'] is Map
+        ? Map<String, dynamic>.from(data['downloads'] as Map)
+        : data;
+    final uploadResult = data['uploads'] is Map
+        ? Map<String, dynamic>.from(data['uploads'] as Map)
+        : const <String, dynamic>{};
+    final uploadDone =
+        _int(uploadResult['verified']) +
+        _int(uploadResult['processing']) +
+        _int(uploadResult['deliveryUnknown']);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          context.l10n.syncApplyResult(
-            _int(data['enqueued']),
-            _int(data['skipped']),
-            _int(data['failed']),
-          ),
+          '${context.l10n.syncApplyResult(_int(downloadResult['enqueued']), _int(downloadResult['skipped']), _int(downloadResult['failed']))}${uploads > 0 ? ' · ${context.l10n.v0111UploadToYandexGroup}: $uploadDone/$uploads' : ''}',
         ),
-        action: widget.onOpenDownloads == null
+        action: widget.onOpenDownloads == null || downloads == 0
             ? null
             : SnackBarAction(
                 label: context.l10n.navDownloads,
                 onPressed: widget.onOpenDownloads!,
               ),
+      ),
+    );
+  }
+
+  Future<void> _reloadRecoveryAndManaged() async {
+    final recovery = await widget.bridge.recoveryTracks(
+      filter: _recoveryFilter,
+    );
+    final managed = widget.managedPlaylistBridge == null
+        ? const <String, dynamic>{}
+        : await widget.managedPlaylistBridge!.managedPlaylists();
+    if (!mounted) return;
+    setState(() {
+      _recovery = Map<String, dynamic>.from(recovery);
+      _managed = Map<String, dynamic>.from(managed);
+    });
+  }
+
+  String _syncLocalContext(Map<String, dynamic> summary) {
+    if (_target['targetConfigured'] == true) {
+      return '${_target['targetPath'] ?? ''}';
+    }
+    return _int(summary['readyToDownload']) == 0
+        ? context.l10n.v0111FolderNotRequired
+        : context.l10n.v0111FolderNotSelected;
+  }
+
+  Future<void> _changeRecoveryFilter(String filter) async {
+    if (_busy || filter == _recoveryFilter) return;
+    setState(() => _recoveryFilter = filter);
+    await _run(() async {
+      final data = await widget.bridge.recoveryTracks(filter: filter);
+      if (mounted) setState(() => _recovery = Map<String, dynamic>.from(data));
+    });
+  }
+
+  String? _managedRoleKind(String role) {
+    for (final raw in _maps(_managed['roles'])) {
+      if ('${raw['role']}' == role && raw['configured'] == true) {
+        final value = '${raw['playlistKind'] ?? ''}'.trim();
+        if (value.isNotEmpty) return value;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _ensureManagedPlaylists() async {
+    final bridge = widget.managedPlaylistBridge;
+    if (bridge == null) return;
+    await _run(() async {
+      _managed = await bridge.ensureManagedPlaylists(confirmCreate: false);
+    });
+  }
+
+  Future<void> _setManagedPlaylist(String role, String playlistKind) async {
+    final bridge = widget.managedPlaylistBridge;
+    if (bridge == null || playlistKind.trim().isEmpty) return;
+    await _run(() async {
+      _managed = await bridge.setManagedPlaylist(
+        role: role,
+        playlistKind: playlistKind,
+      );
+      _diff = await widget.bridge.createPlan(
+        scopeType: _scopeType,
+        scopeId: _scopeType == 'all' ? null : _scopeId,
+      );
+    });
+  }
+
+  Future<void> _restoreRecoveryTrack(Map<String, dynamic> item) async {
+    final bridge = widget.managedPlaylistBridge;
+    final localFileId = int.tryParse('${item['localFileId']}');
+    final state = '${item['recoveryState'] ?? ''}';
+    final role = state.startsWith('censored_') ? 'censored' : 'unavailable';
+    final playlistKind = _managedRoleKind(role);
+    if (bridge == null || localFileId == null || playlistKind == null) return;
+
+    var rights = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(dialogContext.l10n.v0111ReadyToRestore),
+          content: CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: rights,
+            onChanged: (value) => setDialogState(() => rights = value == true),
+            title: Text(dialogContext.l10n.v0111SyncRights),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(dialogContext.l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: rights
+                  ? () => Navigator.pop(dialogContext, true)
+                  : null,
+              child: Text(dialogContext.l10n.v0111ReadyToRestore),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() async {
+      await bridge.uploadBatch(
+        localFileIds: [localFileId],
+        playlistKind: playlistKind,
+        confirm: true,
+        rightsConfirmed: true,
+        batchId: 'recovery-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      await _reloadRecoveryAndManaged();
+    });
+  }
+
+  Widget _scopeContext() {
+    final summary = _diff == null
+        ? const <String, dynamic>{}
+        : _summary(_diff!);
+    final configured = _target['targetConfigured'] == true;
+    final localContext = configured
+        ? '${_target['targetPath'] ?? ''}'
+        : _int(summary['readyToDownload']) == 0
+        ? context.l10n.v0111FolderNotRequired
+        : context.l10n.v0111FolderNotSelected;
+    return ScopeContextBar(
+      collection: _selectedScopeTitle(),
+      localFolders: localContext,
+      localFoldersTooltip: configured ? '${_target['targetPath'] ?? ''}' : null,
+      localNotRequired: !configured && _int(summary['readyToDownload']) == 0,
+    );
+  }
+
+  Widget _v0111Summary(Map<String, dynamic> diff) {
+    final summary = _summary(diff);
+    final entries = <(String, int)>[
+      (context.l10n.v0111UnavailableTracks, _int(summary['unavailableTracks'])),
+      (context.l10n.v0111CensoredTracks, _int(summary['censoredTracks'])),
+      (
+        context.l10n.v0111Recoverable,
+        _int(summary['unavailableRecoverable']) +
+            _int(summary['censoredRecoverable']),
+      ),
+      (context.l10n.v0111ReadyToUpload, _int(summary['readyToUpload'])),
+    ];
+    return Card(
+      key: const Key('sync-recovery-summary'),
+      child: Padding(
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
+        child: Wrap(
+          spacing: AppUiTokens.sectionGap,
+          runSpacing: AppUiTokens.compactGap,
+          children: [
+            for (final entry in entries)
+              SizedBox(
+                width: 220,
+                child: Row(
+                  children: [
+                    Expanded(child: Text(entry.$1)),
+                    Text(
+                      '${entry.$2}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _managedPlaylistsCard() {
+    final bridge = widget.managedPlaylistBridge;
+    if (bridge == null) return const SizedBox.shrink();
+    final roles = _maps(_managed['roles']);
+    final available = _maps(_managed['availablePlaylists']);
+    return Card(
+      key: const Key('sync-managed-playlists'),
+      child: Padding(
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    context.l10n.v0111ManagedPlaylists,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: _busy ? null : _ensureManagedPlaylists,
+                  child: Text(context.l10n.v0111Ensure),
+                ),
+              ],
+            ),
+            if (_managed['canCreatePlaylists'] != true) ...[
+              const SizedBox(height: 6),
+              Text(
+                context.l10n.v0111ManagedCreateUnavailable,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 8),
+            for (final role in roles) ...[
+              _managedRoleRow(role, available),
+              const SizedBox(height: 6),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _managedRoleRow(
+    Map<String, dynamic> role,
+    List<Map<String, dynamic>> available,
+  ) {
+    final roleId = '${role['role'] ?? ''}';
+    final configured = role['configured'] == true;
+    final selected = configured ? '${role['playlistKind'] ?? ''}' : null;
+    final title = '${role['defaultTitle'] ?? roleId}';
+    return LayoutBuilder(
+      builder: (context, constraints) => Wrap(
+        spacing: 10,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 190,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.labelLarge),
+                Text(
+                  configured
+                      ? context.l10n.v0111ManagedConfigured
+                      : context.l10n.v0111ManagedNotConfigured,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: constraints.maxWidth < 560 ? constraints.maxWidth : 320,
+            child: DropdownButtonFormField<String>(
+              key: Key('sync-managed-$roleId'),
+              initialValue:
+                  available.any(
+                    (item) => '${item['playlistKind'] ?? ''}' == selected,
+                  )
+                  ? selected
+                  : null,
+              isExpanded: true,
+              decoration: const InputDecoration(isDense: true),
+              hint: Text(context.l10n.v0111Select),
+              items: [
+                for (final playlist in available)
+                  DropdownMenuItem(
+                    value: '${playlist['playlistKind']}',
+                    child: Text(
+                      '${playlist['title'] ?? playlist['playlistKind']}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      if (value != null) _setManagedPlaylist(roleId, value);
+                    },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _recoverySection() {
+    final items = _maps(_recovery['items']);
+    return Card(
+      key: const Key('sync-recovery-section'),
+      child: Padding(
+        padding: const EdgeInsets.all(AppUiTokens.sectionGap),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              context.l10n.v0111UnavailableSection,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _recoveryFilterChip('all', context.l10n.v0111RecoveryAll),
+                _recoveryFilterChip(
+                  'recoverable',
+                  context.l10n.v0111RecoveryRecoverable,
+                ),
+                _recoveryFilterChip(
+                  'missing_local',
+                  context.l10n.v0111RecoveryMissingLocal,
+                ),
+                _recoveryFilterChip(
+                  'needs_review',
+                  context.l10n.v0111RecoveryNeedsReview,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (items.isEmpty)
+              Text(context.l10n.syncNoOperations)
+            else
+              for (final item in items) _recoveryRow(item),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _recoveryFilterChip(String value, String label) => ChoiceChip(
+    key: Key('sync-recovery-filter-$value'),
+    label: Text(label),
+    selected: _recoveryFilter == value,
+    onSelected: _busy ? null : (_) => _changeRecoveryFilter(value),
+  );
+
+  Widget _recoveryRow(Map<String, dynamic> item) {
+    final externalId = '${item['externalId'] ?? ''}';
+    final artists = (item['artists'] as List? ?? const []).join(', ');
+    final collections = _maps(item['collections'])
+        .map((entry) => '${entry['title'] ?? entry['playlistKind'] ?? ''}')
+        .where((value) => value.isNotEmpty)
+        .join(', ');
+    final localReady = item['localMp3Ready'] == true;
+    final needsReview = '${item['recoveryState'] ?? ''}'.contains(
+      'needs_review',
+    );
+    final role = '${item['recoveryState'] ?? ''}'.startsWith('censored_')
+        ? 'censored'
+        : 'unavailable';
+    final canRestore =
+        localReady && !needsReview && _managedRoleKind(role) != null;
+    return Container(
+      key: Key('sync-recovery-$externalId'),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.cloud_off_outlined),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$artists${artists.isNotEmpty ? ' — ' : ''}${item['title'] ?? externalId}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                if (collections.isNotEmpty)
+                  Text('${context.l10n.v0111SourcePlaylists}: $collections'),
+                Text(
+                  item['providerAvailability'] == 'unavailable'
+                      ? context.l10n.v0111YandexUnavailable
+                      : context.l10n.v0111YandexUnknown,
+                ),
+                Text(
+                  localReady
+                      ? context.l10n.v0111LocalFound
+                      : context.l10n.v0111LocalMissing,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            key: Key('sync-recovery-restore-$externalId'),
+            onPressed: canRestore ? () => _restoreRecoveryTrack(item) : null,
+            icon: const Icon(Icons.cloud_upload_outlined),
+            label: Text(
+              localReady
+                  ? context.l10n.v0111ReadyToRestore
+                  : context.l10n.v0111NeedsLocalFile,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -278,9 +762,7 @@ class _SyncPageState extends State<SyncPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -293,6 +775,8 @@ class _SyncPageState extends State<SyncPage> {
               _header(),
               const SizedBox(height: AppUiTokens.sectionGap),
               _controls(),
+              const SizedBox(height: AppUiTokens.compactGap),
+              _scopeContext(),
               if (_error != null) ...[
                 const SizedBox(height: AppUiTokens.sectionGap),
                 MaterialBanner(
@@ -317,6 +801,12 @@ class _SyncPageState extends State<SyncPage> {
                 )
               else ...[
                 _summaryCard(_diff!),
+                const SizedBox(height: AppUiTokens.sectionGap),
+                _v0111Summary(_diff!),
+                const SizedBox(height: AppUiTokens.sectionGap),
+                _managedPlaylistsCard(),
+                const SizedBox(height: AppUiTokens.sectionGap),
+                _recoverySection(),
                 const SizedBox(height: AppUiTokens.sectionGap),
                 _details(_diff!),
               ],
@@ -352,8 +842,8 @@ class _SyncPageState extends State<SyncPage> {
               Text(
                 l10n.syncSubtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
+                  color: colors.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -371,71 +861,69 @@ class _SyncPageState extends State<SyncPage> {
 
   Widget _controls() {
     final l10n = context.l10n;
-    final selectedKey =
-        _scopeType == 'all' ? 'all|' : '$_scopeType|${_scopeId ?? ''}';
+    final selectedKey = _scopeType == 'all'
+        ? 'all|'
+        : '$_scopeType|${_scopeId ?? ''}';
     final values = _scopes.map((scope) {
       final type = '${scope['type'] ?? 'all'}';
       final id = '${scope['id'] ?? ''}';
       return DropdownMenuItem<String>(
         value: '$type|$id',
-        child: Text(
-          '${scope['title'] ?? id}',
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: Text('${scope['title'] ?? id}', overflow: TextOverflow.ellipsis),
       );
     }).toList();
     final configured = _target['targetConfigured'] == true;
     final path = configured ? '${_target['targetPath'] ?? ''}' : '';
 
     Widget scopeField() => DropdownButtonFormField<String>(
-          key: ValueKey('sync-scope-selector-$selectedKey'),
-          initialValue: values.any((item) => item.value == selectedKey)
-              ? selectedKey
-              : null,
-          isExpanded: true,
-          items: values,
-          onChanged: _busy
-              ? null
-              : (value) {
-                  if (value != null) _changeScope(value);
-                },
-          decoration: InputDecoration(
-            labelText: l10n.syncScopeLabel,
-            prefixIcon: const Icon(Icons.library_music_outlined),
-            isDense: true,
-          ),
-        );
+      key: ValueKey('sync-scope-selector-$selectedKey'),
+      initialValue: values.any((item) => item.value == selectedKey)
+          ? selectedKey
+          : null,
+      isExpanded: true,
+      items: values,
+      onChanged: _busy
+          ? null
+          : (value) {
+              if (value != null) _changeScope(value);
+            },
+      decoration: InputDecoration(
+        labelText: l10n.syncScopeLabel,
+        prefixIcon: const Icon(Icons.library_music_outlined),
+        isDense: true,
+      ),
+    );
 
     Widget folderField() => InputDecorator(
-          decoration: InputDecoration(
-            labelText: l10n.syncFolderLabel,
-            prefixIcon: const Icon(Icons.folder_outlined),
-            isDense: true,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Tooltip(
-                  message: configured ? path : l10n.syncFolderNotSelected,
-                  child: Text(
-                    configured ? path : l10n.syncFolderNotSelected,
-                    key: const Key('sync-target-state'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+      decoration: InputDecoration(
+        labelText: l10n.syncFolderLabel,
+        prefixIcon: const Icon(Icons.folder_outlined),
+        isDense: true,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Tooltip(
+              message: configured ? path : l10n.syncFolderNotSelected,
+              child: Text(
+                configured ? path : l10n.syncFolderNotSelected,
+                key: const Key('sync-target-state'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(width: AppUiTokens.compactGap),
-              TextButton(
-                key: const Key('sync-select-target'),
-                onPressed: _busy ? null : _chooseTarget,
-                child: Text(
-                  configured ? l10n.syncChangeFolder : l10n.syncChooseFolder,
-                ),
-              ),
-            ],
+            ),
           ),
-        );
+          const SizedBox(width: AppUiTokens.compactGap),
+          TextButton(
+            key: const Key('sync-select-target'),
+            onPressed: _busy ? null : _chooseTarget,
+            child: Text(
+              configured ? l10n.syncChangeFolder : l10n.syncChooseFolder,
+            ),
+          ),
+        ],
+      ),
+    );
 
     return Card(
       child: Padding(
@@ -478,33 +966,33 @@ class _SyncPageState extends State<SyncPage> {
     final title = ready > 0 && blockers == 0
         ? l10n.syncStatusReadyTitle
         : ready > 0
-            ? l10n.syncStatusMixedTitle
-            : queued > 0
-                ? l10n.syncStatusQueuedTitle
-                : blockers > 0
-                    ? l10n.syncStatusAttentionTitle
-                    : l10n.syncStatusCompleteTitle;
+        ? l10n.syncStatusMixedTitle
+        : queued > 0
+        ? l10n.syncStatusQueuedTitle
+        : blockers > 0
+        ? l10n.syncStatusAttentionTitle
+        : l10n.syncStatusCompleteTitle;
     final body = ready > 0
         ? blockers > 0
-            ? '${l10n.syncReadyBody(ready)} ${l10n.syncAttentionBody(blockers)}'
-            : l10n.syncReadyBody(ready)
+              ? '${l10n.syncReadyBody(ready)} ${l10n.syncAttentionBody(blockers)}'
+              : l10n.syncReadyBody(ready)
         : queued > 0
-            ? l10n.syncQueuedBody(queued)
-            : blockers > 0
-                ? l10n.syncAttentionBody(blockers)
-                : l10n.syncStatusCompleteBody;
+        ? l10n.syncQueuedBody(queued)
+        : blockers > 0
+        ? l10n.syncAttentionBody(blockers)
+        : l10n.syncStatusCompleteBody;
     final statusIcon = ready > 0 && blockers == 0
         ? Icons.check_circle_outline
         : ready > 0 || blockers > 0
-            ? Icons.info_outline
-            : queued > 0
-                ? Icons.schedule
-                : Icons.task_alt;
+        ? Icons.info_outline
+        : queued > 0
+        ? Icons.schedule
+        : Icons.task_alt;
     final statusColor = ready > 0 && blockers == 0
         ? colors.primaryContainer
         : blockers > 0
-            ? colors.tertiaryContainer
-            : colors.secondaryContainer;
+        ? colors.tertiaryContainer
+        : colors.secondaryContainer;
 
     return Card(
       key: const Key('sync-summary'),
@@ -535,17 +1023,15 @@ class _SyncPageState extends State<SyncPage> {
                           Text(
                             title,
                             key: const Key('sync-status-title'),
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             body,
                             key: const Key('sync-status-body'),
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: colors.onSurfaceVariant),
                           ),
                         ],
                       ),
@@ -567,9 +1053,19 @@ class _SyncPageState extends State<SyncPage> {
                       ),
                     FilledButton.icon(
                       key: const Key('sync-now'),
-                      onPressed: !_busy && configured ? _synchronize : null,
+                      onPressed:
+                          !_busy &&
+                              (configured ||
+                                  (ready == 0 &&
+                                      _int(summary['readyToUpload']) > 0))
+                          ? _synchronize
+                          : null,
                       icon: const Icon(Icons.sync),
-                      label: Text(l10n.syncSynchronizeTracks(ready)),
+                      label: Text(
+                        l10n.syncSynchronizeTracks(
+                          ready + _int(summary['readyToUpload']),
+                        ),
+                      ),
                     ),
                   ],
                 );
@@ -604,15 +1100,19 @@ class _SyncPageState extends State<SyncPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline, size: 18, color: colors.onSurfaceVariant),
+                Icon(
+                  Icons.info_outline,
+                  size: 18,
+                  color: colors.onSurfaceVariant,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     l10n.syncSafetyNote,
                     key: const Key('sync-safety-note'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
+                      color: colors.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
@@ -641,9 +1141,9 @@ class _SyncPageState extends State<SyncPage> {
             Expanded(
               child: Text(
                 l10n.syncCoverageTitle,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
               ),
             ),
             if (projectedCovered != null)
@@ -683,17 +1183,17 @@ class _SyncPageState extends State<SyncPage> {
               child: Text(
                 l10n.syncCoverageCurrent(_formatPercent(current)),
                 key: const Key('sync-coverage-current-label'),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
               ),
             ),
             Text(
               l10n.syncCoverageProjected(_formatPercent(projected)),
               key: const Key('sync-coverage-projected-label'),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
             ),
           ],
         ),
@@ -744,10 +1244,10 @@ class _SyncPageState extends State<SyncPage> {
         final columns = constraints.maxWidth >= 1050
             ? 5
             : constraints.maxWidth >= 680
-                ? 3
-                : constraints.maxWidth >= 420
-                    ? 2
-                    : 1;
+            ? 3
+            : constraints.maxWidth >= 420
+            ? 2
+            : 1;
         final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
         return Wrap(
           spacing: gap,
@@ -766,13 +1266,13 @@ class _SyncPageState extends State<SyncPage> {
     final background = entry.emphasized
         ? colors.primaryContainer
         : entry.attention
-            ? colors.tertiaryContainer
-            : colors.surfaceContainerLowest;
+        ? colors.tertiaryContainer
+        : colors.surfaceContainerLowest;
     final foreground = entry.emphasized
         ? colors.onPrimaryContainer
         : entry.attention
-            ? colors.onTertiaryContainer
-            : colors.onSurface;
+        ? colors.onTertiaryContainer
+        : colors.onSurface;
 
     return Container(
       key: Key('sync-metric-${entry.keyName}'),
@@ -794,17 +1294,17 @@ class _SyncPageState extends State<SyncPage> {
                   entry.label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: foreground,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: foreground),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '${entry.value}',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: foreground,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
@@ -837,17 +1337,16 @@ class _SyncPageState extends State<SyncPage> {
                     children: [
                       Text(
                         l10n.syncPlanTitle,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 3),
                       Text(
                         l10n.syncPlanScope(_selectedScopeTitle()),
                         key: const Key('sync-plan-scope'),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                            ),
+                          color: colors.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -856,8 +1355,8 @@ class _SyncPageState extends State<SyncPage> {
                   l10n.syncPlanShown(items.length, buckets.total),
                   key: const Key('sync-plan-shown'),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -910,8 +1409,8 @@ class _SyncPageState extends State<SyncPage> {
                     l10n.syncNoOperations,
                     key: const Key('sync-plan-empty'),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
+                      color: colors.onSurfaceVariant,
+                    ),
                   ),
                 ),
               )
@@ -956,12 +1455,12 @@ class _SyncPageState extends State<SyncPage> {
     final l10n = context.l10n;
     final colors = Theme.of(context).colorScheme;
     Text header(String value) => Text(
-          value,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colors.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
-        );
+      value,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: colors.onSurfaceVariant,
+        fontWeight: FontWeight.w700,
+      ),
+    );
 
     return Container(
       key: const Key('sync-plan-table-header'),
@@ -1016,7 +1515,9 @@ class _SyncPageState extends State<SyncPage> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         decoration: BoxDecoration(
           border: Border(
-            bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            bottom: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
           ),
         ),
         child: Row(
@@ -1038,7 +1539,9 @@ class _SyncPageState extends State<SyncPage> {
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
         ),
       ),
       child: Column(
@@ -1087,18 +1590,18 @@ class _SyncPageState extends State<SyncPage> {
                 _trackTitle(metadata),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 2),
               Text(
                 _trackArtists(metadata),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
               ),
             ],
           ),
@@ -1179,7 +1682,8 @@ class _SyncPageState extends State<SyncPage> {
           icon: Icons.compare_arrows,
         );
       case 'review_variant':
-        final rawVariant = '${metadata['variantStatus'] ?? item['reason'] ?? ''}';
+        final rawVariant =
+            '${metadata['variantStatus'] ?? item['reason'] ?? ''}';
         return _OperationPresentation(
           actionLabel: l10n.syncActionVariant,
           reason: l10n.syncReasonVariant(_variantLabel(rawVariant)),
@@ -1190,7 +1694,9 @@ class _SyncPageState extends State<SyncPage> {
         final outside = item['reason'] == 'outside_selected_scope';
         return _OperationPresentation(
           actionLabel: l10n.syncActionLocalOnly,
-          reason: outside ? l10n.syncReasonOutsideScope : l10n.syncReasonLocalOnly,
+          reason: outside
+              ? l10n.syncReasonOutsideScope
+              : l10n.syncReasonLocalOnly,
           statusLabel: l10n.syncStatusInformational,
           icon: Icons.folder_outlined,
         );
@@ -1209,8 +1715,8 @@ class _SyncPageState extends State<SyncPage> {
     return switch (raw) {
       'same' => l10n.matchingVariantSame,
       'altered' => l10n.matchingVariantAltered,
-      'different_version' || 'variant_different_version' =>
-        l10n.matchingVariantDifferent,
+      'different_version' ||
+      'variant_different_version' => l10n.matchingVariantDifferent,
       'uncertain' => l10n.matchingVariantUncertain,
       'not_checked' => l10n.matchingVariantNotChecked,
       _ => raw.isEmpty ? l10n.matchingVariantNotChecked : raw,
@@ -1244,9 +1750,9 @@ class _SyncPageState extends State<SyncPage> {
     final rawArtists = metadata['artists'];
     final artists = rawArtists is List
         ? rawArtists
-            .map((e) => '$e'.trim())
-            .where((e) => e.isNotEmpty)
-            .join(', ')
+              .map((e) => '$e'.trim())
+              .where((e) => e.isNotEmpty)
+              .join(', ')
         : '';
     return artists.isEmpty ? context.l10n.syncUnknownArtist : artists;
   }
@@ -1305,8 +1811,9 @@ class _SyncPageState extends State<SyncPage> {
       value is num ? value.toInt() : int.tryParse('$value') ?? 0;
 
   static double _percent(Object? value) {
-    final parsed =
-        value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+    final parsed = value is num
+        ? value.toDouble()
+        : double.tryParse('$value') ?? 0;
     return parsed.clamp(0, 100).toDouble();
   }
 
@@ -1318,9 +1825,9 @@ class _SyncPageState extends State<SyncPage> {
 
   static List<Map<String, dynamic>> _maps(Object? value) => value is List
       ? value
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList()
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
       : <Map<String, dynamic>>[];
 
   static String _message(Object error) =>
@@ -1401,7 +1908,8 @@ class _OperationBuckets {
 
   int get total => all.length;
 
-  List<Map<String, dynamic>> itemsFor(SyncPlanFilter filter) => switch (filter) {
+  List<Map<String, dynamic>> itemsFor(SyncPlanFilter filter) =>
+      switch (filter) {
         SyncPlanFilter.all => all,
         SyncPlanFilter.download => downloads,
         SyncPlanFilter.decision => decisions,

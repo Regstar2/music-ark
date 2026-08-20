@@ -142,7 +142,7 @@ class VariantAcceptanceTests(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as conn:
             version = conn.execute("SELECT value FROM app_metadata WHERE key='schema_version'").fetchone()[0]
             table = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='variant_user_acceptance'").fetchone()
-        self.assertEqual(version, "1.8.4")
+        self.assertEqual(version, "1.9.0")
         self.assertIsNotNone(table)
 
 

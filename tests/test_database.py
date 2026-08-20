@@ -31,7 +31,7 @@ class DatabaseTests(unittest.TestCase):
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
 
-            self.assertEqual(version, "1.8.4")
+            self.assertEqual(version, "1.9.0")
             self.assertIn("app_metadata", tables)
             self.assertIn("audit_log", tables)
             self.assertIn("providers", tables)
@@ -53,6 +53,11 @@ class DatabaseTests(unittest.TestCase):
             self.assertIn("local_track_content_labels", tables)
             self.assertIn("provider_track_content_labels", tables)
             self.assertIn("variant_user_acceptance", tables)
+            self.assertIn("managed_yandex_playlists", tables)
+            self.assertIn("yandex_upload_mappings", tables)
+            self.assertIn("provider_track_availability_history", tables)
+            self.assertIn("yandex_upload_batches", tables)
+            self.assertIn("yandex_upload_batch_items", tables)
 
     def test_initialize_database_retries_one_transient_locked_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +87,7 @@ class DatabaseTests(unittest.TestCase):
                 version = conn.execute(
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
-            self.assertEqual(version, "1.8.4")
+            self.assertEqual(version, "1.9.0")
 
     def test_initialize_database_does_not_retry_non_locking_sqlite_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

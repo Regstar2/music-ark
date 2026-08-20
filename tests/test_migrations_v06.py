@@ -94,7 +94,7 @@ class CoverageMigrationV06Tests(unittest.TestCase):
                 version = conn.execute(
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()[0]
-                self.assertEqual(version, "1.8.4")
+                self.assertEqual(version, "1.9.0")
                 self.assertEqual(
                     conn.execute(
                         "SELECT COUNT(*) FROM provider_collection_items"

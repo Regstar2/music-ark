@@ -15,9 +15,9 @@ from musicark.storage.database import initialize_database
 
 from .credentials import ExternalCredentialStore
 from .editor import ExternalMetadataEditor
-from .network import ExternalNetworkTransport, NetworkSettingsStore
+from .network import ExternalNetworkTransport, NetworkMode, NetworkSettingsStore
 from .resolver import ExternalMetadataResolver
-from .warp import WarpService
+from .warp import WarpService, WarpState
 
 
 _COMMANDS = (
@@ -102,7 +102,8 @@ def main() -> int:
         elif args.command == "warp_disable":
             payload = {"warp": warp.disconnect().as_dict()}
         elif args.command == "network_test":
-            transport = ExternalNetworkTransport(settings)
+            current_settings = settings.load()
+            warp_status = warp.status()
             probes = {
                 "musicbrainz": "https://musicbrainz.org/ws/2/recording?query=recording%3Atest&limit=1&fmt=json",
                 "acoustid": "https://api.acoustid.org/",
@@ -112,13 +113,24 @@ def main() -> int:
                 "lastfm": "https://ws.audioscrobbler.com/2.0/",
             }
             items = []
-            for source, url in probes.items():
-                try:
-                    response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
-                    items.append({"source": source, "reachable": response.status_code < 500, "statusCode": response.status_code})
-                except Exception as exc:  # noqa: BLE001
-                    items.append({"source": source, "reachable": False, "error": type(exc).__name__})
-            payload = {"items": items, "warp": warp.status().as_dict()}
+            if current_settings.mode is NetworkMode.WARP and warp_status.state is not WarpState.PROXY_READY:
+                items = [
+                    {"source": source, "reachable": False, "error": "warp_local_proxy_not_ready"}
+                    for source in probes
+                ]
+            else:
+                transport = ExternalNetworkTransport(settings)
+                for source, url in probes.items():
+                    try:
+                        response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
+                        items.append({"source": source, "reachable": response.status_code < 500, "statusCode": response.status_code})
+                    except Exception as exc:  # noqa: BLE001
+                        items.append({"source": source, "reachable": False, "error": type(exc).__name__})
+            payload = {
+                "items": items,
+                "warp": warp_status.as_dict(),
+                "settings": settings.public(),
+            }
         else:
             if args.local_file_id is None:
                 raise ValueError("--local-file-id is required.")

@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: ["main"]
 
-permissions:
-  contents: write
-
 concurrency:
   group: tests-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -19,38 +16,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feature/v0.11.1-bulk-upload-recovery-sync
-          fetch-depth: 0
-      - name: Apply guarded v0.11.1 integration
-        shell: pwsh
-        run: |
-          python tools/dev/v0111_apply_worktree_fixed.py
-          python tools/dev/v0111_update_readmes.py
-          Push-Location ui/musicark_ui
-          dart format lib/sync_page.dart
-          Pop-Location
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- README.md README_EN.md `
-                    ui/musicark_ui/lib/sync_page.dart `
-                    tests/test_database.py `
-                    tests/test_local_library_v04.py `
-                    tests/test_migrations_v03.py `
-                    tests/test_migrations_v05.py `
-                    tests/test_migrations_v06.py `
-                    tests/test_migrations_v08.py `
-                    tests/test_migrations_v1.py `
-                    tests/test_platform_bridge.py `
-                    tests/test_variant_acceptance_v082.py `
-                    tests/test_variant_v051.py `
-                    tests/test_yandex_experimental_upload.py `
-                    tests/test_yandex_upload_production_service.py
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "fix(v0.11.1): complete recovery Sync integration"
-            git push origin HEAD:feature/v0.11.1-bulk-upload-recovery-sync
-          }
       - name: Select healthy Python
         shell: pwsh
         run: |
@@ -72,7 +37,7 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
-      - name: Run production Yandex upload tests
+      - name: Run production Yandex upload and v0.11.1 recovery tests
         shell: pwsh
         run: |
           Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
@@ -84,13 +49,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   yandex-upload-research:
-    needs: [unit-tests]
     runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feature/v0.11.1-bulk-upload-recovery-sync
       - name: Select healthy Python
         shell: pwsh
         run: |
@@ -122,7 +84,10 @@ jobs:
         run: |
           Remove-Item Env:MUSICARK_YANDEX_PLAYLIST_LIVE -ErrorAction SilentlyContinue
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_playlist_research.py
-          if ($LASTEXITCODE -eq 0) { throw "Playlist research utility must fail closed without explicit live opt-in." }
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -eq 0) { throw "Playlist research utility must fail closed without explicit live opt-in." }
+          if ($exitCode -ne 2) { throw "Unexpected playlist research exit code: $exitCode" }
+          exit 0
       - name: Run complete sanitized offline research pipeline
         shell: pwsh
         run: |
@@ -153,8 +118,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feature/v0.11.1-bulk-upload-recovery-sync
       - name: Verify Flutter
         shell: pwsh
         run: |

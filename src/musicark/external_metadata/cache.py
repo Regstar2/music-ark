@@ -9,10 +9,15 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from musicark.storage.external_metadata_migration import migrate_external_metadata_v012
+
 
 class ExternalMetadataCache:
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
+        with closing(sqlite3.connect(self._database_path)) as conn:
+            with conn:
+                migrate_external_metadata_v012(conn)
 
     @staticmethod
     def _now() -> datetime:

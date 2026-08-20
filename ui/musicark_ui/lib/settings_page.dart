@@ -39,21 +39,14 @@ class SettingsPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(l10n.settingsTitle, style: Theme.of(context).textTheme.headlineMedium),
-                            const SizedBox(height: 4),
-                            Text(l10n.settingsSubtitle, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                          ],
-                        ),
-                      ),
-                      Chip(key: const Key('settings-auto-save-status'), avatar: const Icon(Icons.check, size: 18), label: Text(l10n.settingsAutoSaveStatus)),
-                    ],
-                  ),
+                  Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l10n.settingsTitle, style: Theme.of(context).textTheme.headlineMedium),
+                      const SizedBox(height: 4),
+                      Text(l10n.settingsSubtitle, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    ])),
+                    Chip(key: const Key('settings-auto-save-status'), avatar: const Icon(Icons.check, size: 18), label: Text(l10n.settingsAutoSaveStatus)),
+                  ]),
                   const SizedBox(height: AppUiTokens.sectionGap),
                   _PreferenceCard(
                     icon: Icons.contrast_outlined,
@@ -124,7 +117,8 @@ class _PreferenceCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: LayoutBuilder(builder: (context, constraints) {
             final description = Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(icon), const SizedBox(width: 14),
+              Icon(icon),
+              const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 3),
@@ -143,6 +137,7 @@ class _PreferenceCard extends StatelessWidget {
 class _NetworkAccessCard extends StatefulWidget {
   const _NetworkAccessCard({required this.bridge});
   final ExternalMetadataBridgeClient bridge;
+
   @override
   State<_NetworkAccessCard> createState() => _NetworkAccessCardState();
 }
@@ -151,6 +146,8 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   String _mode = 'auto';
   String _proxyScheme = 'socks5';
   String _warp = 'unknown';
+  String _warpMessage = '';
+  String _warpServiceMode = '';
   bool _busy = false;
   String? _message;
   List<Map<String, dynamic>> _networkItems = const [];
@@ -167,7 +164,10 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
 
   @override
   void dispose() {
-    _host.dispose(); _port.dispose(); _username.dispose(); _password.dispose();
+    _host.dispose();
+    _port.dispose();
+    _username.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -190,7 +190,11 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       _username.text = '${settings['proxy_username'] ?? settings['proxyUsername'] ?? _username.text}';
     }
     final warp = result['warp'];
-    if (warp is Map) _warp = '${warp['state'] ?? _warp}';
+    if (warp is Map) {
+      _warp = '${warp['state'] ?? _warp}';
+      _warpMessage = '${warp['message'] ?? ''}';
+      _warpServiceMode = '${warp['serviceMode'] ?? ''}';
+    }
     final items = result['items'];
     if (items is List) {
       _networkItems = items.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
@@ -203,8 +207,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     if (_busy) return;
     setState(() { _busy = true; _message = null; });
     try {
-      final result = await action();
-      _applyResult(result);
+      _applyResult(await action());
     } catch (error) {
       _message = '$error';
     } finally {
@@ -216,10 +219,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final results = await Future.wait([
-        widget.bridge.getNetworkSettings(),
-        widget.bridge.warpStatus(),
-      ]);
+      final results = await Future.wait([widget.bridge.getNetworkSettings(), widget.bridge.warpStatus()]);
       _applyResult(results[0]);
       _applyResult(results[1]);
     } catch (error) {
@@ -229,8 +229,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     }
   }
 
-  Future<void> _saveVisibleSettings() =>
-      _run(() => widget.bridge.updateNetworkSettings(_visibleSettings()));
+  Future<void> _saveVisibleSettings() => _run(() => widget.bridge.updateNetworkSettings(_visibleSettings()));
 
   Future<void> _changeMode(String mode) async {
     if (_busy || mode == _mode) return;
@@ -246,10 +245,8 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       _networkItems = const [];
     });
     try {
-      final saved = await widget.bridge.updateNetworkSettings(_visibleSettings());
-      _applyResult(saved);
-      final tested = await widget.bridge.testNetwork();
-      _applyResult(tested);
+      _applyResult(await widget.bridge.updateNetworkSettings(_visibleSettings()));
+      _applyResult(await widget.bridge.testNetwork());
     } catch (error) {
       _message = '$error';
     } finally {
@@ -270,27 +267,49 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   String _networkDetail(Map<String, dynamic> item) {
     if (item['reachable'] == true) {
       final status = item['statusCode'];
-      return status == null ? 'OK' : 'HTTP $status';
+      if (status == null) return 'OK';
+      if (status is num && status >= 400) return 'HTTP $status · host reached';
+      return 'HTTP $status';
     }
     return '${item['error'] ?? 'unreachable'}';
+  }
+
+  IconData _networkIcon(Map<String, dynamic> item) {
+    if (item['reachable'] != true) return Icons.error_outline;
+    final status = item['statusCode'];
+    if (status is num && status >= 400) return Icons.warning_amber_outlined;
+    return Icons.check_circle_outline;
   }
 
   @override
   Widget build(BuildContext context) {
     final s = V012Strings.of(context);
-    String warpLabel = switch (_warp) {
+    final warpLabel = switch (_warp) {
       'not_installed' => s.notInstalled,
       'proxy_ready' => s.localProxyReady,
       'connected' => s.localProxyNotReady,
+      'connecting' => s.configuring,
       'installed' || 'disconnected' => s.installed,
       _ => _warp,
     };
+    final warpDetails = [
+      if (_warpServiceMode.isNotEmpty) _warpServiceMode,
+      if (_warpMessage.isNotEmpty) _warpMessage,
+    ].join(' · ');
+
     return Card(
       key: const Key('network-settings-card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [const Icon(Icons.public), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(s.networkTitle, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)), Text(s.networkHint, style: Theme.of(context).textTheme.bodySmall)]))]),
+          Row(children: [
+            const Icon(Icons.public),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(s.networkTitle, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(s.networkHint, style: Theme.of(context).textTheme.bodySmall),
+            ])),
+          ]),
           const SizedBox(height: 16),
           SegmentedButton<String>(
             key: const Key('network-mode-selector'),
@@ -336,10 +355,15 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
             OutlinedButton.icon(key: const Key('warp-refresh'), onPressed: _busy ? null : () => _run(widget.bridge.warpStatus), icon: const Icon(Icons.refresh), label: Text(s.refreshStatus)),
             if (_warp == 'not_installed') FilledButton.tonal(key: const Key('warp-install'), onPressed: _busy ? null : () => _run(widget.bridge.installWarp), child: Text(s.installWarp)),
             if (_warp == 'installed' || _warp == 'disconnected') FilledButton.tonal(key: const Key('warp-enable'), onPressed: _busy ? null : () => _run(widget.bridge.enableWarp), child: Text(s.enableWarp)),
-            if (_warp == 'connected' || _warp == 'proxy_ready') OutlinedButton(key: const Key('warp-disable'), onPressed: _busy ? null : () => _run(widget.bridge.disableWarp), child: Text(s.disableWarp)),
+            if (_warp == 'connected') FilledButton.tonal(key: const Key('warp-configure-proxy'), onPressed: _busy ? null : () => _run(widget.bridge.enableWarp), child: Text(s.configureWarpProxy)),
+            if (_warp == 'connected' || _warp == 'proxy_ready' || _warp == 'connecting') OutlinedButton(key: const Key('warp-disable'), onPressed: _busy ? null : () => _run(widget.bridge.disableWarp), child: Text(s.disableWarp)),
             Text('${s.warp}: $warpLabel', key: const Key('warp-status-label')),
             if (_busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           ]),
+          if (warpDetails.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(warpDetails, key: const Key('warp-status-detail'), style: Theme.of(context).textTheme.bodySmall),
+          ],
           if (_message != null) ...[const SizedBox(height: 8), Text(_message!, key: const Key('network-result'))],
           if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -350,7 +374,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
                 for (final item in _networkItems)
                   Chip(
                     key: Key('network-source-${item['source']}'),
-                    avatar: Icon(item['reachable'] == true ? Icons.check_circle_outline : Icons.error_outline, size: 18),
+                    avatar: Icon(_networkIcon(item), size: 18),
                     label: Text('${_sourceLabel('${item['source'] ?? ''}')} · ${_networkDetail(item)}'),
                   ),
               ],
@@ -383,8 +407,16 @@ class _ProviderAccountCard extends StatelessWidget {
             return Row(children: [
               CircleAvatar(radius: 28, child: signedIn && session.initials.isNotEmpty ? Text(session.initials) : const Icon(Icons.person_outline)),
               const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)), Text(subtitle)])),
-              FilledButton.tonalIcon(key: signedIn ? const Key('settings-account-open') : const Key('settings-account-sign-in'), onPressed: onOpenYandex, icon: Icon(signedIn ? Icons.open_in_new : Icons.login), label: Text(signedIn ? l10n.openYandexMusic : l10n.signIn)),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                Text(subtitle),
+              ])),
+              FilledButton.tonalIcon(
+                key: signedIn ? const Key('settings-account-open') : const Key('settings-account-sign-in'),
+                onPressed: onOpenYandex,
+                icon: Icon(signedIn ? Icons.open_in_new : Icons.login),
+                label: Text(signedIn ? l10n.openYandexMusic : l10n.signIn),
+              ),
             ]);
           },
         ),

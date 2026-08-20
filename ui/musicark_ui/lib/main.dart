@@ -15,6 +15,7 @@ import 'matching_bridge.dart';
 import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
+import 'yandex_upload_bridge.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +48,7 @@ class MusicArkDesktopApp extends StatefulWidget {
     this.syncBridge,
     this.metadataBridge,
     this.contentLabelBridge,
+    this.yandexUploadBridge,
     this.settingsStorage,
   });
 
@@ -57,6 +59,7 @@ class MusicArkDesktopApp extends StatefulWidget {
   final SyncBridgeClient? syncBridge;
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
+  final YandexUploadBridgeClient? yandexUploadBridge;
   final AppSettingsStorage? settingsStorage;
 
   @override
@@ -113,6 +116,8 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
     final injectedMode = widget.bridge != null;
     final featureLabels = widget.contentLabelBridge ??
         (injectedMode ? null : const ContentLabelBridge());
+    final featureYandexUpload = widget.yandexUploadBridge ??
+        (injectedMode ? null : const YandexUploadBridge());
     return AnimatedBuilder(
       animation: _settings,
       builder: (context, _) {
@@ -141,6 +146,7 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
             syncBridge: _syncBridge,
             metadataBridge: widget.metadataBridge ?? const MetadataBridge(),
             contentLabelBridge: featureLabels,
+            yandexUploadBridge: featureYandexUpload,
             settings: _settings,
             accountSession: _accountSession,
           ),

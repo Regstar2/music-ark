@@ -162,7 +162,9 @@ class ExternalNetworkTransport:
 
     @staticmethod
     def _warp_proxy_url(settings: NetworkSettings) -> str:
-        return f"socks5://{settings.warp_proxy_host}:{settings.warp_proxy_port}"
+        # Delegate hostname resolution to WARP. This avoids leaking/depending on
+        # a restricted local DNS path for the very hosts WARP is meant to reach.
+        return f"socks5h://{settings.warp_proxy_host}:{settings.warp_proxy_port}"
 
     def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
         settings = self._settings_store.load()
@@ -200,7 +202,10 @@ class ExternalNetworkTransport:
                 httpx.ReadTimeout,
                 httpx.WriteError,
                 httpx.WriteTimeout,
+                httpx.CloseError,
                 httpx.PoolTimeout,
+                httpx.ProxyError,
+                httpx.ProtocolError,
             ),
         )
 
@@ -215,7 +220,11 @@ class ExternalNetworkTransport:
                     trust_env=False,
                     follow_redirects=False,
                     http1=True,
-                    http2=True,
+                    # HTTPX documents HTTP/1.1 as the more mature transport. For
+                    # low-volume metadata calls we do not gain anything from
+                    # HTTP/2 over a SOCKS tunnel, while WARP+MusicBrainz has shown
+                    # real RemoteProtocolError failures in that combination.
+                    http2=proxy is None,
                 ) as client:
                     response = client.request(method, url, **kwargs)
                 with self._lock:

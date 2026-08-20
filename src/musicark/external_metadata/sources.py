@@ -166,6 +166,143 @@ class MusicBrainzSource:
         return result
 
 
+class ListenBrainzMusicBrainzSource:
+    """MetaBrainz fallback for networks where musicbrainz.org itself is unreachable.
+
+    The public recording metadata endpoint accepts a Recording MBID and exposes
+    cached MusicBrainz artist/release data. The separate public Mapping API can
+    map artist/title/release text to MusicBrainz IDs with a confidence score.
+    Neither endpoint mutates ListenBrainz data.
+    """
+
+    source_id = "listenbrainz_mapper"
+    display_name = "MusicBrainz via ListenBrainz"
+
+    def __init__(self, transport: ExternalNetworkTransport) -> None:
+        self._transport = transport
+        self._rate = RateLimiter(0.25)
+        self._headers = {"User-Agent": "MusicArk/0.12.0 (https://github.com/Regstar2/music-ark)", "Accept": "application/json"}
+
+    @staticmethod
+    def _confidence(value: Any, *, exact_mbid: bool = False) -> Confidence:
+        if exact_mbid:
+            return Confidence.STRONG
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score >= 0.95:
+            return Confidence.STRONG
+        if score >= 0.80:
+            return Confidence.POSSIBLE
+        return Confidence.WEAK
+
+    @staticmethod
+    def _candidate(
+        *,
+        recording_mbid: str,
+        release_mbid: str,
+        title: str,
+        artist: str,
+        album: str,
+        year: int | None = None,
+        release_group_mbid: str = "",
+        confidence: Confidence,
+        exact_mbid: bool = False,
+    ) -> ExternalMetadataCandidate:
+        fields: dict[str, Any] = {
+            "title": title or None,
+            "artists": [artist] if artist else [],
+            "album": album or None,
+            "year": year,
+        }
+        fields = {key: value for key, value in fields.items() if value not in (None, "", [])}
+        identities: dict[str, str] = {}
+        if recording_mbid:
+            identities["musicbrainz_recording_mbid"] = recording_mbid
+        if release_mbid:
+            identities["musicbrainz_release_mbid"] = release_mbid
+        if release_group_mbid:
+            identities["musicbrainz_release_group_mbid"] = release_group_mbid
+        evidence = (
+            (MetadataEvidence(EvidenceType.EXACT_RECORDING_MBID, ListenBrainzMusicBrainzSource.source_id, recording_mbid),)
+            if exact_mbid and recording_mbid
+            else ()
+        )
+        return ExternalMetadataCandidate(
+            source=ListenBrainzMusicBrainzSource.source_id,
+            source_display_name=ListenBrainzMusicBrainzSource.display_name,
+            source_track_id=recording_mbid or None,
+            source_release_id=release_mbid or None,
+            fields=fields,
+            identities=identities,
+            provenance={key: ListenBrainzMusicBrainzSource.source_id for key in fields},
+            evidence=evidence,
+            confidence=confidence,
+        )
+
+    def recording(self, recording_mbid: str, *, fallback_title: str = "") -> list[ExternalMetadataCandidate]:
+        self._rate.wait()
+        payload = _json(self._transport.get(
+            "https://api.listenbrainz.org/1/metadata/recording/",
+            params={"recording_mbids": recording_mbid, "inc": "artist release"},
+            headers=self._headers,
+        ))
+        raw = payload.get(recording_mbid)
+        if not isinstance(raw, dict):
+            return []
+        artist_obj = raw.get("artist") if isinstance(raw.get("artist"), dict) else {}
+        release_obj = raw.get("release") if isinstance(raw.get("release"), dict) else {}
+        artist = str(artist_obj.get("name") or "").strip()
+        release_mbid = str(release_obj.get("mbid") or release_obj.get("caa_release_mbid") or "").strip()
+        album = str(release_obj.get("name") or "").strip()
+        release_group_mbid = str(release_obj.get("release_group_mbid") or "").strip()
+        year_raw = release_obj.get("year")
+        try:
+            year = int(year_raw) if year_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            year = None
+        return [self._candidate(
+            recording_mbid=recording_mbid,
+            release_mbid=release_mbid,
+            title=fallback_title,
+            artist=artist,
+            album=album,
+            year=year,
+            release_group_mbid=release_group_mbid,
+            confidence=self._confidence(None, exact_mbid=True),
+            exact_mbid=True,
+        )]
+
+    def search(self, *, title: str, artist: str, album: str = "") -> list[ExternalMetadataCandidate]:
+        if not title or not artist:
+            return []
+        self._rate.wait()
+        params: dict[str, str] = {"artist_credit_name": artist, "recording_name": title}
+        if album:
+            params["release_name"] = album
+        payload = _json(self._transport.get(
+            "https://mapper.listenbrainz.org/mapping/lookup",
+            params=params,
+            headers=self._headers,
+        ))
+        recording_mbid = str(payload.get("recording_mbid") or "").strip()
+        if not recording_mbid:
+            return []
+        release_mbid = str(payload.get("release_mbid") or "").strip()
+        canonical_title = str(payload.get("recording_name") or title).strip()
+        canonical_artist = str(payload.get("artist_credit_name") or artist).strip()
+        canonical_album = str(payload.get("release_name") or album).strip()
+        return [self._candidate(
+            recording_mbid=recording_mbid,
+            release_mbid=release_mbid,
+            title=canonical_title,
+            artist=canonical_artist,
+            album=canonical_album,
+            confidence=self._confidence(payload.get("confidence")),
+        )]
+
+
 class CoverArtArchiveSource:
     source_id = "cover_art_archive"
 

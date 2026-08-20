@@ -12,6 +12,7 @@ import httpx
 from musicark.external_metadata.fingerprint import FingerprintError, FingerprintService
 from musicark.external_metadata.models import Confidence, EvidenceType, ExternalMetadataCandidate, MetadataEvidence
 from musicark.external_metadata.network import ExternalNetworkTransport, NetworkMode, NetworkSettingsStore
+from musicark.external_metadata.sources import ListenBrainzMusicBrainzSource
 from musicark.storage.database import initialize_database
 from musicark.storage.external_metadata_migration import migrate_external_metadata_v012
 
@@ -201,6 +202,52 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(routes[0], None)
         self.assertIn("127.0.0.1:8080", routes[1])
+
+    def test_listenbrainz_mapper_builds_musicbrainz_candidate(self) -> None:
+        class Transport:
+            def get(self, url, **kwargs):
+                payload = {
+                    "artist_credit_name": "Portishead",
+                    "recording_name": "Glory Box",
+                    "release_name": "Dummy",
+                    "recording_mbid": "recording-mbid",
+                    "release_mbid": "release-mbid",
+                    "confidence": 0.97,
+                }
+                return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+
+        source = ListenBrainzMusicBrainzSource(Transport())  # type: ignore[arg-type]
+        items = source.search(title="Glory Box", artist="Portishead", album="Dummy")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].source, "listenbrainz_mapper")
+        self.assertEqual(items[0].source_track_id, "recording-mbid")
+        self.assertEqual(items[0].source_release_id, "release-mbid")
+        self.assertEqual(items[0].identities["musicbrainz_recording_mbid"], "recording-mbid")
+        self.assertEqual(items[0].confidence, Confidence.STRONG)
+
+    def test_listenbrainz_recording_lookup_recovers_release_from_mbid(self) -> None:
+        class Transport:
+            def get(self, url, **kwargs):
+                payload = {
+                    "recording-mbid": {
+                        "artist": {"name": "Portishead"},
+                        "release": {
+                            "mbid": "release-mbid",
+                            "name": "Dummy",
+                            "release_group_mbid": "release-group-mbid",
+                            "year": 1994,
+                        },
+                    }
+                }
+                return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+
+        source = ListenBrainzMusicBrainzSource(Transport())  # type: ignore[arg-type]
+        items = source.recording("recording-mbid", fallback_title="Glory Box")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].fields["title"], "Glory Box")
+        self.assertEqual(items[0].fields["album"], "Dummy")
+        self.assertEqual(items[0].identities["musicbrainz_release_group_mbid"], "release-group-mbid")
+        self.assertEqual(items[0].confidence, Confidence.STRONG)
 
 
 if __name__ == "__main__":

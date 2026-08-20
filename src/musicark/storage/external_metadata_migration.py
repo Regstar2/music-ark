@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-
-def _parse(value: str) -> tuple[int, int, int]:
-    parts = (value.strip() + ".0.0").split(".")[:3]
-    try:
-        return int(parts[0]), int(parts[1]), int(parts[2])
-    except (TypeError, ValueError):
-        return 0, 0, 0
+_EXTERNAL_SCHEMA_KEY = "external_metadata_schema_version"
 
 
 def migrate_external_metadata_v012(cursor: object) -> str:
-    """Add external identities, response/fingerprint caches and WARP ownership state."""
-    row = cursor.execute("SELECT value FROM app_metadata WHERE key='schema_version'").fetchone()
-    current = str(row[0]) if row and row[0] is not None else "0.0.0"
-    parsed = _parse(current)
-    if parsed >= (1, 10, 0):
-        return current
-    if parsed < (1, 9, 0):
+    """Add v0.12 external metadata tables without changing the core DB version.
+
+    The external metadata subsystem owns an additive sub-schema. Keeping its
+    version under a dedicated app_metadata key avoids making every pre-v0.12
+    bridge process think the core 1.9.0 schema is stale.
+    """
+    row = cursor.execute("SELECT value FROM app_metadata WHERE key=?", (_EXTERNAL_SCHEMA_KEY,)).fetchone()
+    current = str(row[0]) if row and row[0] is not None else "0"
+    if current == "1":
         return current
 
     cursor.execute(
@@ -94,8 +90,9 @@ def migrate_external_metadata_v012(cursor: object) -> str:
     )
     cursor.execute(
         """
-        INSERT INTO app_metadata(key, value) VALUES('schema_version', '1.10.0')
+        INSERT INTO app_metadata(key, value) VALUES(?, '1')
         ON CONFLICT(key) DO UPDATE SET value=excluded.value
-        """
+        """,
+        (_EXTERNAL_SCHEMA_KEY,),
     )
-    return "1.10.0"
+    return "1"

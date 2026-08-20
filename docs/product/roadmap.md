@@ -12,89 +12,57 @@ v0.7   — Download + Local Playback                     complete
 v0.8.0 — Controlled Sync                               complete
 v0.8.1 — Rich Yandex download metadata/provenance      complete
 v0.8.2 — Local Metadata Editor / Yandex Metadata       complete
-v0.9.0 — UI, Account & Settings                        complete
-v0.9.1 — Main Screen UI Polish                         complete
-v0.9.2 — Local Library UI & Multi-Root Selection       complete
-v0.9.3 — Matching UI Redesign                          complete
-v0.9.4 — Coverage / Missing UI Polish                  complete
-v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions    complete
-v0.9.6 — Sync Page UI Polish                           complete
-v0.9.7 — Settings, Help & About UI Polish              complete
-v0.9.x — UI improvement line                           complete
-v0.10.0 — Yandex Upload Feasibility                    complete / blocked
-next — upload architecture decision                    decision required
+v0.9.x — Desktop UI improvement line                   complete
+v0.10.0 — Yandex Upload Feasibility                    complete
+v0.11.0 — Production Single-Track Yandex Upload        complete
+v0.11.1 — Bulk Upload, Recovery Sync & Scope Context   complete
+v0.12.0 — External Metadata & Resilient Network Access implementation
+next    — Format support/conversion and upload polish   planned
+later   — Auto-update, installer/release, mobile        planned
 ```
+
+## Current architecture
+
+MusicArk treats Yandex Music as the first production music provider, not as the global domain model. Local Library, Identity Matching, Variant analysis, Coverage, Download, Controlled Sync, metadata editing and upload/recovery remain explicit layers with separate mutation boundaries.
 
 ## v0.8.0 — Controlled Sync
 
-Yandex active collections are desired state; Local Library plus authoritative Coverage are actual state. Controlled Sync builds a read-only plan, previews safe downloads and blockers, validates staleness, requires explicit confirmation, rechecks each operation, and delegates acquisition to the production `DownloadService`.
+Yandex active collections are desired state; Local Library plus authoritative Coverage are actual state. Controlled Sync creates a read-only plan, validates staleness, requires explicit confirmation and delegates only supported operations. It does not delete local-only files or silently replace different versions.
 
-Bulk acquisition remains `missing + wanted`. Unreviewed Missing, identity conflicts/not-analyzed state and unresolved Variant issues remain review work. `DIFFERENT_VERSION` never triggers automatic replacement. Local-only/outside-scope files are informational and are never deleted.
+## v0.8.1 — Rich Yandex metadata/provenance
 
-## v0.8.1 — Rich Yandex download metadata / provenance
+Authorized Yandex downloads write available standard MP3 metadata and trusted MusicArk/Yandex provenance before atomic finalization. This allows exact provider identity recovery without weakening queue isolation or overwriting a user file on filename collision.
 
-The production Yandex download path writes available standard MP3 metadata and trusted MusicArk/Yandex provenance before atomic finalization. This keeps downloaded files useful after rescans and allows trusted provider identity recovery without weakening queue isolation or overwriting an existing user file on a filename collision.
+## v0.8.2 — Local Metadata Editor
 
-## v0.8.2 — Local Metadata Editor / Yandex Metadata Import
+The Metadata Editor is the explicit transactional write boundary for existing user-owned audio. It supports structured/advanced ID3 editing, artwork, safe rename, Yandex search/Compare, selective Apply and explicit Yandex Apply + Bind. Scan, Matching, Coverage and Sync do not rewrite existing user audio files.
 
-v0.8.2 adds an explicit write boundary for existing user-owned MP3 files: structured/advanced ID3 editing, artwork and safe filename changes, Yandex search/Compare, selective Apply Metadata and explicit Apply + Bind. It also includes app-level ORIGINAL/CENSORED marks, reviewed-variant acceptance and Yandex artwork/playback.
+## v0.9.x — Desktop UI line
 
-Schema progression reaches `1.8.4` through forward-only migrations. Scan, Matching, Coverage and Sync remain non-mutating for existing user audio files; only an explicit Metadata Editor action may rewrite one.
+The v0.9.x line introduced account/settings shell, localization/theme support, responsive Yandex/Local/Matching/Coverage/Downloads/Sync pages, safe deletion/bulk actions, Help and diagnostics without changing the domain safety boundaries.
 
-## v0.9.0 — UI, Account & Settings
+## v0.10.0 — Upload feasibility
 
-v0.9.0 adds the global desktop shell account control, Settings utility destination, persisted System/Light/Dark theme preference, persisted System/Russian/English locale preference, Flutter localization resources, offline Help and About/diagnostics. It does not add new music semantics.
+The initial upload milestone researched Yandex own-track upload and kept production capability fail-closed until a reproducible account-owned protocol could be demonstrated.
 
-The SQLite schema remains `1.8.4`; UI preferences are stored separately. The Yandex account contract is reused cache-first and logout remains the existing provider application boundary.
+## v0.11.0 — Production Single-Track Yandex Upload
 
-## v0.9.1 — Main Screen UI Polish
+v0.11.0 promotes the proven direct-Python upload protocol into an explicit one-track Local Library action. It keeps upload credentials, signed targets and uncertain-delivery handling behind a narrow provider transport boundary and never blindly retries an ambiguous Stage 2 delivery.
 
-v0.9.1 removes the duplicate permanent Yandex navigation sidebar and makes the global MusicArk sidebar the only permanent application navigation. Liked tracks, Playlists and Albums use top-level Yandex workspace navigation, while collection contents use detail views with explicit back navigation.
+## v0.11.1 — Bulk Upload & Recovery Sync
 
-The Yandex workspace becomes responsive for desktop resizing: search/sort/version-label controls reflow, wide track rows use table-like columns, compact rows retain the same actions, normal `available` status is hidden, and unavailable playback is disabled with explanatory presentation. ORIGINAL/CENSORED feature bridges remain explicit dependencies.
+v0.11.1 preserves the v0.11.0 single-track service as the only one-file upload primitive and adds sequential batch upload, persistent upload mappings, managed recovery playlists, unavailable-provider history and controlled Sync upload operations for deterministic recovery cases. Playlist creation remains fail-closed until separately live-proven.
 
-The release also centralizes small UI layout tokens, adds a theme-aware MusicArk mark, refines light/dark presentation and makes Now Playing responsive without adding new playback semantics. SQLite remains `1.8.4` and backend music behavior is unchanged.
+## v0.12.0 — External Metadata & Resilient Network Access
 
-## v0.9.2 — Local Library UI & Multi-Root Selection
+v0.12.0 adds a provider-neutral external metadata layer for recovering/enriching one local file without weakening the Metadata Editor write boundary. The main sequence is cache-first and evidence-driven: trusted identity → Chromaprint/AcoustID → MusicBrainz Recording/Release → Cover Art Archive and optional fallback sources. Multiple releases remain separate candidates and no external result silently binds a Yandex identity or changes ORIGINAL/CENSORED state.
 
-v0.9.2 brings Local Library onto the same desktop presentation layer and adds a true multi-root view filter. The user can show all roots, one root, any subset, or no roots without mutating the configured library sources.
+The same milestone introduces an external-network transport with Direct, Custom HTTP(S)/SOCKS5 Proxy, Cloudflare WARP local proxy and Auto modes. Auto falls back only for transport-level failures and caches working routes briefly so an inaccessible host does not impose the same timeout for every track. Yandex upload transport is deliberately excluded from this routing layer.
 
-Filtering is executed in SQLite before count/search/sort/pagination through a typed root-ID query contract, so large libraries are not filtered from only the first Flutter page. Folder management remains independent from the display filter, and existing playback, metadata editing, content labels and read-only scan boundaries remain intact.
+Windows-specific Cloudflare integration stays below the platform-neutral network boundary. MusicArk can detect/control an official WARP installation and has a fail-closed verified installation path; ownership is persisted only when MusicArk performed the successful install. A future uninstaller must preserve pre-existing WARP.
 
-SQLite remains `1.8.4`.
+See `docs/versions/v0.12.0.md` and `docs/architecture/external-metadata-sources.md`.
 
-## v0.9.3 — Matching UI Redesign
+## Next
 
-v0.9.3 turns Matching into a desktop comparison workspace with five summary metrics, counted filters, Search/Sort and side-by-side Yandex/local columns. Matching identity and Variant recording status stay separate, and narrow desktop layouts preserve comparison semantics through horizontal scrolling instead of changing the matching model.
-
-## v0.9.4 — Coverage / Missing UI Polish
-
-v0.9.4 makes Coverage track-first: compact local-coverage summary, counted status tabs, responsive filters, artwork from already persisted provider metadata and explicit Missing triage/download actions. Coverage semantics and the existing direct Download boundary remain unchanged.
-
-## v0.9.5 — Downloads UI, Safe Deletion & Bulk Actions
-
-v0.9.5 redesigns Downloads around compact task rows, search/status filters, lazy rendering and explicit bulk actions. Failed/needs-review task removal deletes only the task record, while retry/download-selected run only IDs produced by the current user action and do not wake unrelated queued work.
-
-## v0.9.6 — Sync Page UI Polish
-
-v0.9.6 presents Controlled Sync as one readable desktop workflow: responsive scope/folder controls, state summary, current/projected coverage, five primary metrics and a single counted/filterable plan list. Empty operation classes no longer consume large accordion sections, while narrow windows switch plan rows to a stacked presentation.
-
-The underlying Controlled Sync contract does not change: filters are Flutter presentation state, Apply still requires confirmation and delegates only the existing safe operations. There is no local-file deletion, metadata rewrite, Yandex mutation, reverse sync or automatic Different-Version replacement. SQLite remains `1.8.4`.
-
-## v0.9.7 — Settings, Help & About UI Polish
-
-v0.9.7 completes the v0.9.x UI-improvement line with responsive Settings, expanded offline Help and diagnostic About while preserving all existing music-domain and mutation boundaries.
-
-## v0.10.0 — Yandex Upload Feasibility
-
-The feasibility spike confirms that Yandex Music exposes an own-track upload workflow through its website/desktop application, but it does **not** establish a reproducible programmatic upload contract usable through MusicArk's existing credential boundary.
-
-The pinned `yandex-music==3.0.0` client has no verified own-file upload API for this workflow, while endpoint/method/body/authentication/response identity remain undocumented by the inspected primary sources. The milestone therefore ends as `BLOCKED` instead of adding guessed transport code or a user-visible Upload capability.
-
-Production provider capabilities remain disabled, SQLite remains `1.8.4`, no Upload UI/queue/Sync integration is added, and the obsolete experimental compatibility path fails closed without reading a local file or sending a Yandex request.
-
-See `docs/versions/v0.10.0.md` for the evidence table and security constraints.
-
-## Next — decision required
-
-Do not schedule production Single Track Upload solely from this milestone. Reopen the upload architecture when a supported API becomes available or when an explicit account-owned, sanitized capture of the normal Yandex upload workflow provides a reproducible protocol without browser-cookie theft or security-challenge bypass.
+The previous upload-queue work is largely covered by v0.11.1's sequential batch/recovery primitives. The next milestones should focus on broader audio-format read/write support, explicit conversion where Yandex requires it, performance on very large libraries, then auto-update and production installer/release work. Installer work must integrate the documented WARP ownership rules rather than treating every detected WARP installation as MusicArk-owned.

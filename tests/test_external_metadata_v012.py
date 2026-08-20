@@ -161,7 +161,7 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(routes[0], None)
         self.assertIn("127.0.0.1:8080", routes[1])
 
-    def test_warp_uses_proxy_side_dns_and_http1(self) -> None:
+    def test_warp_prefers_http_connect_and_http1(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
         store.save({"networkMode": NetworkMode.WARP.value})
@@ -177,9 +177,33 @@ class ExternalMetadataV012Tests(unittest.TestCase):
 
         response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(client_options[0]["proxy"], "socks5h://127.0.0.1:40000")
+        self.assertEqual(client_options[0]["proxy"], "http://127.0.0.1:40000")
         self.assertTrue(client_options[0]["http1"])
         self.assertFalse(client_options[0]["http2"])
+
+    def test_warp_falls_back_from_connect_to_socks5_on_tls_connect_failure(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({"networkMode": NetworkMode.WARP.value})
+        routes = []
+
+        class Client:
+            def __init__(self, **kwargs):
+                self.proxy = kwargs.get("proxy")
+                routes.append(self.proxy)
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def request(self, method, url, **kwargs):
+                if str(self.proxy).startswith("http://"):
+                    raise httpx.ConnectError(
+                        "certificate verify failed: hostname mismatch",
+                        request=httpx.Request(method, url),
+                    )
+                return httpx.Response(200, request=httpx.Request(method, url))
+
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(routes, ["http://127.0.0.1:40000", "socks5://127.0.0.1:40000"])
 
     def test_protocol_error_is_transport_failure_and_auto_can_fallback(self) -> None:
         credentials = _MemoryCredentials()

@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/v0.11.1-bulk-upload-recovery-sync
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -16,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: feature/v0.11.1-bulk-upload-recovery-sync
           fetch-depth: 0
 
       - name: Apply guarded v0.11.1 edits
@@ -73,11 +77,11 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ui/musicark_ui/lib/local_library_page.dart `
-                  ui/musicark_ui/lib/yandex_upload_dialog.dart `
-                  ui/musicark_ui/lib/sync_bridge.dart `
-                  ui/musicark_ui/lib/sync_page.dart `
-                  ui/musicark_ui/test/yandex_upload_local_library_test.dart
+          git add -- ui/musicark_ui/lib/local_library_page.dart `
+                    ui/musicark_ui/lib/yandex_upload_dialog.dart `
+                    ui/musicark_ui/lib/sync_bridge.dart `
+                    ui/musicark_ui/lib/sync_page.dart `
+                    ui/musicark_ui/test/yandex_upload_local_library_test.dart
           if (-not (git diff --cached --quiet)) {
             git commit -m "feat(v0.11.1): add bulk upload and recovery workspace UI"
             git push origin HEAD:feature/v0.11.1-bulk-upload-recovery-sync

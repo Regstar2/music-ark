@@ -56,7 +56,7 @@ class WarpV012Tests(unittest.TestCase):
         with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", return_value=True):
             self.assertEqual(service.status().state, WarpState.PROXY_READY)
 
-    def test_connect_switches_supported_cli_to_proxy_mode_before_connect(self) -> None:
+    def test_connect_switches_already_connected_client_to_proxy_without_redundant_connect(self) -> None:
         calls = []
         proxy_checks = iter([False, True])
 
@@ -66,8 +66,6 @@ class WarpV012Tests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, "Possible values: warp proxy tunnel_only", "")
             if args[-2:] == ["mode", "proxy"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
-            if args[-1:] == ["connect"]:
-                return subprocess.CompletedProcess(args, 0, "Success", "")
             if args[-1:] == ["--version"]:
                 return subprocess.CompletedProcess(args, 0, "warp-cli 2026.6.905.0", "")
             if args[-1:] == ["settings"]:
@@ -81,6 +79,34 @@ class WarpV012Tests(unittest.TestCase):
             status = service.connect()
         self.assertEqual(status.state, WarpState.PROXY_READY)
         self.assertTrue(any(call[-2:] == ["mode", "proxy"] for call in calls))
+        self.assertFalse(any(call[-1:] == ["connect"] for call in calls))
+
+    def test_connect_calls_connect_when_proxy_mode_switch_leaves_client_disconnected(self) -> None:
+        calls = []
+        connected = False
+
+        def runner(args, **kwargs):
+            nonlocal connected
+            calls.append(args)
+            if args[-2:] == ["mode", "--help"]:
+                return subprocess.CompletedProcess(args, 0, "Possible values: warp proxy tunnel_only", "")
+            if args[-2:] == ["mode", "proxy"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[-1:] == ["connect"]:
+                connected = True
+                return subprocess.CompletedProcess(args, 0, "Success", "")
+            if args[-1:] == ["--version"]:
+                return subprocess.CompletedProcess(args, 0, "warp-cli test", "")
+            if args[-1:] == ["settings"]:
+                return subprocess.CompletedProcess(args, 0, "Mode: WarpProxy", "")
+            if args[-1:] == ["status"]:
+                return subprocess.CompletedProcess(args, 0, "Status update: Connected" if connected else "Status update: Disconnected", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        service = WarpService(self.db, runner=runner, sleeper=lambda _: None)
+        with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", side_effect=lambda: connected):
+            status = service.connect()
+        self.assertEqual(status.state, WarpState.PROXY_READY)
         proxy_index = next(i for i, call in enumerate(calls) if call[-2:] == ["mode", "proxy"])
         connect_index = next(i for i, call in enumerate(calls) if call[-1:] == ["connect"])
         self.assertLess(proxy_index, connect_index)

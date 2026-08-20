@@ -138,6 +138,25 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
     return mb >= 0.1 ? '${mb.toStringAsFixed(1)} MB' : '${(raw / 1024).toStringAsFixed(0)} KB';
   }
 
+  String _failureBody(YandexUploadResult result) {
+    final details = <String>[];
+    if (result.stage1HttpStatus != null) {
+      details.add('Stage 1 HTTP ${result.stage1HttpStatus}');
+    }
+    if (result.stage2HttpStatus != null) {
+      details.add('Stage 2 HTTP ${result.stage2HttpStatus}');
+    }
+    final errorCode = result.errorCode?.trim();
+    if (errorCode != null && errorCode.isNotEmpty) {
+      details.add('Code: $errorCode');
+    }
+    if (result.readBackAttempts > 0) {
+      details.add('Read-back: ${result.readBackAttempts}');
+    }
+    if (details.isEmpty) return context.l10n.yandexUploadNetworkError;
+    return '${context.l10n.yandexUploadNetworkError}\n${details.join(' · ')}';
+  }
+
   Widget _artwork() {
     final artwork = Map<String, dynamic>.from(
       widget.track['artwork'] as Map? ?? const {},
@@ -214,7 +233,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         key: const Key('yandex-upload-state-error'),
         icon: const Icon(Icons.error_outline),
         title: l10n.yandexUploadError,
-        body: l10n.yandexUploadNetworkError,
+        body: _failureBody(result),
       ),
     };
   }

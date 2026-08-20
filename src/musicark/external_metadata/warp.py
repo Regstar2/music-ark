@@ -52,7 +52,6 @@ class WarpStatus:
 
 
 class WarpService:
-    # Official stable Windows download endpoint exposed by Cloudflare.
     OFFICIAL_WINDOWS_STABLE_URL = "https://downloads.cloudflareclient.com/v1/download/windows/ga"
     ALLOWED_DOWNLOAD_HOST = "downloads.cloudflareclient.com"
 
@@ -139,9 +138,6 @@ class WarpService:
         if result.returncode != 0:
             return ""
         text = f"{result.stdout}\n{result.stderr}"
-        # Current Cloudflare clients report these names from `warp-cli settings`.
-        # The local user CLI also confirms that `warp-cli mode proxy` is a supported
-        # public command and maps to the SOCKS5 proxy mode.
         if "WarpProxy" in text:
             return "WarpProxy"
         for mode in (
@@ -192,14 +188,33 @@ class WarpService:
             service_mode=service_mode,
         )
 
-    def connect(self) -> WarpStatus:
-        """Configure Cloudflare's supported SOCKS5 Local Proxy mode and connect.
+    def _wait_for_proxy(self, latest: WarpStatus | None = None) -> WarpStatus:
+        current = latest or self.status()
+        for _ in range(20):
+            if current.state is WarpState.PROXY_READY:
+                return current
+            if current.state in {WarpState.ERROR, WarpState.NOT_INSTALLED, WarpState.UNSUPPORTED_VERSION}:
+                return current
+            self._sleep(0.25)
+            current = self.status()
+        if current.service_mode == "WarpProxy":
+            return WarpStatus(
+                WarpState.CONNECTING,
+                version=current.version,
+                installed_by_musicark=current.installed_by_musicark,
+                service_mode=current.service_mode,
+                message="WARP Local proxy mode is active but port 40000 did not become ready in time.",
+            )
+        return WarpStatus(
+            WarpState.UNSUPPORTED_VERSION,
+            version=current.version,
+            installed_by_musicark=current.installed_by_musicark,
+            service_mode=current.service_mode,
+            message="warp-cli accepted proxy mode but WarpProxy was not confirmed by client settings.",
+        )
 
-        The command `warp-cli mode proxy` is intentionally isolated here. It is
-        only used after the installed CLI itself has exposed `proxy` as a public
-        mode; failures are returned as typed states rather than falling back to
-        undocumented client behavior.
-        """
+    def connect(self) -> WarpStatus:
+        """Configure Cloudflare's supported SOCKS5 Local Proxy mode and connect."""
         if not self._cli():
             return WarpStatus(WarpState.NOT_INSTALLED, installed_by_musicark=self._owned())
 
@@ -229,43 +244,33 @@ class WarpService:
                 message="warp-cli mode proxy failed",
             )
 
-        result = self._run_cli("connect")
-        if result.returncode != 0:
-            current = self.status()
-            return WarpStatus(
-                WarpState.ERROR,
-                version=current.version,
-                installed_by_musicark=current.installed_by_musicark,
-                service_mode=current.service_mode,
-                message="warp-cli connect failed",
-            )
+        # Changing mode may reconfigure an already-connected client by itself.
+        # Check first so an "already connected" response cannot turn a healthy
+        # proxy transition into a false error.
+        current = self.status()
+        if current.state is WarpState.PROXY_READY:
+            return current
+        if current.service_mode == "WarpProxy" and current.state in {WarpState.CONNECTED, WarpState.CONNECTING}:
+            return self._wait_for_proxy(current)
 
-        # The service may need a short moment to reconfigure from TunnelOnly to
-        # WarpProxy and bind the default local SOCKS5 port.
-        latest = self.status()
-        for _ in range(20):
-            if latest.state is WarpState.PROXY_READY:
-                return latest
-            if latest.state in {WarpState.ERROR, WarpState.NOT_INSTALLED, WarpState.UNSUPPORTED_VERSION}:
-                return latest
-            self._sleep(0.25)
-            latest = self.status()
+        if current.state in {WarpState.DISCONNECTED, WarpState.INSTALLED}:
+            result = self._run_cli("connect")
+            if result.returncode != 0:
+                after = self.status()
+                if after.state is WarpState.PROXY_READY:
+                    return after
+                return WarpStatus(
+                    WarpState.ERROR,
+                    version=after.version,
+                    installed_by_musicark=after.installed_by_musicark,
+                    service_mode=after.service_mode,
+                    message="warp-cli connect failed",
+                )
+            return self._wait_for_proxy()
 
-        if latest.service_mode == "WarpProxy":
-            return WarpStatus(
-                WarpState.CONNECTING,
-                version=latest.version,
-                installed_by_musicark=latest.installed_by_musicark,
-                service_mode=latest.service_mode,
-                message="WARP Local proxy mode is active but port 40000 did not become ready in time.",
-            )
-        return WarpStatus(
-            WarpState.UNSUPPORTED_VERSION,
-            version=latest.version,
-            installed_by_musicark=latest.installed_by_musicark,
-            service_mode=latest.service_mode,
-            message="warp-cli accepted proxy mode but WarpProxy was not confirmed by client settings.",
-        )
+        # If the CLI reports another transient state after mode switch, give the
+        # service a bounded chance to settle before deciding it is unsupported.
+        return self._wait_for_proxy(current)
 
     def disconnect(self) -> WarpStatus:
         result = self._run_cli("disconnect")

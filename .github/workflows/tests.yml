@@ -37,15 +37,23 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          dart format ui/musicark_ui/lib/app_shell.dart ui/musicark_ui/lib/main.dart ui/musicark_ui/lib/local_library_page.dart ui/musicark_ui/lib/sync_bridge.dart ui/musicark_ui/lib/sync_page.dart ui/musicark_ui/lib/v0111_localizations_ext.dart ui/musicark_ui/test
+          dart format `
+            ui/musicark_ui/lib/app_shell.dart `
+            ui/musicark_ui/lib/main.dart `
+            ui/musicark_ui/lib/local_library_page.dart `
+            ui/musicark_ui/lib/sync_bridge.dart `
+            ui/musicark_ui/lib/sync_page.dart `
+            ui/musicark_ui/lib/v0111_localizations_ext.dart `
+            ui/musicark_ui/test/local_library_page_test.dart `
+            ui/musicark_ui/test/v0111_bulk_recovery_test.dart `
+            ui/musicark_ui/test/v0111_sync_page_test.dart `
+            ui/musicark_ui/test/yandex_upload_dialog_test.dart
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Restore normal CI and clean temporary files
+      - name: Clean temporary patch files
         shell: pwsh
         run: |
-          Copy-Item .\tools\dev\tests_workflow_v0111_restore.yml .\.github\workflows\tests.yml -Force
           Remove-Item .\tools\dev\v0111_feedback_patch.py -Force
           Remove-Item .\tools\dev\tests_workflow_v0111_restore.yml -Force
-          Remove-Item .\.github\workflows\v0111-feedback-apply.yml -Force -ErrorAction SilentlyContinue
       - name: Commit implementation
         shell: pwsh
         run: |
@@ -54,5 +62,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if (git diff --cached --quiet) { throw "Feedback patch produced no changes." }
+          if (-not (git diff --cached --quiet -- .github/workflows)) { throw "Runner must not modify workflow files." }
           git commit -m "fix: address v0.11.1 manual UI feedback"
           git push origin HEAD:feature/v0.11.1-bulk-upload-recovery-sync

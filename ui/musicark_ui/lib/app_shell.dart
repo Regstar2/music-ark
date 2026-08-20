@@ -22,6 +22,7 @@ import 'settings_page.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
+import 'yandex_batch_upload_bridge.dart';
 import 'yandex_upload_bridge.dart';
 
 class MusicArkShell extends StatefulWidget {
@@ -284,6 +285,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           ? SyncPage(
                               key: ValueKey('sync-${_activationRevision[5]}'),
                               bridge: widget.syncBridge,
+                              managedPlaylistBridge: const YandexBatchUploadBridge(),
                               onOpenDownloads: () => _selectSection(4),
                               onOpenMatching: () => _selectSection(2),
                             )

@@ -30,23 +30,77 @@ class WarpV012Tests(unittest.TestCase):
 
     def test_connected_cli_status_is_typed(self) -> None:
         calls = []
+
         def runner(args, **kwargs):
             calls.append(args)
             if "--version" in args:
                 return subprocess.CompletedProcess(args, 0, "warp-cli 2026.6.905.0", "")
+            if "settings" in args:
+                return subprocess.CompletedProcess(args, 0, "(user set) Mode: TunnelOnly", "")
             return subprocess.CompletedProcess(args, 0, "Status update: Connected", "")
+
         service = WarpService(self.db, runner=runner)
         with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", return_value=False):
             status = service.status()
         self.assertEqual(status.state, WarpState.CONNECTED)
+        self.assertEqual(status.service_mode, "TunnelOnly")
         self.assertIn("2026.6.905.0", status.version)
 
     def test_proxy_ready_takes_precedence_over_human_cli_output(self) -> None:
         def runner(args, **kwargs):
+            if "settings" in args:
+                return subprocess.CompletedProcess(args, 0, "Mode: WarpProxy", "")
             return subprocess.CompletedProcess(args, 0, "unknown localized text", "")
+
         service = WarpService(self.db, runner=runner)
         with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", return_value=True):
             self.assertEqual(service.status().state, WarpState.PROXY_READY)
+
+    def test_connect_switches_supported_cli_to_proxy_mode_before_connect(self) -> None:
+        calls = []
+        proxy_checks = iter([False, True])
+
+        def runner(args, **kwargs):
+            calls.append(args)
+            if args[-2:] == ["mode", "--help"]:
+                return subprocess.CompletedProcess(args, 0, "Possible values: warp proxy tunnel_only", "")
+            if args[-2:] == ["mode", "proxy"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[-1:] == ["connect"]:
+                return subprocess.CompletedProcess(args, 0, "Success", "")
+            if args[-1:] == ["--version"]:
+                return subprocess.CompletedProcess(args, 0, "warp-cli 2026.6.905.0", "")
+            if args[-1:] == ["settings"]:
+                return subprocess.CompletedProcess(args, 0, "(user set) Mode: WarpProxy", "")
+            if args[-1:] == ["status"]:
+                return subprocess.CompletedProcess(args, 0, "Status update: Connected", "")
+            return subprocess.CompletedProcess(args, 1, "", "unexpected")
+
+        service = WarpService(self.db, runner=runner, sleeper=lambda _: None)
+        with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", side_effect=lambda: next(proxy_checks, True)):
+            status = service.connect()
+        self.assertEqual(status.state, WarpState.PROXY_READY)
+        self.assertTrue(any(call[-2:] == ["mode", "proxy"] for call in calls))
+        proxy_index = next(i for i, call in enumerate(calls) if call[-2:] == ["mode", "proxy"])
+        connect_index = next(i for i, call in enumerate(calls) if call[-1:] == ["connect"])
+        self.assertLess(proxy_index, connect_index)
+
+    def test_connect_fails_closed_if_proxy_mode_is_not_exposed(self) -> None:
+        def runner(args, **kwargs):
+            if args[-2:] == ["mode", "--help"]:
+                return subprocess.CompletedProcess(args, 0, "Possible values: warp tunnel_only", "")
+            if args[-1:] == ["--version"]:
+                return subprocess.CompletedProcess(args, 0, "warp-cli test", "")
+            if args[-1:] == ["settings"]:
+                return subprocess.CompletedProcess(args, 0, "Mode: TunnelOnly", "")
+            if args[-1:] == ["status"]:
+                return subprocess.CompletedProcess(args, 0, "Status update: Connected", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        service = WarpService(self.db, runner=runner, sleeper=lambda _: None)
+        with patch.object(service, "_cli", return_value="warp-cli"), patch.object(service, "_proxy_ready", return_value=False):
+            status = service.connect()
+        self.assertEqual(status.state, WarpState.UNSUPPORTED_VERSION)
 
     def test_ownership_marker_is_explicit(self) -> None:
         service = WarpService(self.db)

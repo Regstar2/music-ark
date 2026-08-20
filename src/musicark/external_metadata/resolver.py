@@ -12,10 +12,17 @@ from typing import Any
 from musicark.download.metadata import YandexTrackMetadata
 from musicark.metadata.yandex import YandexMetadataGateway, identity_fields, metadata_fields
 
+from .artwork import ExternalArtworkCache
 from .cache import ExternalMetadataCache
 from .credentials import ExternalCredentialStore
 from .fingerprint import FingerprintError, FingerprintService
-from .models import Confidence, EvidenceType, ExternalMetadataCandidate, MetadataEvidence
+from .models import (
+    Confidence,
+    EvidenceType,
+    ExternalArtworkCandidate,
+    ExternalMetadataCandidate,
+    MetadataEvidence,
+)
 from .network import ExternalNetworkTransport, NetworkSettingsStore
 from .sources import (
     AcoustIdSource,
@@ -31,7 +38,7 @@ from .sources import (
 
 
 class ExternalMetadataResolver:
-    """Resolve candidates without mutating local audio or Yandex identity state."""
+    """Resolve candidates without mutating local audio or trusted Yandex identity state."""
 
     def __init__(self, database_path: Path, base_dir: Path | None = None) -> None:
         self._database_path = database_path
@@ -45,6 +52,7 @@ class ExternalMetadataResolver:
         self._acoustid = AcoustIdSource(self._transport, self._credentials)
         self._musicbrainz = MusicBrainzSource(self._transport)
         self._caa = CoverArtArchiveSource(self._transport)
+        self._artwork = ExternalArtworkCache(database_path, base_dir, self._transport)
         self._discogs = DiscogsSource(self._transport, self._credentials)
         self._audiodb = TheAudioDbSource(self._transport, self._credentials)
         self._lastfm = LastFmSource(self._transport, self._credentials)
@@ -70,6 +78,13 @@ class ExternalMetadataResolver:
         return item
 
     @staticmethod
+    def _file_key(local: dict[str, Any]) -> str:
+        path = Path(str(local["path"]))
+        stat = path.stat()
+        modified = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
+        return f"{stat.st_size}:{modified}"
+
+    @staticmethod
     def _candidate_id(local_file_id: int, item: ExternalMetadataCandidate) -> str:
         raw = "|".join((str(local_file_id), item.source, item.source_track_id or "", item.source_release_id or ""))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -87,12 +102,44 @@ class ExternalMetadataResolver:
             raise ValueError("External metadata candidate expired or was not found.")
         return dict(cached[1])
 
+    def persist_candidate_identities(self, local_file_id: int, candidate_id: str) -> None:
+        candidate = self.candidate(local_file_id, candidate_id)
+        identities = candidate.get("identities") or {}
+        if not isinstance(identities, dict):
+            return
+        source = str(candidate.get("source") or "external")
+        confidence = str(candidate.get("confidence") or "possible")
+        with closing(sqlite3.connect(self._database_path)) as conn:
+            with conn:
+                for identity_type, identity_value in identities.items():
+                    value = str(identity_value or "").strip()
+                    key = str(identity_type or "").strip()
+                    if not key or not value:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO local_external_identities(
+                            local_file_id, identity_type, identity_value, source,
+                            confidence, user_confirmed, updated_at
+                        ) VALUES(?, ?, ?, ?, ?, 1, datetime('now'))
+                        ON CONFLICT(local_file_id, identity_type, identity_value) DO UPDATE SET
+                            source=excluded.source,
+                            confidence=excluded.confidence,
+                            user_confirmed=1,
+                            updated_at=excluded.updated_at
+                        """,
+                        (int(local_file_id), key, value, source, confidence),
+                    )
+
     @staticmethod
     def _yandex_candidate(metadata: YandexTrackMetadata, public: dict[str, Any]) -> ExternalMetadataCandidate:
         fields = metadata_fields(metadata)
         fields = {key: value for key, value in fields.items() if value not in (None, "", [])}
         identities = identity_fields(metadata)
         normalized = {str(key): str(value) for key, value in identities.items() if value not in (None, "", [])}
+        artwork_payload = public.get("artwork") if isinstance(public, dict) else None
+        artwork_path = str((artwork_payload or {}).get("cachePath") or "") if isinstance(artwork_payload, dict) else ""
+        artwork = ExternalArtworkCandidate(source="yandex_music", cache_path=artwork_path) if artwork_path else None
         return ExternalMetadataCandidate(
             source="yandex_music",
             source_display_name="Yandex Music",
@@ -102,6 +149,7 @@ class ExternalMetadataResolver:
             identities=normalized,
             provenance={key: "yandex_music" for key in fields},
             confidence=Confidence.EXACT,
+            artwork=artwork,
         )
 
     @staticmethod
@@ -123,18 +171,67 @@ class ExternalMetadataResolver:
             statuses.append(self._status(source, "unavailable", str(exc)))
         return None
 
+    def _with_artwork(
+        self,
+        candidates: list[ExternalMetadataCandidate],
+        statuses: list[dict[str, str]],
+        *,
+        limit: int = 3,
+    ) -> list[ExternalMetadataCandidate]:
+        result: list[ExternalMetadataCandidate] = []
+        attempts = 0
+        for item in candidates:
+            if item.artwork is not None or not item.source_release_id or item.source != "musicbrainz" or attempts >= limit:
+                result.append(item)
+                continue
+            attempts += 1
+            try:
+                url = self._caa.front_url(release_mbid=item.source_release_id, size=500)
+                artwork = None
+                if url:
+                    artwork = self._artwork.fetch(
+                        f"caa:release:{item.source_release_id}:500",
+                        "cover_art_archive",
+                        url,
+                    )
+                statuses.append(self._status("cover_art_archive", "ok" if artwork else "not_found"))
+            except Exception as exc:  # noqa: BLE001 - artwork is optional.
+                artwork = None
+                statuses.append(self._status("cover_art_archive", "unavailable", str(exc)))
+            result.append(ExternalMetadataCandidate(
+                source=item.source,
+                source_display_name=item.source_display_name,
+                source_track_id=item.source_track_id,
+                source_release_id=item.source_release_id,
+                fields=item.fields,
+                identities=item.identities,
+                provenance=item.provenance,
+                evidence=item.evidence,
+                confidence=item.confidence,
+                artwork=artwork,
+            ))
+        return result
+
     def identify(self, local_file_id: int, *, continue_search: bool = False) -> dict[str, Any]:
         local = self._local(local_file_id)
+        resolution_key = f"resolve:{int(local_file_id)}:{self._file_key(local)}:{1 if continue_search else 0}"
+        cached = self._cache.get(resolution_key)
+        if cached is not None and cached[0] is False and isinstance(cached[1], dict):
+            payload = dict(cached[1])
+            payload["fromCache"] = True
+            return payload
+
         statuses: list[dict[str, str]] = []
         candidates: list[ExternalMetadataCandidate] = []
 
         if local.get("source_provider_id") == "yandex_music" and local.get("source_external_id"):
             try:
                 metadata = self._yandex.get(str(local["source_external_id"]))
-                candidates.append(self._yandex_candidate(metadata, self._yandex.public_payload(metadata, cache_artwork=True)))
+                public = self._yandex.public_payload(metadata, cache_artwork=True)
+                candidates.append(self._yandex_candidate(metadata, public))
                 statuses.append(self._status("yandex_music", "ok"))
                 if not continue_search:
-                    return self._response(local_file_id, candidates, statuses, early_stop=True)
+                    return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
             except Exception as exc:  # noqa: BLE001
                 statuses.append(self._status("yandex_music", "unavailable", str(exc)))
 
@@ -167,9 +264,10 @@ class ExternalMetadataResolver:
                         evidence=evidence, confidence=item.confidence, artwork=item.artwork,
                     ))
                 items = enriched
+            items = self._with_artwork(items, statuses)
             candidates.extend(items)
             if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} and item.source_release_id for item in items) and not continue_search:
-                return self._response(local_file_id, candidates, statuses, early_stop=True)
+                return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
 
         title = str(local.get("title") or Path(str(local["path"])).stem).strip()
         artists = [str(item).strip() for item in local.get("artists") or [] if str(item).strip()]
@@ -177,25 +275,49 @@ class ExternalMetadataResolver:
         album = str(local.get("album") or "").strip()
         if title:
             mb_items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
+            mb_items = self._with_artwork(mb_items, statuses)
             candidates.extend(mb_items)
             if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} for item in mb_items) and not continue_search:
-                return self._response(local_file_id, candidates, statuses, early_stop=True)
+                return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
 
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
             candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist, recording_mbid=recording_mbid)) or [])
 
-        return self._response(local_file_id, candidates, statuses, early_stop=False)
+        return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=False)
 
     def search(self, local_file_id: int, *, title: str, artist: str = "", album: str = "", continue_search: bool = False) -> dict[str, Any]:
+        normalized = "|".join((title.strip().casefold(), artist.strip().casefold(), album.strip().casefold(), "1" if continue_search else "0"))
+        cache_key = f"search:{int(local_file_id)}:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
+        cached = self._cache.get(cache_key)
+        if cached is not None and cached[0] is False and isinstance(cached[1], dict):
+            payload = dict(cached[1])
+            payload["fromCache"] = True
+            return payload
         statuses: list[dict[str, str]] = []
         candidates = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
+        candidates = self._with_artwork(candidates, statuses)
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
             candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist)) or [])
-        return self._response(local_file_id, candidates, statuses, early_stop=False)
+        payload = self._response(local_file_id, candidates, statuses, early_stop=False)
+        self._cache.put(cache_key, "resolver", payload, ttl_seconds=3600)
+        return payload
+
+    def _finish_resolution(
+        self,
+        cache_key: str,
+        local_file_id: int,
+        candidates: list[ExternalMetadataCandidate],
+        statuses: list[dict[str, str]],
+        *,
+        early_stop: bool,
+    ) -> dict[str, Any]:
+        payload = self._response(local_file_id, candidates, statuses, early_stop=early_stop)
+        self._cache.put(cache_key, "resolver", payload, negative=not bool(payload["items"]), ttl_seconds=3600 if payload["items"] else 300)
+        return payload
 
     def _response(self, local_file_id: int, candidates: list[ExternalMetadataCandidate], statuses: list[dict[str, str]], *, early_stop: bool) -> dict[str, Any]:
         unique: list[ExternalMetadataCandidate] = []
@@ -214,4 +336,5 @@ class ExternalMetadataResolver:
             "items": [self._remember_candidate(local_file_id, item) for item in unique[:30]],
             "sources": statuses,
             "earlyStop": early_stop,
+            "fromCache": False,
         }

@@ -27,7 +27,7 @@ musicark-metadata-bridge = "musicark.metadata.bridge:main"
 musicark-external-metadata-bridge = "musicark.external_metadata.bridge:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -32,13 +32,41 @@ void main() {
         externalBridge: external,
       ),
     ));
+    await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('network-settings-card')), findsOneWidget);
     expect(find.byKey(const Key('network-mode-selector')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('warp-refresh')));
-    await tester.tap(find.byKey(const Key('warp-refresh')));
-    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('warp-install')));
     expect(find.byKey(const Key('warp-install')), findsOneWidget);
+  });
+
+  testWidgets('Selected network mode is saved before connectivity test', (tester) async {
+    final settings = AppSettingsController(storage: _MemorySettingsStorage());
+    await settings.load();
+    final session = AccountSessionController()..finishInitialization();
+    final external = FakeExternalMetadataBridge(networkMode: 'direct', warpState: 'proxy_ready');
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsPage(
+        settings: settings,
+        session: session,
+        onOpenYandex: () {},
+        onOpenHelp: () {},
+        onOpenAbout: () {},
+        externalBridge: external,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Cloudflare WARP'));
+    await tester.tap(find.text('Cloudflare WARP'));
+    await tester.pumpAndSettle();
+    expect(external.networkMode, 'warp');
+
+    await tester.ensureVisible(find.byKey(const Key('network-test')));
+    await tester.tap(find.byKey(const Key('network-test')));
+    await tester.pumpAndSettle();
+    expect(external.networkMode, 'warp');
   });
 
   testWidgets('Metadata Editor shows normalized external candidates', (tester) async {

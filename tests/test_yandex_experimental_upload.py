@@ -15,10 +15,10 @@ from musicark.storage.database import initialize_database
 
 
 class YandexUploadFeasibilityTests(unittest.TestCase):
-    def test_production_upload_capabilities_remain_disabled(self) -> None:
+    def test_production_upload_capabilities_are_separate_from_obsolete_probe(self) -> None:
         capabilities = YandexMusicProvider().capabilities
-        self.assertFalse(capabilities.can_upload_tracks)
-        self.assertFalse(capabilities.supports_user_uploads)
+        self.assertTrue(capabilities.can_upload_tracks)
+        self.assertTrue(capabilities.supports_user_uploads)
 
     def test_compatibility_probe_reports_no_verified_api(self) -> None:
         supported, methods = client_exposes_upload_api()

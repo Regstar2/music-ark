@@ -37,12 +37,15 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
-      - name: Run production Yandex upload tests
+      - name: Run production Yandex upload and v0.11.1 recovery tests
         shell: pwsh
         run: |
           Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
+          Remove-Item Env:MUSICARK_YANDEX_PLAYLIST_LIVE -ErrorAction SilentlyContinue
           Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_production_*.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_v0111_recovery_upload -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   yandex-upload-research:
@@ -70,11 +73,21 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
+          Remove-Item Env:MUSICARK_YANDEX_PLAYLIST_LIVE -ErrorAction SilentlyContinue
           Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_*.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify playlist research fails closed in CI
+        shell: pwsh
+        run: |
+          Remove-Item Env:MUSICARK_YANDEX_PLAYLIST_LIVE -ErrorAction SilentlyContinue
+          & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_playlist_research.py
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -eq 0) { throw "Playlist research utility must fail closed without explicit live opt-in." }
+          if ($exitCode -ne 2) { throw "Unexpected playlist research exit code: $exitCode" }
+          exit 0
       - name: Run complete sanitized offline research pipeline
         shell: pwsh
         run: |
@@ -116,9 +129,9 @@ jobs:
       - name: Flutter analyze
         shell: pwsh
         run: flutter analyze --no-fatal-infos
-      - name: Focused Yandex upload UI tests
+      - name: Focused v0.11.1 UI tests
         shell: pwsh
-        run: flutter test test/yandex_upload_dialog_test.dart test/yandex_upload_local_library_test.dart
+        run: flutter test test/v0111_bulk_recovery_test.dart test/v0111_sync_page_test.dart test/yandex_upload_dialog_test.dart test/yandex_upload_local_library_test.dart test/local_library_page_test.dart test/sync_page_test.dart
       - name: Flutter tests
         shell: pwsh
         run: flutter test

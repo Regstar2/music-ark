@@ -38,7 +38,7 @@ class V03MigrationTests(unittest.TestCase):
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(provider_collection_snapshots)")}
                 local_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
-            self.assertEqual(version, "1.8.4")
+            self.assertEqual(version, "1.9.0")
             self.assertEqual(json.loads(row[0])["displayName"], "Tester")
             self.assertEqual(row[1], 1)
             self.assertEqual(row[2], "2026-08-11T10:00:00+00:00")

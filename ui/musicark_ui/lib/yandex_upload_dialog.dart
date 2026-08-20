@@ -11,10 +11,15 @@ Future<YandexUploadResult?> showYandexUploadDialog({
   required BuildContext context,
   required Map<String, dynamic> track,
   required YandexUploadBridgeClient bridge,
+  String? preferredPlaylistKind,
 }) => showDialog<YandexUploadResult>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => YandexUploadDialog(track: track, bridge: bridge),
+  builder: (_) => YandexUploadDialog(
+    track: track,
+    bridge: bridge,
+    preferredPlaylistKind: preferredPlaylistKind,
+  ),
 );
 
 class YandexUploadDialog extends StatefulWidget {
@@ -22,10 +27,12 @@ class YandexUploadDialog extends StatefulWidget {
     super.key,
     required this.track,
     required this.bridge,
+    this.preferredPlaylistKind,
   });
 
   final Map<String, dynamic> track;
   final YandexUploadBridgeClient bridge;
+  final String? preferredPlaylistKind;
 
   @override
   State<YandexUploadDialog> createState() => _YandexUploadDialogState();
@@ -72,6 +79,12 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
       setState(() {
         _authenticated = targets.authenticated;
         _playlists = targets.playlists;
+        final preferred = widget.preferredPlaylistKind?.trim();
+        if (preferred != null &&
+            preferred.isNotEmpty &&
+            targets.playlists.any((item) => item.playlistKind == preferred)) {
+          _selectedPlaylistKind = preferred;
+        }
         _loadingTargets = false;
       });
     } on MusicArkBridgeException {
@@ -125,7 +138,10 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
   String _artists() {
     final raw = widget.track['artists'];
     if (raw is List) {
-      final text = raw.map((item) => '$item').where((item) => item.isNotEmpty).join(', ');
+      final text = raw
+          .map((item) => '$item')
+          .where((item) => item.isNotEmpty)
+          .join(', ');
       if (text.isNotEmpty) return text;
     }
     return context.l10n.localUnknownArtist;
@@ -135,7 +151,9 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
     final raw = double.tryParse('${widget.track['fileSize'] ?? 0}') ?? 0;
     if (raw <= 0) return '—';
     final mb = raw / (1024 * 1024);
-    return mb >= 0.1 ? '${mb.toStringAsFixed(1)} MB' : '${(raw / 1024).toStringAsFixed(0)} KB';
+    return mb >= 0.1
+        ? '${mb.toStringAsFixed(1)} MB'
+        : '${(raw / 1024).toStringAsFixed(0)} KB';
   }
 
   String _failureBody(YandexUploadResult result) {
@@ -169,7 +187,12 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         width: 72,
         height: 72,
         child: file != null && file.existsSync()
-            ? Image.file(file, fit: BoxFit.cover, cacheWidth: 144, cacheHeight: 144)
+            ? Image.file(
+                file,
+                fit: BoxFit.cover,
+                cacheWidth: 144,
+                cacheHeight: 144,
+              )
             : ColoredBox(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: const Icon(Icons.album_outlined, size: 40),
@@ -241,9 +264,15 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final title = (widget.track['title'] ?? widget.track['fileName'] ?? l10n.localUnknownTrack).toString();
+    final title =
+        (widget.track['title'] ??
+                widget.track['fileName'] ??
+                l10n.localUnknownTrack)
+            .toString();
     final fileName = '${widget.track['fileName'] ?? ''}';
-    final format = '${widget.track['codec'] ?? widget.track['extension'] ?? '—'}'.toUpperCase();
+    final format =
+        '${widget.track['codec'] ?? widget.track['extension'] ?? '—'}'
+            .toUpperCase();
     final hasTerminalResult = _result != null;
 
     return AlertDialog(
@@ -265,7 +294,10 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(title, style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         const SizedBox(height: 3),
                         Text(_artists()),
                         const SizedBox(height: 8),
@@ -328,7 +360,8 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                       .toList(growable: false),
                   onChanged: _submitting || hasTerminalResult
                       ? null
-                      : (value) => setState(() => _selectedPlaylistKind = value),
+                      : (value) =>
+                            setState(() => _selectedPlaylistKind = value),
                 ),
                 const SizedBox(height: 10),
                 CheckboxListTile(
@@ -338,7 +371,9 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                   value: _rightsConfirmed,
                   onChanged: _submitting || hasTerminalResult
                       ? null
-                      : (value) => setState(() => _rightsConfirmed = value == true),
+                      : (value) => setState(
+                          () => _rightsConfirmed = value == true,
+                        ),
                   title: Text(l10n.yandexUploadRightsConfirmation),
                 ),
               ],

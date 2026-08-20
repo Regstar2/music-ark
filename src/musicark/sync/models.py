@@ -1,4 +1,4 @@
-"""Controlled Sync domain models for MusicArk v0.8."""
+"""Controlled Sync domain models for MusicArk."""
 
 from __future__ import annotations
 
@@ -20,17 +20,24 @@ class SyncOperationType(StrEnum):
     REPLACE_CANDIDATE = "replace_candidate"
     CREATE_DOWNLOAD_TASK = "create_download_task"
 
-    # v0.8 production operations.
+    # v0.8+ production operations.
     ENQUEUE_DOWNLOAD = "enqueue_download"
     REVIEW_IDENTITY = "review_identity"
     REVIEW_VARIANT = "review_variant"
     USER_DECISION_REQUIRED = "user_decision_required"
     LOCAL_ONLY = "local_only"
 
+    # v0.11.1 production recovery upload.  This is deliberately distinct from
+    # historical UPLOAD_CANDIDATE so old persisted plans do not change meaning.
+    UPLOAD_LOCAL_TO_YANDEX = "upload_local_to_yandex"
+
 
 class SyncOperationStatus(StrEnum):
     PENDING = "pending"
     ENQUEUED = "enqueued"
+    VERIFIED = "verified"
+    PROCESSING = "processing"
+    DELIVERY_UNKNOWN = "delivery_unknown"
     SKIPPED = "skipped"
     FAILED = "failed"
     INFORMATIONAL = "informational"
@@ -54,11 +61,7 @@ class SyncScopeType(StrEnum):
 
 @dataclass(slots=True, frozen=True)
 class SyncOperation:
-    """Single persisted operation from an immutable plan snapshot.
-
-    ``status`` and ``result`` are execution metadata. They may change after the
-    snapshot is created; the operation intent and metadata never do.
-    """
+    """Single persisted operation from an immutable plan snapshot."""
 
     operation_type: SyncOperationType
     entity_id: str
@@ -81,7 +84,7 @@ class SyncPlan:
     dry_run: bool = True
     operations: list[SyncOperation] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
-    planner_version: int = 1
+    planner_version: int = 2
     scope_type: SyncScopeType = SyncScopeType.ALL
     scope_id: str | None = None
     target_root_id: int | None = None

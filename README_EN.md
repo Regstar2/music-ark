@@ -2,10 +2,24 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.11.0 — Production Single-Track Yandex Upload.**  
-**Current SQLite schema: 1.8.4.**
+**Current code version: 0.11.1 — Bulk Upload, Recovery Sync & Explicit Scope Context.**  
+**Current SQLite schema: 1.9.0.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. The v0.9.x line is complete. v0.10.0 completed the feasibility phase and confirmed direct-Python upload end to end; v0.11.0 promotes that proven protocol into a production manual workflow for one local MP3.
+MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.11.0 proved production upload of one MP3; v0.11.1 keeps `YandexSingleTrackUploadService` as the only one-file transfer primitive and extends it into safe bulk upload and collection recovery.
+
+## Bulk Upload & Recovery Sync v0.11.1
+
+Local Library now selects tracks by stable `local_file_id`, supports Select all visible, a bulk toolbar and sequential upload (`concurrency=1`). The single-track upload action is no longer hidden in the overflow menu; it is a direct row action beside Play/Edit. Manual bulk upload defaults to the managed **UPLOADED TRACKS** playlist when configured.
+
+MusicArk persists three managed playlist roles by playlist `kind`, not title: **CENSORED**, **UPLOADED TRACKS**, and **UNAVAILABLE**. Playlist creation stays fail-closed until a separate manual live proof succeeds; without that proof the user assigns existing owned playlists. CI never performs real playlist mutations.
+
+Yandex provider availability is now independent from local Coverage: `available / unavailable / unknown`. Explicit `available=false` is evidence of unavailability; disappearance from a playlist alone is not. Lightweight last-known history tracks unavailable/available-again transitions without copying raw provider responses.
+
+Controlled Sync can create `UPLOAD_LOCAL_TO_YANDEX` only for deterministic recovery: unavailable provider track + existing local MP3 → **UNAVAILABLE**; explicitly `censored` provider track + explicitly `original` local MP3 → **CENSORED**. `altered`, `different_version`, and `uncertain` do not prove censorship by themselves. Upload-only Sync does not require a download folder, but every upload apply requires fresh rights confirmation.
+
+`YandexBatchUploadService` is not a second transport: every item calls `YandexSingleTrackUploadService`. One item failure does not stop safe later items; `delivery_unknown` is never blindly retried and requires playlist inspection first. Persistent upload mappings plus read-back make repeated Sync idempotent for verified uploads.
+
+See `docs/versions/v0.11.1.md` for the full architecture, safety rules, research status, and limitations.
 
 ## Production Single-Track Yandex Upload v0.11.0
 

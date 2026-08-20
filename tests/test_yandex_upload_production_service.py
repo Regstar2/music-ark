@@ -358,6 +358,8 @@ class BridgeAndCapabilityRegressionTests(unittest.TestCase):
                     "provider": {"title": "Track", "artists": ["Artist"]},
                 }
             ],
+            recovery={},
+            managed={},
             local_fingerprint="local",
             active_downloads={},
         )

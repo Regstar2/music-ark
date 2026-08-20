@@ -22,6 +22,7 @@ import 'settings_page.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
+import 'yandex_batch_upload_bridge.dart';
 import 'yandex_upload_bridge.dart';
 
 class MusicArkShell extends StatefulWidget {
@@ -37,6 +38,7 @@ class MusicArkShell extends StatefulWidget {
     this.metadataBridge = const MetadataBridge(),
     this.contentLabelBridge = const ContentLabelBridge(),
     this.yandexUploadBridge,
+    this.yandexBatchUploadBridge,
   });
 
   final MusicArkBridgeClient bridge;
@@ -52,6 +54,7 @@ class MusicArkShell extends StatefulWidget {
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
   final YandexUploadBridgeClient? yandexUploadBridge;
+  final YandexBatchUploadBridgeClient? yandexBatchUploadBridge;
 
   @override
   State<MusicArkShell> createState() => _MusicArkShellState();
@@ -109,39 +112,41 @@ class _MusicArkShellState extends State<MusicArkShell> {
     } on MusicArkBridgeException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${context.l10n.genericError} ${error.message}')),
+        SnackBar(
+          content: Text('${context.l10n.genericError} ${error.message}'),
+        ),
       );
     }
   }
 
   Widget _buildYandexSection() => yandex.MusicArkHomePage(
-        key: ValueKey('yandex-${widget.accountSession.logoutRevision}'),
-        bridge: widget.bridge,
-        contentLabelBridge: widget.contentLabelBridge,
-      );
+    key: ValueKey('yandex-${widget.accountSession.logoutRevision}'),
+    bridge: widget.bridge,
+    contentLabelBridge: widget.contentLabelBridge,
+  );
 
   Widget _buildBrand(BuildContext context) => SizedBox(
-        width: AppUiTokens.sidebarWidth - 28,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
-          child: Row(
-            children: [
-              const MusicArkMark(size: 32),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'MusicArk',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-            ],
+    width: AppUiTokens.sidebarWidth - 28,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+      child: Row(
+        children: [
+          const MusicArkMark(size: 32),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'MusicArk',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 
   Widget _buildSidebar(BuildContext context) {
     final l10n = context.l10n;
@@ -152,12 +157,18 @@ class _MusicArkShellState extends State<MusicArkShell> {
         label: Text(l10n.navYandex),
       ),
       NavigationRailDestination(
-        icon: const Icon(Icons.library_music_outlined, key: Key('nav-local-library')),
+        icon: const Icon(
+          Icons.library_music_outlined,
+          key: Key('nav-local-library'),
+        ),
         selectedIcon: const Icon(Icons.library_music),
         label: Text(l10n.navLocalLibrary),
       ),
       NavigationRailDestination(
-        icon: const Icon(Icons.compare_arrows_outlined, key: Key('nav-matching')),
+        icon: const Icon(
+          Icons.compare_arrows_outlined,
+          key: Key('nav-matching'),
+        ),
         selectedIcon: const Icon(Icons.compare_arrows),
         label: Text(l10n.navMatching),
       ),
@@ -254,17 +265,23 @@ class _MusicArkShellState extends State<MusicArkShell> {
                               metadataBridge: widget.metadataBridge,
                               contentLabelBridge: widget.contentLabelBridge,
                               yandexUploadBridge: widget.yandexUploadBridge,
+                              yandexBatchUploadBridge:
+                                  widget.yandexBatchUploadBridge,
                             )
                           : const SizedBox.shrink(),
                       _matchingOpened
                           ? MatchingPage(
-                              key: ValueKey('matching-${_activationRevision[2]}'),
+                              key: ValueKey(
+                                'matching-${_activationRevision[2]}',
+                              ),
                               bridge: widget.matchingBridge,
                             )
                           : const SizedBox.shrink(),
                       _coverageOpened
                           ? CoveragePage(
-                              key: ValueKey('coverage-${_activationRevision[3]}'),
+                              key: ValueKey(
+                                'coverage-${_activationRevision[3]}',
+                              ),
                               bridge: widget.coverageBridge,
                               matchingBridge: widget.matchingBridge,
                               downloadBridge: widget.downloadBridge,
@@ -274,7 +291,9 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           : const SizedBox.shrink(),
                       _downloadsOpened
                           ? DownloadPage(
-                              key: ValueKey('downloads-${_activationRevision[4]}'),
+                              key: ValueKey(
+                                'downloads-${_activationRevision[4]}',
+                              ),
                               bridge: widget.downloadBridge,
                               coverageBridge: widget.coverageBridge,
                               active: _index == 4,
@@ -284,6 +303,8 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           ? SyncPage(
                               key: ValueKey('sync-${_activationRevision[5]}'),
                               bridge: widget.syncBridge,
+                              managedPlaylistBridge:
+                                  widget.yandexBatchUploadBridge,
                               onOpenDownloads: () => _selectSection(4),
                               onOpenMatching: () => _selectSection(2),
                             )

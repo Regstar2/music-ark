@@ -74,41 +74,41 @@ class _LocalUploadBridge extends FakeMusicArkBridge {
 }
 
 void main() {
-  tearDown(() async {
-    await TestWidgetsFlutterBinding.ensureInitialized().setSurfaceSize(null);
-  });
-
-  testWidgets('Local Library exposes single-track Yandex upload action for MP3', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    final uploadBridge = FakeYandexUploadBridge(
-      playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
-      ],
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        locale: const Locale('ru'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: LocalLibraryPage(
-          bridge: _LocalUploadBridge(),
-          folderPicker: const _NoFolderPicker(),
-          yandexUploadBridge: uploadBridge,
+  testWidgets(
+    'Local Library exposes single-track Yandex upload action for MP3',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final uploadBridge = FakeYandexUploadBridge(
+        playlists: const [
+          YandexUploadTarget(
+            playlistKind: '7',
+            title: 'My playlist',
+            trackCount: 0,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('ru'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: LocalLibraryPage(
+            bridge: _LocalUploadBridge(),
+            folderPicker: const _NoFolderPicker(),
+            yandexUploadBridge: uploadBridge,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('local-track-menu-77')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('local-upload-yandex-77')), findsOneWidget);
-    expect(find.text('Загрузить в Яндекс Музыку'), findsOneWidget);
+      expect(find.byKey(const Key('local-upload-yandex-77')), findsOneWidget);
+      expect(find.byTooltip('Загрузить в Яндекс Музыку'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('local-upload-yandex-77')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('yandex-upload-dialog')), findsOneWidget);
-    expect(find.text('Artist - Track.mp3'), findsWidgets);
-  });
+      await tester.tap(find.byKey(const Key('local-upload-yandex-77')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('yandex-upload-dialog')), findsOneWidget);
+      expect(find.textContaining('Artist - Track.mp3'), findsOneWidget);
+    },
+  );
 }

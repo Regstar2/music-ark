@@ -10,10 +10,13 @@ import 'folder_picker.dart';
 import 'metadata_bridge.dart';
 import 'metadata_editor_page.dart';
 import 'musicark_bridge.dart';
+import 'v0111_localizations_ext.dart';
+import 'yandex_batch_upload_bridge.dart';
+import 'yandex_batch_upload_dialog.dart';
 import 'yandex_upload_bridge.dart';
 import 'yandex_upload_dialog.dart';
 
-enum _TrackMenuAction { uploadYandex, details, reveal }
+enum _TrackMenuAction { details, reveal }
 
 enum _RootMenuAction { remove }
 
@@ -26,13 +29,20 @@ class LocalLibraryPage extends StatefulWidget {
     MetadataBridgeClient? metadataBridge,
     ContentLabelBridgeClient? contentLabelBridge,
     YandexUploadBridgeClient? yandexUploadBridge,
+    YandexBatchUploadBridgeClient? yandexBatchUploadBridge,
   }) : folderPicker = folderPicker ?? const SystemLocalFolderPicker(),
-       metadataBridge = metadataBridge ??
+       metadataBridge =
+           metadataBridge ??
            (bridge is MusicArkBridge ? const MetadataBridge() : null),
-       contentLabelBridge = contentLabelBridge ??
+       contentLabelBridge =
+           contentLabelBridge ??
            (bridge is MusicArkBridge ? const ContentLabelBridge() : null),
-       yandexUploadBridge = yandexUploadBridge ??
-           (bridge is MusicArkBridge ? const YandexUploadBridge() : null);
+       yandexUploadBridge =
+           yandexUploadBridge ??
+           (bridge is MusicArkBridge ? const YandexUploadBridge() : null),
+       yandexBatchUploadBridge =
+           yandexBatchUploadBridge ??
+           (bridge is MusicArkBridge ? const YandexBatchUploadBridge() : null);
 
   final MusicArkBridgeClient bridge;
   final LocalFolderPicker folderPicker;
@@ -40,6 +50,7 @@ class LocalLibraryPage extends StatefulWidget {
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
   final YandexUploadBridgeClient? yandexUploadBridge;
+  final YandexBatchUploadBridgeClient? yandexBatchUploadBridge;
 
   @override
   State<LocalLibraryPage> createState() => _LocalLibraryPageState();
@@ -53,6 +64,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   List<Map<String, dynamic>> _roots = const [];
   List<Map<String, dynamic>> _tracks = const [];
   Set<int> _selectedRootIds = <int>{};
+  Set<int> _selectedTrackIds = <int>{};
   bool _selectionInitialized = false;
   int _total = 0;
   bool _busy = true;
@@ -98,10 +110,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
     return next;
   }
 
-  bool _allSelected({
-    List<Map<String, dynamic>>? roots,
-    Set<int>? selected,
-  }) {
+  bool _allSelected({List<Map<String, dynamic>>? roots, Set<int>? selected}) {
     final ids = _rootIds(roots ?? _roots);
     final selection = selected ?? _selectedRootIds;
     return ids.isNotEmpty &&
@@ -130,8 +139,6 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   Future<void> _activate() async {
     await _reload();
     if (!mounted || _roots.isEmpty) return;
-    // Keep the existing activation contract: an opened Local Library refreshes
-    // its configured roots without allowing background pages to mutate the index.
     await _scan();
   }
 
@@ -150,12 +157,14 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       final byId = raw is Map
           ? Map<String, dynamic>.from(raw)
           : <String, dynamic>{};
-      return tracks.map((track) {
-        final copy = Map<String, dynamic>.from(track);
-        final label = byId['${track['id']}'];
-        if (label != null) copy['contentLabel'] = '$label';
-        return copy;
-      }).toList(growable: false);
+      return tracks
+          .map((track) {
+            final copy = Map<String, dynamic>.from(track);
+            final label = byId['${track['id']}'];
+            if (label != null) copy['contentLabel'] = '$label';
+            return copy;
+          })
+          .toList(growable: false);
     } on MusicArkBridgeException {
       return tracks;
     }
@@ -172,16 +181,18 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       await labels.setLocal(id, label);
       if (!mounted) return;
       setState(() {
-        _tracks = _tracks.map((item) {
-          if ('${item['id']}' != '$id') return item;
-          final copy = Map<String, dynamic>.from(item);
-          if (label.isEmpty) {
-            copy.remove('contentLabel');
-          } else {
-            copy['contentLabel'] = label;
-          }
-          return copy;
-        }).toList(growable: false);
+        _tracks = _tracks
+            .map((item) {
+              if ('${item['id']}' != '$id') return item;
+              final copy = Map<String, dynamic>.from(item);
+              if (label.isEmpty) {
+                copy.remove('contentLabel');
+              } else {
+                copy['contentLabel'] = label;
+              }
+              return copy;
+            })
+            .toList(growable: false);
       });
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -203,16 +214,17 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       final items = raw is Map
           ? Map<String, dynamic>.from(raw)
           : <String, dynamic>{};
-      return tracks.map((track) {
-        final copy = Map<String, dynamic>.from(track);
-        final artwork = items['${track['id']}'];
-        if (artwork is Map) {
-          copy['artwork'] = Map<String, dynamic>.from(artwork);
-        }
-        return copy;
-      }).toList(growable: false);
+      return tracks
+          .map((track) {
+            final copy = Map<String, dynamic>.from(track);
+            final artwork = items['${track['id']}'];
+            if (artwork is Map) {
+              copy['artwork'] = Map<String, dynamic>.from(artwork);
+            }
+            return copy;
+          })
+          .toList(growable: false);
     } on MusicArkBridgeException {
-      // Artwork is decoration only. Cache failures must not hide local tracks.
       return tracks;
     }
   }
@@ -245,6 +257,13 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         _selectedRootIds = selected;
         _selectionInitialized = true;
         _tracks = tracks;
+        final visibleIds = tracks
+            .map((item) => int.tryParse('${item['id']}'))
+            .whereType<int>()
+            .toSet();
+        _selectedTrackIds = _selectedTrackIds
+            .where(visibleIds.contains)
+            .toSet();
         _total = int.tryParse('${tracksPayload['count'] ?? 0}') ?? 0;
       });
     } on MusicArkBridgeException catch (error) {
@@ -430,10 +449,30 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   Future<void> _uploadToYandex(Map<String, dynamic> track) async {
     final bridge = widget.yandexUploadBridge;
     if (bridge == null) return;
+    String? preferredKind;
+    final batchBridge = widget.yandexBatchUploadBridge;
+    if (batchBridge != null) {
+      try {
+        final managed = await batchBridge.managedPlaylists();
+        for (final raw in (managed['roles'] as List? ?? const [])) {
+          if (raw is! Map) continue;
+          final role = Map<String, dynamic>.from(raw);
+          if (role['role'] == 'uploaded' && role['configured'] == true) {
+            final candidate = '${role['playlistKind'] ?? ''}'.trim();
+            if (candidate.isNotEmpty) preferredKind = candidate;
+            break;
+          }
+        }
+      } catch (_) {
+        preferredKind = null;
+      }
+    }
+    if (!mounted) return;
     final result = await showYandexUploadDialog(
       context: context,
       track: track,
       bridge: bridge,
+      preferredPlaylistKind: preferredKind,
     );
     if (!mounted || result == null) return;
     if (result.status == YandexUploadStatus.verified) {
@@ -442,6 +481,63 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         _statusIsError = false;
       });
     }
+  }
+
+  void _toggleTrackSelection(Map<String, dynamic> track, bool selected) {
+    final id = int.tryParse('${track['id']}');
+    if (id == null) return;
+    setState(() {
+      if (selected) {
+        _selectedTrackIds.add(id);
+      } else {
+        _selectedTrackIds.remove(id);
+      }
+    });
+  }
+
+  void _selectAllVisibleTracks() {
+    setState(() {
+      _selectedTrackIds.addAll(
+        _tracks.map((track) => int.tryParse('${track['id']}')).whereType<int>(),
+      );
+    });
+  }
+
+  void _clearTrackSelection() => setState(() => _selectedTrackIds.clear());
+
+  List<Map<String, dynamic>> _selectedTracks() => _tracks
+      .where(
+        (track) => _selectedTrackIds.contains(int.tryParse('${track['id']}')),
+      )
+      .toList(growable: false);
+
+  Future<void> _bulkUploadToYandex() async {
+    final uploadBridge = widget.yandexUploadBridge;
+    final batchBridge = widget.yandexBatchUploadBridge;
+    final selected = _selectedTracks();
+    if (uploadBridge == null || batchBridge == null || selected.isEmpty) return;
+    final allRoots = _allSelected();
+    final localContext = allRoots
+        ? context.l10n.v0111AllFolders
+        : _selectedRootIds.length == 1
+        ? _singleSelectedRootPath()
+        : _folderFilterLabel();
+    final result = await showYandexBatchUploadDialog(
+      context: context,
+      tracks: selected,
+      targetBridge: uploadBridge,
+      batchBridge: batchBridge,
+      localContext: localContext,
+      localContextTooltip: _selectedRootIds.length == 1
+          ? _singleSelectedRootPath()
+          : null,
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _status = context.l10n.v0111BatchFinished;
+      _statusIsError = false;
+      _selectedTrackIds.clear();
+    });
   }
 
   Future<void> _edit(Map<String, dynamic> track) async {
@@ -589,8 +685,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         var draft = Set<int>.from(initial);
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final allChecked = draft.length == allIds.length &&
-                draft.containsAll(allIds);
+            final allChecked =
+                draft.length == allIds.length && draft.containsAll(allIds);
             final allValue = allChecked
                 ? true
                 : draft.isEmpty
@@ -690,10 +786,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         if ('${root['id']}' == '$id') return _rootName(root);
       }
     }
-    return l10n.localFoldersSelected(
-      _selectedRootIds.length,
-      _roots.length,
-    );
+    return l10n.localFoldersSelected(_selectedRootIds.length, _roots.length);
   }
 
   String _singleSelectedRootPath() {
@@ -738,6 +831,10 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                   _buildHeader(l10n),
                   const SizedBox(height: AppUiTokens.sectionGap),
                   _buildToolbar(l10n),
+                  if (_selectedTrackIds.isNotEmpty) ...[
+                    const SizedBox(height: AppUiTokens.compactGap),
+                    _buildBulkToolbar(),
+                  ],
                   if (_status != null || _error != null) ...[
                     const SizedBox(height: AppUiTokens.compactGap),
                     _buildMessageLine(),
@@ -873,6 +970,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                   child: DropdownButtonFormField<String>(
                     key: const Key('local-sort'),
                     initialValue: _sort,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: l10n.localSortLabel,
                       border: const OutlineInputBorder(),
@@ -881,23 +979,43 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                     items: [
                       DropdownMenuItem(
                         value: 'artist',
-                        child: Text(l10n.localSortArtist),
+                        child: Text(
+                          l10n.localSortArtist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'title',
-                        child: Text(l10n.localSortTitle),
+                        child: Text(
+                          l10n.localSortTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'album',
-                        child: Text(l10n.localSortAlbum),
+                        child: Text(
+                          l10n.localSortAlbum,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'duration',
-                        child: Text(l10n.localSortDuration),
+                        child: Text(
+                          l10n.localSortDuration,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'path',
-                        child: Text(l10n.localSortPath),
+                        child: Text(
+                          l10n.localSortPath,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                     onChanged: _busy
@@ -913,6 +1031,56 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBulkToolbar() {
+    final l10n = context.l10n;
+    final visibleIds = _tracks
+        .map((track) => int.tryParse('${track['id']}'))
+        .whereType<int>()
+        .toSet();
+    final allVisibleSelected =
+        visibleIds.isNotEmpty && visibleIds.every(_selectedTrackIds.contains);
+    return Card(
+      key: const Key('local-bulk-toolbar'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              l10n.v0111Selected(_selectedTrackIds.length),
+              key: const Key('local-selection-count'),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (!allVisibleSelected)
+              OutlinedButton(
+                key: const Key('local-select-all-visible'),
+                onPressed: _selectAllVisibleTracks,
+                child: Text(l10n.v0111SelectAllVisible),
+              ),
+            FilledButton.icon(
+              key: const Key('local-bulk-upload-yandex'),
+              onPressed:
+                  widget.yandexUploadBridge != null &&
+                      widget.yandexBatchUploadBridge != null
+                  ? _bulkUploadToYandex
+                  : null,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: Text(l10n.v0111UploadToYandex),
+            ),
+            TextButton(
+              key: const Key('local-clear-selection'),
+              onPressed: _clearTrackSelection,
+              child: Text(l10n.v0111ClearSelection),
+            ),
+          ],
         ),
       ),
     );
@@ -970,11 +1138,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
               leading: const Icon(Icons.folder_outlined),
               title: Tooltip(
                 message: path,
-                child: Text(
-                  path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(path, maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
               subtitle: Text(l10n.localLastScanned(_lastScanned(root))),
               trailing: Wrap(
@@ -1048,9 +1212,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         title: hasSearch
             ? l10n.localEmptySearchTitle
             : l10n.localEmptyTracksTitle,
-        body: hasSearch
-            ? l10n.localEmptySearchBody
-            : l10n.localEmptyTracksBody,
+        body: hasSearch ? l10n.localEmptySearchBody : l10n.localEmptyTracksBody,
       );
     }
 
@@ -1130,13 +1292,23 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
+          const SizedBox(width: 48),
           Expanded(flex: 5, child: Text(l10n.localColumnTrack, style: style)),
           Expanded(flex: 3, child: Text(l10n.localColumnAlbum, style: style)),
           SizedBox(width: 64, child: Text(l10n.localColumnYear, style: style)),
-          SizedBox(width: 74, child: Text(l10n.localColumnFormat, style: style)),
-          SizedBox(width: 132, child: Text(l10n.localColumnVersion, style: style)),
-          SizedBox(width: 64, child: Text(l10n.localColumnDuration, style: style)),
-          const SizedBox(width: 132),
+          SizedBox(
+            width: 74,
+            child: Text(l10n.localColumnFormat, style: style),
+          ),
+          SizedBox(
+            width: 132,
+            child: Text(l10n.localColumnVersion, style: style),
+          ),
+          SizedBox(
+            width: 64,
+            child: Text(l10n.localColumnDuration, style: style),
+          ),
+          const SizedBox(width: 176),
         ],
       ),
     );
@@ -1147,7 +1319,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       track['artwork'] as Map? ?? const {},
     );
     final album = '${track['album'] ?? '—'}';
-    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'.toUpperCase();
+    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'
+        .toUpperCase();
     return Material(
       key: Key('local-track-${track['id']}'),
       color: Colors.transparent,
@@ -1157,7 +1330,18 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
           height: AppUiTokens.trackRowHeight + 4,
           child: Row(
             children: [
-              const SizedBox(width: 12),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 42,
+                child: Checkbox(
+                  key: Key('local-select-${track['id']}'),
+                  value: _selectedTrackIds.contains(
+                    int.tryParse('${track['id']}'),
+                  ),
+                  onChanged: (value) =>
+                      _toggleTrackSelection(track, value == true),
+                ),
+              ),
               Expanded(
                 flex: 5,
                 child: Row(
@@ -1179,18 +1363,20 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                                 .toString(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             _artists(track),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
                           ),
                         ],
                       ),
@@ -1200,7 +1386,11 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
               ),
               Expanded(
                 flex: 3,
-                child: Text(album, maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  album,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               SizedBox(width: 64, child: Text('${track['year'] ?? '—'}')),
               SizedBox(width: 74, child: Text(codec)),
@@ -1209,7 +1399,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                 width: 64,
                 child: Text(_duration(track['durationSeconds'])),
               ),
-              SizedBox(width: 132, child: _buildTrackActions(track, l10n)),
+              SizedBox(width: 176, child: _buildTrackActions(track, l10n)),
             ],
           ),
         ),
@@ -1222,7 +1412,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       track['artwork'] as Map? ?? const {},
     );
     final album = '${track['album'] ?? '—'}';
-    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'.toUpperCase();
+    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'
+        .toUpperCase();
     return Material(
       key: Key('local-track-${track['id']}'),
       color: Colors.transparent,
@@ -1232,10 +1423,16 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
-              _LocalArtwork(
-                artwork: artwork,
-                size: AppUiTokens.artworkSize,
+              Checkbox(
+                key: Key('local-select-${track['id']}'),
+                value: _selectedTrackIds.contains(
+                  int.tryParse('${track['id']}'),
+                ),
+                onChanged: (value) =>
+                    _toggleTrackSelection(track, value == true),
               ),
+              const SizedBox(width: 4),
+              _LocalArtwork(artwork: artwork, size: AppUiTokens.artworkSize),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1292,10 +1489,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         ? l10n.original
         : '—';
     if (widget.contentLabelBridge == null) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Text(text),
-      );
+      return Align(alignment: Alignment.centerLeft, child: Text(text));
     }
     return Align(
       alignment: Alignment.centerLeft,
@@ -1312,14 +1506,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         child: Chip(
           key: Key('local-content-label-${track['id']}'),
           visualDensity: VisualDensity.compact,
-          label: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(text),
-              const SizedBox(width: 2),
-              const Icon(Icons.arrow_drop_down, size: 16),
-            ],
-          ),
+          label: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ),
     );
@@ -1344,14 +1531,18 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
             onPressed: () => _edit(track),
             icon: const Icon(Icons.edit_outlined),
           ),
+        if (widget.yandexUploadBridge != null)
+          IconButton(
+            key: Key('local-upload-yandex-${track['id']}'),
+            tooltip: context.l10n.v0111UploadToYandex,
+            onPressed: () => _uploadToYandex(track),
+            icon: const Icon(Icons.cloud_upload_outlined),
+          ),
         PopupMenuButton<_TrackMenuAction>(
           key: Key('local-track-menu-${track['id']}'),
           tooltip: l10n.localMoreActions,
           onSelected: (action) {
             switch (action) {
-              case _TrackMenuAction.uploadYandex:
-                _uploadToYandex(track);
-                break;
               case _TrackMenuAction.details:
                 _showDetails(track);
                 break;
@@ -1361,16 +1552,6 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
             }
           },
           itemBuilder: (context) => [
-            if (widget.yandexUploadBridge != null)
-              PopupMenuItem(
-                key: Key('local-upload-yandex-${track['id']}'),
-                value: _TrackMenuAction.uploadYandex,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.cloud_upload_outlined),
-                  title: Text(l10n.yandexUploadMenuAction),
-                ),
-              ),
             PopupMenuItem(
               value: _TrackMenuAction.details,
               child: ListTile(
@@ -1433,10 +1614,7 @@ class _EmptyLocalState extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 16),
-              action!,
-            ],
+            if (action != null) ...[const SizedBox(height: 16), action!],
           ],
         ),
       ),

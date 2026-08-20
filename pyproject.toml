@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.11.0"
-description = "MusicArk cache-first Yandex, local library, identity matching, coverage, controlled sync, authorized download, explicit local metadata editing, manual single-track Yandex upload, and desktop settings app"
+version = "0.11.1"
+description = "MusicArk cache-first Yandex, local library, identity matching, coverage, controlled sync, authorized download, explicit local metadata editing, safe Yandex upload/recovery workflows, and desktop settings app"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]

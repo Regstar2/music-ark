@@ -26,9 +26,9 @@ Widget _app(
 }
 
 Finder _syncScrollable() => find.descendant(
-      of: find.byKey(const Key('sync-page')),
-      matching: find.byType(Scrollable),
-    );
+  of: find.byKey(const Key('sync-page')),
+  matching: find.byType(Scrollable),
+);
 
 Future<void> _settle(
   WidgetTester tester, {
@@ -40,7 +40,9 @@ Future<void> _settle(
 }
 
 void main() {
-  testWidgets('shows redesigned summary, coverage and plan filters', (tester) async {
+  testWidgets('shows redesigned summary, coverage and plan filters', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
@@ -74,7 +76,9 @@ void main() {
     expect(find.byType(ExpansionTile), findsNothing);
   });
 
-  testWidgets('changing scope rebuilds exactly selected collection', (tester) async {
+  testWidgets('changing scope rebuilds exactly selected collection', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
@@ -91,7 +95,9 @@ void main() {
     expect(find.text('Коллекция: Focus'), findsOneWidget);
   });
 
-  testWidgets('no target disables synchronization but keeps diff visible', (tester) async {
+  testWidgets('no target disables synchronization but keeps diff visible', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge(targetConfigured: false);
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
@@ -99,11 +105,15 @@ void main() {
 
     expect(find.text('Выберите папку для загрузок'), findsOneWidget);
     expect(find.byKey(const Key('sync-summary')), findsOneWidget);
-    final button = tester.widget<FilledButton>(find.byKey(const Key('sync-now')));
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('sync-now')),
+    );
     expect(button.onPressed, isNull);
   });
 
-  testWidgets('synchronize rebuilds diff and still requires confirmation', (tester) async {
+  testWidgets('synchronize rebuilds diff and still requires confirmation', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
@@ -143,7 +153,9 @@ void main() {
     expect(find.byKey(const Key('sync-decision-2')), findsOneWidget);
   });
 
-  testWidgets('decision action still updates bridge and rebuilds plan', (tester) async {
+  testWidgets('decision action still updates bridge and rebuilds plan', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(_app(bridge));
     await _settle(tester);
@@ -161,7 +173,9 @@ void main() {
     expect(bridge.createCalls, 2);
   });
 
-  testWidgets('matching and variant operations keep Matching routes', (tester) async {
+  testWidgets('matching and variant operations keep Matching routes', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     var opens = 0;
     await tester.pumpWidget(_app(bridge, onMatching: () => opens++));
@@ -202,11 +216,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.targetConfigured, isTrue);
-    expect(find.text(r'D:\Music'), findsOneWidget);
+    expect(find.text(r'D:\Music'), findsWidgets);
     expect(bridge.createCalls, 2);
   });
 
-  testWidgets('downloads shortcut remains available from status card', (tester) async {
+  testWidgets('downloads shortcut remains available from status card', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     var opens = 0;
     await tester.pumpWidget(_app(bridge, onDownloads: () => opens++));
@@ -217,14 +233,12 @@ void main() {
     expect(opens, 1);
   });
 
-  testWidgets('narrow desktop layout keeps required actions without overflow', (tester) async {
+  testWidgets('narrow desktop layout keeps required actions without overflow', (
+    tester,
+  ) async {
     final bridge = FakeSyncBridge();
     await tester.pumpWidget(
-      _app(
-        bridge,
-        onDownloads: () {},
-        onMatching: () {},
-      ),
+      _app(bridge, onDownloads: () {}, onMatching: () {}),
     );
     await _settle(tester, size: const Size(620, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -233,6 +247,15 @@ void main() {
     expect(find.byKey(const Key('sync-now')), findsOneWidget);
     expect(find.byKey(const Key('sync-open-downloads')), findsOneWidget);
     expect(find.byKey(const Key('sync-plan-table-header')), findsNothing);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('sync-workspace-tabs')),
+      320,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('sync-page')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('sync-filter-download')), findsOneWidget);
   });
 

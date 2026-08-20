@@ -157,7 +157,10 @@ class MultiRootLocalBridge extends FakeMusicArkBridge {
   Future<Map<String, dynamic>> localRootAdd(String path) async {
     final nextId = _roots.isEmpty
         ? 1
-        : _roots.map((root) => root['id'] as int).reduce((a, b) => a > b ? a : b) + 1;
+        : _roots
+                  .map((root) => root['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1;
     final root = _root(nextId, path);
     _roots.add(root);
     return {'root': root, 'roots': await localRoots()};
@@ -234,7 +237,8 @@ class QueueFolderPicker implements LocalFolderPicker {
   final List<String?> _paths;
 
   @override
-  Future<String?> pickDirectory() async => _paths.isEmpty ? null : _paths.removeAt(0);
+  Future<String?> pickDirectory() async =>
+      _paths.isEmpty ? null : _paths.removeAt(0);
 }
 
 class FakeLocalFileActions implements LocalFileActions {
@@ -251,6 +255,7 @@ class FakeLocalFileActions implements LocalFileActions {
 void main() {
   Future<void> desktop(WidgetTester tester, Widget widget) async {
     await tester.binding.setSurfaceSize(const Size(1500, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('ru'),
@@ -283,15 +288,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  tearDown(() async {
-    await TestWidgetsFlutterBinding.ensureInitialized().setSurfaceSize(null);
-  });
-
   testWidgets('main navigation opens Local Library independently of Yandex', (
     tester,
   ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await tester.binding.setSurfaceSize(const Size(1500, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MusicArkDesktopApp(bridge: bridge));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('nav-local-library')));
@@ -300,32 +302,33 @@ void main() {
     expect(find.byKey(const Key('local-empty')), findsOneWidget);
   });
 
-  testWidgets('empty state can add root, scan, show tracks and compact result', (
-    tester,
-  ) async {
-    final bridge = SortingLocalBridge();
-    await desktop(
-      tester,
-      LocalLibraryPage(
-        bridge: bridge,
-        folderPicker: FakeLocalFolderPicker(r'C:\Music'),
-      ),
-    );
-    expect(find.byKey(const Key('local-empty')), findsOneWidget);
+  testWidgets(
+    'empty state can add root, scan, show tracks and compact result',
+    (tester) async {
+      final bridge = SortingLocalBridge();
+      await desktop(
+        tester,
+        LocalLibraryPage(
+          bridge: bridge,
+          folderPicker: FakeLocalFolderPicker(r'C:\Music'),
+        ),
+      );
+      expect(find.byKey(const Key('local-empty')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('local-add-folder')));
-    await tester.pumpAndSettle();
-    expect(find.text(r'C:\Music'), findsOneWidget);
-    expect(find.byKey(const Key('local-roots')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('local-add-folder')));
+      await tester.pumpAndSettle();
+      expect(find.text(r'C:\Music'), findsOneWidget);
+      expect(find.byKey(const Key('local-roots')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('local-scan-all')));
-    await tester.pumpAndSettle();
-    expect(bridge.localScanCalls, greaterThanOrEqualTo(1));
-    expect(find.textContaining('Добавлено 2'), findsOneWidget);
-    expect(find.byKey(const Key('local-track-list')), findsOneWidget);
-    expect(find.text('Zulu'), findsOneWidget);
-    expect(find.text('Alpha'), findsOneWidget);
-  });
+      await tester.tap(find.byKey(const Key('local-scan-all')));
+      await tester.pumpAndSettle();
+      expect(bridge.localScanCalls, greaterThanOrEqualTo(1));
+      expect(find.textContaining('Добавлено 2'), findsOneWidget);
+      expect(find.byKey(const Key('local-track-list')), findsOneWidget);
+      expect(find.text('Zulu'), findsOneWidget);
+      expect(find.text('Alpha'), findsOneWidget);
+    },
+  );
 
   testWidgets('local search and sorting use the bridge query contract', (
     tester,
@@ -354,7 +357,10 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Zulu')).dy),
     );
 
-    await tester.enterText(find.byKey(const Key('local-search')), 'Zulu Artist');
+    await tester.enterText(
+      find.byKey(const Key('local-search')),
+      'Zulu Artist',
+    );
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(find.text('Alpha'), findsOneWidget);
@@ -411,7 +417,9 @@ void main() {
     await tester.tap(find.byKey(const Key('local-remove-root-1')));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('Музыкальные файлы на диске не изменяются и не удаляются.'),
+      find.textContaining(
+        'Музыкальные файлы на диске не изменяются и не удаляются.',
+      ),
       findsOneWidget,
     );
     await tester.tap(find.text('Убрать из MusicArk').last);
@@ -419,24 +427,25 @@ void main() {
     expect(find.byKey(const Key('local-empty')), findsOneWidget);
   });
 
-  testWidgets('all roots are selected by default and arbitrary subset is queried', (
-    tester,
-  ) async {
-    final bridge = MultiRootLocalBridge();
-    await desktop(tester, LocalLibraryPage(bridge: bridge));
+  testWidgets(
+    'all roots are selected by default and arbitrary subset is queried',
+    (tester) async {
+      final bridge = MultiRootLocalBridge();
+      await desktop(tester, LocalLibraryPage(bridge: bridge));
 
-    expect(find.text('One Track'), findsOneWidget);
-    expect(find.text('Two Track'), findsOneWidget);
-    expect(find.text('Three Track'), findsOneWidget);
-    expect(bridge.rootIdQueries.last, isNull);
+      expect(find.text('One Track'), findsOneWidget);
+      expect(find.text('Two Track'), findsOneWidget);
+      expect(find.text('Three Track'), findsOneWidget);
+      expect(bridge.rootIdQueries.last, isNull);
 
-    await applyRootSelection(tester, [1, 3]);
-    expect(find.text('One Track'), findsOneWidget);
-    expect(find.text('Two Track'), findsNothing);
-    expect(find.text('Three Track'), findsOneWidget);
-    expect(bridge.rootIdQueries.last, [1, 3]);
-    expect(find.text('2 из 3 папок'), findsOneWidget);
-  });
+      await applyRootSelection(tester, [1, 3]);
+      expect(find.text('One Track'), findsOneWidget);
+      expect(find.text('Two Track'), findsNothing);
+      expect(find.text('Three Track'), findsOneWidget);
+      expect(bridge.rootIdQueries.last, [1, 3]);
+      expect(find.text('2 из 3 папок'), findsOneWidget);
+    },
+  );
 
   testWidgets('single root and empty selection have distinct view states', (
     tester,
@@ -475,12 +484,17 @@ void main() {
     expect(bridge.rootIdQueries.last, isNull);
   });
 
-  testWidgets('search and sort preserve the selected root subset', (tester) async {
+  testWidgets('search and sort preserve the selected root subset', (
+    tester,
+  ) async {
     final bridge = MultiRootLocalBridge();
     await desktop(tester, LocalLibraryPage(bridge: bridge));
     await applyRootSelection(tester, [1, 3]);
 
-    await tester.enterText(find.byKey(const Key('local-search')), 'Other Artist');
+    await tester.enterText(
+      find.byKey(const Key('local-search')),
+      'Other Artist',
+    );
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(bridge.rootIdQueries.last, [1, 3]);
@@ -498,8 +512,14 @@ void main() {
     await desktop(tester, LocalLibraryPage(bridge: bridge));
     await applyRootSelection(tester, [1]);
 
+    final trackList = find.byKey(const Key('local-track-list'));
+    final loadMore = find.byKey(const Key('local-load-more'));
+    for (var i = 0; i < 12 && loadMore.evaluate().isEmpty; i++) {
+      await tester.drag(trackList, const Offset(0, -4000));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-load-more')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('local-load-more')));
     await tester.tap(find.byKey(const Key('local-load-more')));
     await tester.pumpAndSettle();
     expect(bridge.rootIdQueries.last, [1]);
@@ -523,7 +543,7 @@ void main() {
     expect(bridge.rootIdQueries.last, [1]);
     expect(find.text('One Track'), findsOneWidget);
     expect(find.text('Three Track'), findsNothing);
-    expect(find.text('1 из 2 папок'), findsOneWidget);
+    expect(find.textContaining('1 из 2 папок'), findsOneWidget);
   });
 
   testWidgets('new root joins selection only when the previous state was all', (
@@ -554,6 +574,6 @@ void main() {
     await tester.tap(find.byKey(const Key('local-add-folder')));
     await tester.pumpAndSettle();
     expect(subsetBridge.rootIdQueries.last, [1]);
-    expect(find.text('1 из 4 папок'), findsOneWidget);
+    expect(find.textContaining('1 из 4 папок'), findsOneWidget);
   });
 }

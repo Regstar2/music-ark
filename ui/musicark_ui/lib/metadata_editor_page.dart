@@ -3,18 +3,22 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import 'external_metadata_bridge.dart';
 import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
+import 'v012_strings.dart';
 
 class MetadataEditorPage extends StatefulWidget {
   const MetadataEditorPage({
     super.key,
     required this.localFileId,
     required this.bridge,
+    this.externalBridge = const ExternalMetadataBridge(),
   });
 
   final int localFileId;
   final MetadataBridgeClient bridge;
+  final ExternalMetadataBridgeClient externalBridge;
 
   @override
   State<MetadataEditorPage> createState() => _MetadataEditorPageState();
@@ -484,6 +488,234 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
     }
   }
 
+  Future<void> _searchExternal() async {
+    final strings = V012Strings.of(context);
+    var items = <Map<String, dynamic>>[];
+    var sourceStates = <Map<String, dynamic>>[];
+    var loading = false;
+    var initialSearch = false;
+    String? searchError;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> runSearch({bool alternatives = false}) async {
+            if (loading) return;
+            setDialogState(() {
+              loading = true;
+              searchError = null;
+            });
+            try {
+              final response = await widget.externalBridge.identify(
+                widget.localFileId,
+                continueSearch: alternatives,
+              );
+              if (!dialogContext.mounted) return;
+              items = (response['items'] as List? ?? const [])
+                  .whereType<Map>()
+                  .map((item) => Map<String, dynamic>.from(item))
+                  .toList();
+              sourceStates = (response['sources'] as List? ?? const [])
+                  .whereType<Map>()
+                  .map((item) => Map<String, dynamic>.from(item))
+                  .toList();
+            } on MusicArkBridgeException catch (error) {
+              searchError = error.message;
+            } finally {
+              if (dialogContext.mounted) setDialogState(() => loading = false);
+            }
+          }
+
+          if (!initialSearch) {
+            initialSearch = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) => runSearch());
+          }
+
+          return AlertDialog(
+            key: const Key('external-metadata-dialog'),
+            title: Text(strings.externalMetadata),
+            content: SizedBox(
+              width: 860,
+              height: 620,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (loading) const LinearProgressIndicator(key: Key('external-metadata-loading')),
+                  if (searchError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(searchError!, key: const Key('external-metadata-error')),
+                    ),
+                  if (sourceStates.isNotEmpty)
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final state in sourceStates)
+                          Chip(
+                            label: Text('${state['source'] ?? 'source'}: ${state['state'] ?? 'unknown'}'),
+                          ),
+                      ],
+                    ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: items.isEmpty && !loading
+                        ? const Center(child: Text('Подходящие внешние метаданные не найдены.'))
+                        : ListView.builder(
+                            key: const Key('external-metadata-results'),
+                            itemCount: items.length,
+                            itemBuilder: (context, index) {
+                              final item = items[index];
+                              final fields = Map<String, dynamic>.from(item['fields'] as Map? ?? const {});
+                              final artwork = Map<String, dynamic>.from(item['artwork'] as Map? ?? const {});
+                              final evidence = (item['evidence'] as List? ?? const [])
+                                  .whereType<Map>()
+                                  .map((value) => '${value['type'] ?? ''}')
+                                  .where((value) => value.isNotEmpty)
+                                  .take(2)
+                                  .join(' + ');
+                              final candidateId = '${item['candidateId'] ?? ''}';
+                              final source = '${item['sourceDisplayName'] ?? item['source'] ?? 'External'}';
+                              final artists = _strings(fields['artists']).join(', ');
+                              final album = '${fields['album'] ?? '—'}';
+                              final year = '${fields['year'] ?? '—'}';
+                              final confidence = '${item['confidence'] ?? 'possible'}';
+                              return Card(
+                                key: Key('external-candidate-$candidateId'),
+                                child: ListTile(
+                                  leading: _ArtworkThumb(path: '${artwork['cachePath'] ?? ''}', size: 52),
+                                  title: Text('${fields['title'] ?? '—'}'),
+                                  subtitle: Text('$source • $confidence\n${artists.isEmpty ? '—' : artists}\n$album • $year${evidence.isEmpty ? '' : ' • $evidence'}'),
+                                  isThreeLine: true,
+                                  onTap: candidateId.isEmpty
+                                      ? null
+                                      : () async {
+                                          final applied = await _showExternalCompare(candidateId);
+                                          if (applied && dialogContext.mounted) Navigator.pop(dialogContext);
+                                        },
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                key: const Key('external-more-alternatives'),
+                onPressed: loading ? null : () => runSearch(alternatives: true),
+                child: Text(strings.moreAlternatives),
+              ),
+              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Закрыть')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<bool> _showExternalCompare(String candidateId) async {
+    try {
+      final response = await widget.externalBridge.compare(widget.localFileId, candidateId);
+      if (!mounted) return false;
+      final rows = (response['rows'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      final external = Map<String, dynamic>.from(response['external'] as Map? ?? const {});
+      final selected = <String, bool>{
+        for (final row in rows)
+          '${row['field']}': row['available'] == true && row['selected'] == true,
+      };
+      return await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => StatefulBuilder(
+              builder: (context, setDialogState) {
+                var applying = false;
+                String? applyError;
+                Future<void> apply() async {
+                  if (applying) return;
+                  setDialogState(() {
+                    applying = true;
+                    applyError = null;
+                  });
+                  try {
+                    final fields = selected.entries
+                        .where((entry) => entry.value)
+                        .map((entry) => entry.key)
+                        .toList();
+                    final result = await widget.externalBridge.apply(
+                      widget.localFileId,
+                      candidateId,
+                      fields,
+                    );
+                    await _load();
+                    final applied = ((result['external'] as Map?)?['appliedFields'] as List? ?? const [])
+                        .map((value) => _fieldLabel('$value'))
+                        .toList();
+                    if (mounted) {
+                      _setSuccess(applied.isEmpty
+                          ? 'Внешние метаданные применены.'
+                          : 'Применены внешние поля: ${applied.join(', ')}. Yandex identity не изменена.');
+                    }
+                    if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                  } on MusicArkBridgeException catch (error) {
+                    applyError = error.message;
+                    if (dialogContext.mounted) setDialogState(() => applying = false);
+                  }
+                }
+
+                return AlertDialog(
+                  key: const Key('external-compare-dialog'),
+                  title: Text('Local ↔ ${external['sourceDisplayName'] ?? external['source'] ?? 'External'}'),
+                  content: SizedBox(
+                    width: 900,
+                    height: 600,
+                    child: Column(
+                      children: [
+                        if (applyError != null) Text(applyError!, key: const Key('external-compare-error')),
+                        if (applying) const LinearProgressIndicator(),
+                        Expanded(
+                          child: ListView(
+                            children: [
+                              for (final row in rows)
+                                CheckboxListTile(
+                                  key: Key('external-compare-field-${row['field']}'),
+                                  value: selected['${row['field']}'] == true,
+                                  onChanged: row['available'] == true && !applying
+                                      ? (value) => setDialogState(() => selected['${row['field']}'] = value == true)
+                                      : null,
+                                  title: Text(_fieldLabel('${row['field']}')),
+                                  subtitle: Text('LOCAL: ${_display(row['local'])}\nEXTERNAL: ${_display(row['external'])}\nSOURCE: ${row['source'] ?? external['source'] ?? '—'}'),
+                                  controlAffinity: ListTileControlAffinity.leading,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(onPressed: applying ? null : () => Navigator.pop(dialogContext, false), child: const Text('Отмена')),
+                    FilledButton(
+                      key: const Key('external-compare-apply'),
+                      onPressed: applying || !selected.values.any((value) => value) ? null : apply,
+                      child: Text(V012Strings.of(context).applySelected),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ) ??
+          false;
+    } on MusicArkBridgeException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+      return false;
+    }
+  }
+
   String _fieldLabel(String field) => switch (field) {
         'title' => 'Название',
         'artists' => 'Исполнители',
@@ -615,6 +847,7 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
     final artworkPath = _removeArtwork ? '' : (_artworkImagePath ?? '${artwork['cachePath'] ?? ''}');
+    final externalStrings = V012Strings.of(context);
 
     return Scaffold(
       key: const Key('metadata-editor-page'),
@@ -778,6 +1011,12 @@ class _MetadataEditorPageState extends State<MetadataEditorPage> {
                     runSpacing: 8,
                     alignment: WrapAlignment.end,
                     children: [
+                      OutlinedButton.icon(
+                        key: const Key('metadata-external-identify'),
+                        onPressed: _busy ? null : _searchExternal,
+                        icon: const Icon(Icons.auto_fix_high_outlined),
+                        label: Text(externalStrings.automaticIdentify),
+                      ),
                       OutlinedButton.icon(
                         key: const Key('metadata-yandex-search'),
                         onPressed: _busy ? null : _searchYandex,

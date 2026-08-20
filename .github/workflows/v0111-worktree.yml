@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - feature/v0.11.1-bulk-upload-recovery-sync
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -15,31 +12,21 @@ jobs:
   apply-and-validate:
     if: github.actor != 'github-actions[bot]'
     runs-on: self-hosted
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/v0.11.1-bulk-upload-recovery-sync
           fetch-depth: 0
 
-      - name: Apply guarded v0.11.1 edits
+      - name: Apply guarded v0.11.1 integration edits
         shell: pwsh
         run: python tools/dev/v0111_apply_worktree_fixed.py
 
       - name: Format Dart changes
         shell: pwsh
         working-directory: ui/musicark_ui
-        run: |
-          dart format `
-            lib/local_library_page.dart `
-            lib/yandex_upload_dialog.dart `
-            lib/sync_bridge.dart `
-            lib/sync_page.dart `
-            lib/v0111_localizations_ext.dart `
-            lib/scope_context_bar.dart `
-            lib/yandex_batch_upload_bridge.dart `
-            lib/yandex_batch_upload_dialog.dart `
-            test/yandex_upload_local_library_test.dart
+        run: dart format lib/sync_page.dart
 
       - name: Python environment
         shell: pwsh
@@ -51,7 +38,14 @@ jobs:
 
       - name: Focused backend tests
         shell: pwsh
-        run: .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_v0111_recovery_upload -v
+        run: |
+          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_v0111_recovery_upload -v
+          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_yandex_upload_production_service -v
+          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_yandex_experimental_upload -v
+
+      - name: Full Python suite
+        shell: pwsh
+        run: .\.venv-v0111-dev\Scripts\python.exe -m unittest discover -s tests -v
 
       - name: Flutter dependencies
         shell: pwsh
@@ -67,9 +61,16 @@ jobs:
         shell: pwsh
         working-directory: ui/musicark_ui
         run: |
-          flutter test test/local_library_page_test.dart
+          flutter test test/v0111_bulk_recovery_test.dart
+          flutter test test/v0111_sync_page_test.dart
           flutter test test/yandex_upload_local_library_test.dart
+          flutter test test/local_library_page_test.dart
           flutter test test/sync_page_test.dart
+
+      - name: Full Flutter suite
+        shell: pwsh
+        working-directory: ui/musicark_ui
+        run: flutter test
 
       - name: Commit validated worktree edits
         shell: pwsh
@@ -77,12 +78,20 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- ui/musicark_ui/lib/local_library_page.dart `
-                    ui/musicark_ui/lib/yandex_upload_dialog.dart `
-                    ui/musicark_ui/lib/sync_bridge.dart `
-                    ui/musicark_ui/lib/sync_page.dart `
-                    ui/musicark_ui/test/yandex_upload_local_library_test.dart
+          git add -- ui/musicark_ui/lib/sync_page.dart `
+                    tests/test_database.py `
+                    tests/test_local_library_v04.py `
+                    tests/test_migrations_v03.py `
+                    tests/test_migrations_v05.py `
+                    tests/test_migrations_v06.py `
+                    tests/test_migrations_v08.py `
+                    tests/test_migrations_v1.py `
+                    tests/test_platform_bridge.py `
+                    tests/test_variant_acceptance_v082.py `
+                    tests/test_variant_v051.py `
+                    tests/test_yandex_experimental_upload.py `
+                    tests/test_yandex_upload_production_service.py
           if (-not (git diff --cached --quiet)) {
-            git commit -m "feat(v0.11.1): add bulk upload and recovery workspace UI"
+            git commit -m "fix(v0.11.1): complete recovery Sync integration"
             git push origin HEAD:feature/v0.11.1-bulk-upload-recovery-sync
           }

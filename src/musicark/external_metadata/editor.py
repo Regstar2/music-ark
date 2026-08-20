@@ -54,12 +54,19 @@ class ExternalMetadataEditor:
         artwork_path = str((candidate.get("artwork") or {}).get("cachePath") or "").strip()
         if "artwork" in selected and artwork_path:
             patch["artworkImagePath"] = artwork_path
+        if not patch:
+            raise ValueError("No available external metadata fields were selected.")
+
         result = self._service.update(local_file_id, patch, confirm=True)
+        # Persist only provider-neutral identities after the user explicitly applies
+        # a candidate. This table is evidence/provenance; it does not overwrite the
+        # trusted Yandex source_provider_id/source_external_id columns.
+        self._resolver.persist_candidate_identities(local_file_id, candidate_id)
         result["external"] = {
             "candidateId": candidate_id,
             "source": candidate.get("source"),
-            "appliedFields": sorted(field for field in selected if field in fields or field == "artwork"),
+            "appliedFields": sorted(field for field in selected if field in fields or (field == "artwork" and artwork_path)),
             "identityBound": False,
+            "externalIdentitiesPersisted": True,
         }
-        # External candidates never silently mutate the trusted Yandex identity.
         return result

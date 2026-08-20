@@ -15,6 +15,7 @@ class V012Strings {
   String get warp => 'Cloudflare WARP';
   String get proxy => ru ? 'Прокси' : 'Proxy';
   String get proxyUrl => ru ? 'Пользовательский прокси' : 'Custom proxy';
+  String get proxyType => ru ? 'Тип прокси' : 'Proxy type';
   String get refreshStatus => ru ? 'Обновить статус' : 'Refresh status';
   String get testConnection => ru ? 'Проверить подключение' : 'Test connection';
   String get installWarp => ru ? 'Установить WARP' : 'Install WARP';
@@ -24,6 +25,8 @@ class V012Strings {
   String get notInstalled => ru ? 'Не установлен' : 'Not installed';
   String get installed => ru ? 'Установлен' : 'Installed';
   String get connected => ru ? 'Подключён' : 'Connected';
+  String get localProxyReady => ru ? 'Local Proxy готов' : 'Local Proxy ready';
+  String get localProxyNotReady => ru ? 'Подключён, Local Proxy не готов' : 'Connected, Local Proxy not ready';
   String get loading => ru ? 'Проверка…' : 'Checking…';
   String get password => ru ? 'Пароль прокси' : 'Proxy password';
   String get username => ru ? 'Имя пользователя' : 'Username';

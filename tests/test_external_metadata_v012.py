@@ -160,6 +160,48 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(routes[0], None)
         self.assertIn("127.0.0.1:8080", routes[1])
 
+    def test_warp_uses_proxy_side_dns_and_http1(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({"networkMode": NetworkMode.WARP.value})
+        client_options = []
+
+        class Client:
+            def __init__(self, **kwargs):
+                client_options.append(kwargs)
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def request(self, method, url, **kwargs):
+                return httpx.Response(200, request=httpx.Request(method, url))
+
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(client_options[0]["proxy"], "socks5h://127.0.0.1:40000")
+        self.assertTrue(client_options[0]["http1"])
+        self.assertFalse(client_options[0]["http2"])
+
+    def test_protocol_error_is_transport_failure_and_auto_can_fallback(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({"networkMode": NetworkMode.AUTO.value, "proxyScheme": "http", "proxyHost": "127.0.0.1", "proxyPort": 8080})
+        routes = []
+
+        class Client:
+            def __init__(self, **kwargs):
+                self.proxy = kwargs.get("proxy")
+                routes.append(self.proxy)
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def request(self, method, url, **kwargs):
+                if self.proxy is None:
+                    raise httpx.RemoteProtocolError("bad upstream protocol", request=httpx.Request(method, url))
+                return httpx.Response(200, request=httpx.Request(method, url))
+
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://example.test/value")  # type: ignore[arg-type]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(routes[0], None)
+        self.assertIn("127.0.0.1:8080", routes[1])
+
 
 if __name__ == "__main__":
     unittest.main()

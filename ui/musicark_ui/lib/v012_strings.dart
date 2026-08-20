@@ -31,9 +31,10 @@ class V012Strings {
   String get localProxyNotReady => ru ? 'Подключён, Local Proxy не готов' : 'Connected, Local Proxy not ready';
   String get loading => ru ? 'Проверка…' : 'Checking…';
   String get hostReached => ru ? 'хост доступен' : 'host reached';
-  String networkSummary(int ok, int reached, int failed) => ru
-      ? '$ok API OK · $reached хостов доступны · $failed ошибок'
-      : '$ok API OK · $reached hosts reached · $failed failed';
+  String get notConfigured => ru ? 'не настроен' : 'not configured';
+  String networkSummary(int ok, int reached, int notConfiguredCount, int failed) => ru
+      ? '$ok API OK · $reached хостов доступны · $notConfiguredCount не настроено · $failed ошибок'
+      : '$ok API OK · $reached hosts reached · $notConfiguredCount not configured · $failed failed';
   String get password => ru ? 'Пароль прокси' : 'Proxy password';
   String get username => ru ? 'Имя пользователя' : 'Username';
   String get host => ru ? 'Хост' : 'Host';

@@ -35,8 +35,7 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.db = self.root / "musicark.db"
-        connection = initialize_database(self.db)
-        connection.close()
+        initialize_database(self.db)
         with sqlite3.connect(self.db) as conn:
             with conn:
                 migrate_external_metadata_v012(conn)

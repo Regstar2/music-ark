@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -54,6 +55,14 @@ def _database(base_dir: Path | None) -> Path:
 
 def _error(exc: Exception) -> dict[str, Any]:
     return {"error": {"code": "external_metadata_error", "message": str(exc)}}
+
+
+def _safe_network_error_detail(exc: Exception) -> str:
+    """Return useful diagnostics without exposing proxy/API credentials."""
+    text = str(exc).strip().replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+)@", r"\1***@", text)
+    text = re.sub(r"(?i)\b(token|api[_-]?key|password|secret)=([^&\s]+)", r"\1=***", text)
+    return text[:180]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,6 +115,7 @@ def main() -> int:
             warp_status = warp.status()
             probes = {
                 "musicbrainz": "https://musicbrainz.org/ws/2/recording?query=recording%3Atest&limit=1&fmt=json",
+                "listenbrainz_mapper": "https://mapper.listenbrainz.org/mapping/lookup?artist_credit_name=Portishead&recording_name=Glory%20Box",
                 "acoustid": "https://api.acoustid.org/",
                 "cover_art_archive": "https://coverartarchive.org/",
                 "discogs": "https://api.discogs.com/",
@@ -123,9 +133,18 @@ def main() -> int:
                 for source, url in probes.items():
                     try:
                         response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
-                        items.append({"source": source, "reachable": response.status_code < 500, "statusCode": response.status_code})
+                        items.append({
+                            "source": source,
+                            "reachable": response.status_code < 500,
+                            "statusCode": response.status_code,
+                        })
                     except Exception as exc:  # noqa: BLE001
-                        items.append({"source": source, "reachable": False, "error": type(exc).__name__})
+                        items.append({
+                            "source": source,
+                            "reachable": False,
+                            "error": type(exc).__name__,
+                            "errorDetail": _safe_network_error_detail(exc),
+                        })
             payload = {
                 "items": items,
                 "warp": warp_status.as_dict(),

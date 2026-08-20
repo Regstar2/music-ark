@@ -254,6 +254,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
 
   String _sourceLabel(String source) => switch (source) {
         'musicbrainz' => 'MusicBrainz',
+        'listenbrainz_mapper' => 'MusicBrainz Mapper',
         'acoustid' => 'AcoustID',
         'cover_art_archive' => 'Cover Art Archive',
         'discogs' => 'Discogs',
@@ -269,7 +270,9 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       if (status is num && status >= 400) return 'HTTP $status · ${s.hostReached}';
       return 'HTTP $status';
     }
-    return '${item['error'] ?? 'unreachable'}';
+    final error = '${item['error'] ?? 'unreachable'}';
+    final detail = '${item['errorDetail'] ?? ''}'.trim();
+    return detail.isEmpty ? error : '$error · $detail';
   }
 
   IconData _networkIcon(Map<String, dynamic> item) {

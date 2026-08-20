@@ -515,7 +515,10 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('local-load-more')),
       500,
-      scrollable: find.byKey(const Key('local-track-list')),
+      scrollable: find.descendant(
+        of: find.byKey(const Key('local-track-list')),
+        matching: find.byType(Scrollable),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-load-more')), findsOneWidget);

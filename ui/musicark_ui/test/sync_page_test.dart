@@ -250,7 +250,10 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('sync-workspace-tabs')),
       320,
-      scrollable: find.byKey(const Key('sync-page')),
+      scrollable: find.descendant(
+        of: find.byKey(const Key('sync-page')),
+        matching: find.byType(Scrollable),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('sync-filter-download')), findsOneWidget);

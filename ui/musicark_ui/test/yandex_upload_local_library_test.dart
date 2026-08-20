@@ -108,7 +108,7 @@ void main() {
       await tester.tap(find.byKey(const Key('local-upload-yandex-77')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('yandex-upload-dialog')), findsOneWidget);
-      expect(find.text('Artist - Track.mp3'), findsWidgets);
+      expect(find.textContaining('Artist - Track.mp3'), findsOneWidget);
     },
   );
 }

@@ -6,7 +6,7 @@ from contextlib import closing
 import hashlib
 from pathlib import Path
 import sqlite3
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from musicark.storage.external_metadata_migration import migrate_external_metadata_v012
 
@@ -29,12 +29,18 @@ class ExternalArtworkCache:
                 migrate_external_metadata_v012(conn)
 
     @staticmethod
-    def _trusted_url(url: str) -> bool:
+    def _normalize_trusted_url(url: str) -> str | None:
+        """Accept only known CAA/Internet Archive hosts and upgrade HTTP examples to HTTPS."""
         parsed = urlsplit(url)
-        if parsed.scheme != "https" or parsed.username or parsed.password or not parsed.hostname:
-            return False
+        if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not parsed.hostname:
+            return None
         host = parsed.hostname.casefold()
-        return any(host == suffix or host.endswith("." + suffix) for suffix in _ALLOWED_CAA_IMAGE_HOST_SUFFIXES)
+        if not any(host == suffix or host.endswith("." + suffix) for suffix in _ALLOWED_CAA_IMAGE_HOST_SUFFIXES):
+            return None
+        # The CAA documentation still contains historical HTTP redirect examples.
+        # MusicArk never follows them in clear text; use the same trusted host/path
+        # over HTTPS instead.
+        return urlunsplit(("https", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
     def cached(self, artwork_key: str) -> ExternalArtworkCandidate | None:
         with closing(sqlite3.connect(self._database_path)) as conn:
@@ -50,18 +56,20 @@ class ExternalArtworkCache:
         existing = self.cached(artwork_key)
         if existing is not None:
             return existing
-        if not self._trusted_url(url):
+        current = self._normalize_trusted_url(url)
+        if current is None:
             return None
-        response = self._transport.get(url, headers={"Accept": "image/*"})
-        # The transport itself never follows redirects. Follow a bounded CAA/Internet
-        # Archive redirect chain only after re-validating each destination host.
+        response = self._transport.get(current, headers={"Accept": "image/*"})
+        # The generic transport never follows redirects. Follow a bounded
+        # CAA/Internet Archive redirect chain only after validating every hop.
         for _ in range(3):
             if response.status_code not in {301, 302, 303, 307, 308}:
                 break
-            location = response.headers.get("location", "")
-            if not self._trusted_url(location):
+            location = self._normalize_trusted_url(response.headers.get("location", ""))
+            if location is None:
                 return None
-            response = self._transport.get(location, headers={"Accept": "image/*"})
+            current = location
+            response = self._transport.get(current, headers={"Accept": "image/*"})
         if response.status_code != 200:
             return None
         mime = (response.headers.get("content-type") or "").split(";", 1)[0].strip().casefold()
@@ -91,4 +99,4 @@ class ExternalArtworkCache:
                     """,
                     (artwork_key, source, str(path.resolve()), mime, len(data)),
                 )
-        return ExternalArtworkCandidate(source=source, cache_path=str(path.resolve()), source_url=url, mime=mime)
+        return ExternalArtworkCandidate(source=source, cache_path=str(path.resolve()), source_url=current, mime=mime)

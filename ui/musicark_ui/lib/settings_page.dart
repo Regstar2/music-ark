@@ -149,13 +149,21 @@ class _NetworkAccessCard extends StatefulWidget {
 
 class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   String _mode = 'auto';
+  String _proxyScheme = 'socks5';
   String _warp = 'unknown';
   bool _busy = false;
   String? _message;
+  List<Map<String, dynamic>> _networkItems = const [];
   final _host = TextEditingController(text: '127.0.0.1');
   final _port = TextEditingController(text: '1080');
   final _username = TextEditingController();
   final _password = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadInitial());
+  }
 
   @override
   void dispose() {
@@ -163,25 +171,40 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     super.dispose();
   }
 
+  Map<String, dynamic> _visibleSettings() => {
+        'networkMode': _mode,
+        'proxyScheme': _proxyScheme,
+        'proxyHost': _host.text.trim(),
+        'proxyPort': int.tryParse(_port.text) ?? 1080,
+        'proxyUsername': _username.text.trim(),
+        if (_password.text.isNotEmpty) 'proxyPassword': _password.text,
+      };
+
+  void _applyResult(Map<String, dynamic> result) {
+    final settings = result['settings'];
+    if (settings is Map) {
+      _mode = '${settings['mode'] ?? _mode}';
+      _proxyScheme = '${settings['proxy_scheme'] ?? settings['proxyScheme'] ?? _proxyScheme}';
+      _host.text = '${settings['proxy_host'] ?? settings['proxyHost'] ?? _host.text}';
+      _port.text = '${settings['proxy_port'] ?? settings['proxyPort'] ?? _port.text}';
+      _username.text = '${settings['proxy_username'] ?? settings['proxyUsername'] ?? _username.text}';
+    }
+    final warp = result['warp'];
+    if (warp is Map) _warp = '${warp['state'] ?? _warp}';
+    final items = result['items'];
+    if (items is List) {
+      _networkItems = items.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
+      final reachable = _networkItems.where((item) => item['reachable'] == true).length;
+      _message = '$reachable/${_networkItems.length}';
+    }
+  }
+
   Future<void> _run(Future<Map<String, dynamic>> Function() action) async {
     if (_busy) return;
     setState(() { _busy = true; _message = null; });
     try {
       final result = await action();
-      final settings = result['settings'];
-      if (settings is Map) {
-        _mode = '${settings['mode'] ?? _mode}';
-        _host.text = '${settings['proxyHost'] ?? _host.text}';
-        _port.text = '${settings['proxyPort'] ?? _port.text}';
-        _username.text = '${settings['proxyUsername'] ?? _username.text}';
-      }
-      final warp = result['warp'];
-      if (warp is Map) _warp = '${warp['state'] ?? _warp}';
-      final items = result['items'];
-      if (items is List) {
-        final reachable = items.whereType<Map>().where((item) => item['reachable'] == true).length;
-        _message = '$reachable/${items.length}';
-      }
+      _applyResult(result);
     } catch (error) {
       _message = '$error';
     } finally {
@@ -189,12 +212,76 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     }
   }
 
+  Future<void> _loadInitial() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final results = await Future.wait([
+        widget.bridge.getNetworkSettings(),
+        widget.bridge.warpStatus(),
+      ]);
+      _applyResult(results[0]);
+      _applyResult(results[1]);
+    } catch (error) {
+      _message = '$error';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _saveVisibleSettings() =>
+      _run(() => widget.bridge.updateNetworkSettings(_visibleSettings()));
+
+  Future<void> _changeMode(String mode) async {
+    if (_busy || mode == _mode) return;
+    setState(() => _mode = mode);
+    await _saveVisibleSettings();
+  }
+
+  Future<void> _testVisibleSettings() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+      _networkItems = const [];
+    });
+    try {
+      final saved = await widget.bridge.updateNetworkSettings(_visibleSettings());
+      _applyResult(saved);
+      final tested = await widget.bridge.testNetwork();
+      _applyResult(tested);
+    } catch (error) {
+      _message = '$error';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _sourceLabel(String source) => switch (source) {
+        'musicbrainz' => 'MusicBrainz',
+        'acoustid' => 'AcoustID',
+        'cover_art_archive' => 'Cover Art Archive',
+        'discogs' => 'Discogs',
+        'theaudiodb' => 'TheAudioDB',
+        'lastfm' => 'Last.fm',
+        _ => source,
+      };
+
+  String _networkDetail(Map<String, dynamic> item) {
+    if (item['reachable'] == true) {
+      final status = item['statusCode'];
+      return status == null ? 'OK' : 'HTTP $status';
+    }
+    return '${item['error'] ?? 'unreachable'}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = V012Strings.of(context);
     String warpLabel = switch (_warp) {
       'not_installed' => s.notInstalled,
-      'connected' || 'proxy_ready' => s.connected,
+      'proxy_ready' => s.localProxyReady,
+      'connected' => s.localProxyNotReady,
       'installed' || 'disconnected' => s.installed,
       _ => _warp,
     };
@@ -214,10 +301,22 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
               ButtonSegment(value: 'custom_proxy', label: Text(s.proxy)),
             ],
             selected: {_mode},
-            onSelectionChanged: _busy ? null : (value) { if (value.isNotEmpty) setState(() => _mode = value.first); },
+            onSelectionChanged: _busy ? null : (value) { if (value.isNotEmpty) _changeMode(value.first); },
           ),
           if (_mode == 'custom_proxy') ...[
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: const Key('proxy-scheme'),
+              value: _proxyScheme,
+              decoration: InputDecoration(labelText: s.proxyType),
+              items: const [
+                DropdownMenuItem(value: 'socks5', child: Text('SOCKS5')),
+                DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                DropdownMenuItem(value: 'https', child: Text('HTTPS')),
+              ],
+              onChanged: _busy ? null : (value) { if (value != null) setState(() => _proxyScheme = value); },
+            ),
+            const SizedBox(height: 8),
             Row(children: [
               Expanded(child: TextField(key: const Key('proxy-host'), controller: _host, decoration: InputDecoration(labelText: s.host))),
               const SizedBox(width: 8),
@@ -232,8 +331,8 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
           ],
           const SizedBox(height: 12),
           Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-            FilledButton.tonalIcon(key: const Key('network-save'), onPressed: _busy ? null : () => _run(() => widget.bridge.updateNetworkSettings({'networkMode': _mode, 'proxyScheme': 'socks5', 'proxyHost': _host.text.trim(), 'proxyPort': int.tryParse(_port.text) ?? 1080, 'proxyUsername': _username.text.trim(), if (_password.text.isNotEmpty) 'proxyPassword': _password.text})), icon: const Icon(Icons.save_outlined), label: Text(s.save)),
-            OutlinedButton.icon(key: const Key('network-test'), onPressed: _busy ? null : () => _run(widget.bridge.testNetwork), icon: const Icon(Icons.network_check), label: Text(s.testConnection)),
+            FilledButton.tonalIcon(key: const Key('network-save'), onPressed: _busy ? null : _saveVisibleSettings, icon: const Icon(Icons.save_outlined), label: Text(s.save)),
+            OutlinedButton.icon(key: const Key('network-test'), onPressed: _busy ? null : _testVisibleSettings, icon: const Icon(Icons.network_check), label: Text(s.testConnection)),
             OutlinedButton.icon(key: const Key('warp-refresh'), onPressed: _busy ? null : () => _run(widget.bridge.warpStatus), icon: const Icon(Icons.refresh), label: Text(s.refreshStatus)),
             if (_warp == 'not_installed') FilledButton.tonal(key: const Key('warp-install'), onPressed: _busy ? null : () => _run(widget.bridge.installWarp), child: Text(s.installWarp)),
             if (_warp == 'installed' || _warp == 'disconnected') FilledButton.tonal(key: const Key('warp-enable'), onPressed: _busy ? null : () => _run(widget.bridge.enableWarp), child: Text(s.enableWarp)),
@@ -242,6 +341,21 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
             if (_busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
           ]),
           if (_message != null) ...[const SizedBox(height: 8), Text(_message!, key: const Key('network-result'))],
+          if (_networkItems.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final item in _networkItems)
+                  Chip(
+                    key: Key('network-source-${item['source']}'),
+                    avatar: Icon(item['reachable'] == true ? Icons.check_circle_outline : Icons.error_outline, size: 18),
+                    label: Text('${_sourceLabel('${item['source'] ?? ''}')} · ${_networkDetail(item)}'),
+                  ),
+              ],
+            ),
+          ],
         ]),
       ),
     );

@@ -1,0 +1,200 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'musicark_bridge.dart';
+
+abstract interface class ExternalMetadataBridgeClient {
+  Future<Map<String, dynamic>> identify(int localFileId, {bool continueSearch = false});
+  Future<Map<String, dynamic>> search(int localFileId, {required String title, String artist = '', String album = '', bool continueSearch = false});
+  Future<Map<String, dynamic>> compare(int localFileId, String candidateId);
+  Future<Map<String, dynamic>> apply(int localFileId, String candidateId, List<String> selectedFields);
+  Future<Map<String, dynamic>> getNetworkSettings();
+  Future<Map<String, dynamic>> updateNetworkSettings(Map<String, dynamic> settings);
+  Future<Map<String, dynamic>> testNetwork();
+  Future<Map<String, dynamic>> warpStatus();
+  Future<Map<String, dynamic>> installWarp();
+  Future<Map<String, dynamic>> enableWarp();
+  Future<Map<String, dynamic>> disableWarp();
+}
+
+class ExternalMetadataBridge implements ExternalMetadataBridgeClient {
+  const ExternalMetadataBridge();
+
+  @override
+  Future<Map<String, dynamic>> identify(int localFileId, {bool continueSearch = false}) =>
+      _run('external_metadata_identify', localFileId: localFileId, continueSearch: continueSearch);
+
+  @override
+  Future<Map<String, dynamic>> search(int localFileId, {required String title, String artist = '', String album = '', bool continueSearch = false}) =>
+      _run('external_metadata_search', localFileId: localFileId, title: title, artist: artist, album: album, continueSearch: continueSearch);
+
+  @override
+  Future<Map<String, dynamic>> compare(int localFileId, String candidateId) =>
+      _run('external_metadata_compare', localFileId: localFileId, candidateId: candidateId);
+
+  @override
+  Future<Map<String, dynamic>> apply(int localFileId, String candidateId, List<String> selectedFields) =>
+      _run('external_metadata_apply', localFileId: localFileId, candidateId: candidateId, payload: {'confirm': true, 'selectedFields': selectedFields});
+
+  @override
+  Future<Map<String, dynamic>> getNetworkSettings() => _run('network_settings_get');
+
+  @override
+  Future<Map<String, dynamic>> updateNetworkSettings(Map<String, dynamic> settings) => _run('network_settings_update', payload: settings);
+
+  @override
+  Future<Map<String, dynamic>> testNetwork() => _run('network_test');
+
+  @override
+  Future<Map<String, dynamic>> warpStatus() => _run('warp_status');
+
+  @override
+  Future<Map<String, dynamic>> installWarp() => _run('warp_install');
+
+  @override
+  Future<Map<String, dynamic>> enableWarp() => _run('warp_enable');
+
+  @override
+  Future<Map<String, dynamic>> disableWarp() => _run('warp_disable');
+
+  Future<Map<String, dynamic>> _run(
+    String command, {
+    int? localFileId,
+    String candidateId = '',
+    String title = '',
+    String artist = '',
+    String album = '',
+    bool continueSearch = false,
+    Map<String, dynamic>? payload,
+  }) async {
+    final root = _resolveRepoRoot();
+    final python = await _resolvePython(root);
+    final s = Platform.pathSeparator;
+    final src = '$root${s}src';
+    final current = Platform.environment['PYTHONPATH'];
+    final environment = <String, String>{
+      ...Platform.environment,
+      'PYTHONPATH': current == null || current.isEmpty ? src : '$src${Platform.isWindows ? ';' : ':'}$current',
+      'PYTHONIOENCODING': 'utf-8',
+      'PYTHONUTF8': '1',
+    };
+    environment.remove('YANDEX_MUSIC_TOKEN');
+    if (payload != null) environment['MUSICARK_EXTERNAL_PAYLOAD'] = jsonEncode(payload);
+    final args = <String>[
+      ...python.prefixArgs,
+      '-m', 'musicark.external_metadata.bridge', '--base-dir', root, command,
+      if (localFileId != null) ...['--local-file-id', '$localFileId'],
+      if (candidateId.isNotEmpty) ...['--candidate-id', candidateId],
+      if (title.isNotEmpty) ...['--title', title],
+      if (artist.isNotEmpty) ...['--artist', artist],
+      if (album.isNotEmpty) ...['--album', album],
+      if (continueSearch) '--continue-search',
+    ];
+    final result = await Process.run(
+      python.executable, args, workingDirectory: root, runInShell: false,
+      environment: environment, stdoutEncoding: utf8, stderrEncoding: utf8,
+    );
+    final stdout = '${result.stdout ?? ''}'.trim();
+    final stderr = '${result.stderr ?? ''}'.trim();
+    Map<String, dynamic>? decoded;
+    try {
+      final value = stdout.isEmpty ? null : jsonDecode(stdout);
+      if (value is Map) decoded = Map<String, dynamic>.from(value);
+    } on FormatException {
+      decoded = null;
+    }
+    if (decoded?['error'] is Map) {
+      final error = Map<String, dynamic>.from(decoded!['error'] as Map);
+      throw MusicArkBridgeException('${error['code'] ?? 'external_metadata_error'}', '${error['message'] ?? stderr}');
+    }
+    if (result.exitCode != 0 || decoded == null) {
+      throw MusicArkBridgeException('external_metadata_error', stderr.isNotEmpty ? stderr : (stdout.isNotEmpty ? stdout : 'External metadata bridge returned invalid JSON.'));
+    }
+    return decoded;
+  }
+
+  String _resolveRepoRoot() {
+    final override = Platform.environment['MUSICARK_REPO_ROOT']?.trim();
+    if (override != null && override.isNotEmpty && _looksLikeRoot(Directory(override))) return Directory(override).absolute.path;
+    final starts = <Directory>{Directory.current.absolute, File(Platform.resolvedExecutable).parent.absolute};
+    for (final start in starts) {
+      var current = start;
+      while (true) {
+        if (_looksLikeRoot(current)) return current.path;
+        final parent = current.parent;
+        if (parent.path == current.path) break;
+        current = parent;
+      }
+    }
+    throw const MusicArkBridgeException('repo_root_not_found', 'MusicArk repository root was not found.');
+  }
+
+  bool _looksLikeRoot(Directory directory) {
+    final s = Platform.pathSeparator;
+    return File('${directory.path}${s}pyproject.toml').existsSync() && File('${directory.path}${s}src${s}musicark${s}external_metadata${s}bridge.py').existsSync();
+  }
+
+  Future<_PythonCommand> _resolvePython(String root) async {
+    final override = Platform.environment['MUSICARK_PYTHON']?.trim();
+    if (override != null && override.isNotEmpty) {
+      final command = _PythonCommand(override);
+      if (await _works(command)) return command;
+    }
+    final s = Platform.pathSeparator;
+    final venv = Platform.isWindows ? '$root${s}.venv${s}Scripts${s}python.exe' : '$root${s}.venv${s}bin${s}python';
+    if (File(venv).existsSync()) {
+      final command = _PythonCommand(venv);
+      if (await _works(command)) return command;
+    }
+    final candidates = Platform.isWindows ? const [_PythonCommand('python'), _PythonCommand('py', prefixArgs: ['-3'])] : const [_PythonCommand('python3'), _PythonCommand('python')];
+    for (final command in candidates) {
+      if (await _works(command)) return command;
+    }
+    throw const MusicArkBridgeException('python_not_found', 'Python was not found.');
+  }
+
+  Future<bool> _works(_PythonCommand command) async {
+    try {
+      final result = await Process.run(command.executable, [...command.prefixArgs, '--version'], runInShell: false);
+      return result.exitCode == 0;
+    } on ProcessException {
+      return false;
+    }
+  }
+}
+
+class _PythonCommand {
+  const _PythonCommand(this.executable, {this.prefixArgs = const []});
+  final String executable;
+  final List<String> prefixArgs;
+}
+
+class FakeExternalMetadataBridge implements ExternalMetadataBridgeClient {
+  FakeExternalMetadataBridge({this.networkMode = 'auto', this.warpState = 'not_installed', this.candidates = const []});
+  String networkMode;
+  String warpState;
+  final List<Map<String, dynamic>> candidates;
+
+  @override
+  Future<Map<String, dynamic>> identify(int localFileId, {bool continueSearch = false}) async => {'items': candidates, 'sources': const [], 'earlyStop': !continueSearch};
+  @override
+  Future<Map<String, dynamic>> search(int localFileId, {required String title, String artist = '', String album = '', bool continueSearch = false}) async => {'items': candidates, 'sources': const []};
+  @override
+  Future<Map<String, dynamic>> compare(int localFileId, String candidateId) async => {'rows': const []};
+  @override
+  Future<Map<String, dynamic>> apply(int localFileId, String candidateId, List<String> selectedFields) async => {'external': {'appliedFields': selectedFields}};
+  @override
+  Future<Map<String, dynamic>> getNetworkSettings() async => {'settings': {'mode': networkMode, 'proxyScheme': 'socks5', 'proxyHost': '127.0.0.1', 'proxyPort': 1080, 'proxyUsername': '', 'proxyPasswordConfigured': false}};
+  @override
+  Future<Map<String, dynamic>> updateNetworkSettings(Map<String, dynamic> settings) async { networkMode = '${settings['networkMode'] ?? networkMode}'; return getNetworkSettings(); }
+  @override
+  Future<Map<String, dynamic>> testNetwork() async => {'items': const [], 'warp': {'state': warpState}};
+  @override
+  Future<Map<String, dynamic>> warpStatus() async => {'warp': {'state': warpState, 'installedByMusicArk': false}};
+  @override
+  Future<Map<String, dynamic>> installWarp() async { warpState = 'installed'; return warpStatus(); }
+  @override
+  Future<Map<String, dynamic>> enableWarp() async { warpState = 'connected'; return warpStatus(); }
+  @override
+  Future<Map<String, dynamic>> disableWarp() async { warpState = 'disconnected'; return warpStatus(); }
+}

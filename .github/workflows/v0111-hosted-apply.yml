@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/v0.11.1-bulk-upload-recovery-sync
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

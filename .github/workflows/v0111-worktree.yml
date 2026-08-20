@@ -21,7 +21,9 @@ jobs:
 
       - name: Apply guarded v0.11.1 integration edits
         shell: pwsh
-        run: python tools/dev/v0111_apply_worktree_fixed.py
+        run: |
+          python tools/dev/v0111_apply_worktree_fixed.py
+          python tools/dev/v0111_update_readmes.py
 
       - name: Format Dart changes
         shell: pwsh
@@ -78,7 +80,8 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- ui/musicark_ui/lib/sync_page.dart `
+          git add -- README.md README_EN.md `
+                    ui/musicark_ui/lib/sync_page.dart `
                     tests/test_database.py `
                     tests/test_local_library_v04.py `
                     tests/test_migrations_v03.py `

@@ -30,24 +30,37 @@ jobs:
         working-directory: ui/musicark_ui
         run: dart format lib/sync_page.dart
 
-      - name: Python environment
+      - name: Select healthy Python
         shell: pwsh
         run: |
-          if (-not (Test-Path .venv-v0111-dev\Scripts\python.exe)) {
-            python -m venv .venv-v0111-dev
+          $ErrorActionPreference = "Stop"
+          $selectedVersion = $null
+          if (-not (Get-Command py -ErrorAction SilentlyContinue)) { throw "Windows Python launcher 'py' is required on the self-hosted runner." }
+          foreach ($version in @("3.13", "3.12", "3.11", "3.10")) {
+            & py "-$version" -c "import ctypes, pip" 2>$null
+            if ($LASTEXITCODE -eq 0) { $selectedVersion = $version; break }
           }
-          .\.venv-v0111-dev\Scripts\python.exe -m pip install --disable-pip-version-check -e ".[dev]"
+          if (-not $selectedVersion) { throw "No healthy Python installation with ctypes and pip was found." }
+          "MUSICARK_PYTHON_VERSION=$selectedVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+          & py "-$selectedVersion" --version
+
+      - name: Install Python project
+        shell: pwsh
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install --disable-pip-version-check -e ".[dev]"'
 
       - name: Focused backend tests
         shell: pwsh
         run: |
-          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_v0111_recovery_upload -v
-          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_yandex_upload_production_service -v
-          .\.venv-v0111-dev\Scripts\python.exe -m unittest tests.test_yandex_experimental_upload -v
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_v0111_recovery_upload -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_yandex_upload_production_service -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_yandex_experimental_upload -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Full Python suite
         shell: pwsh
-        run: .\.venv-v0111-dev\Scripts\python.exe -m unittest discover -s tests -v
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -v'
 
       - name: Flutter dependencies
         shell: pwsh
@@ -64,10 +77,15 @@ jobs:
         working-directory: ui/musicark_ui
         run: |
           flutter test test/v0111_bulk_recovery_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test test/v0111_sync_page_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test test/yandex_upload_local_library_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test test/local_library_page_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test test/sync_page_test.dart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Full Flutter suite
         shell: pwsh

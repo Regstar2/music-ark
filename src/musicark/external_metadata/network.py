@@ -161,10 +161,20 @@ class ExternalNetworkTransport:
         return f"{settings.proxy_scheme}://{auth}{settings.proxy_host}:{settings.proxy_port}"
 
     @staticmethod
-    def _warp_proxy_url(settings: NetworkSettings) -> str:
-        # Delegate hostname resolution to WARP. This avoids leaking/depending on
-        # a restricted local DNS path for the very hosts WARP is meant to reach.
-        return f"socks5h://{settings.warp_proxy_host}:{settings.warp_proxy_port}"
+    def _warp_routes(settings: NetworkSettings) -> list[tuple[str, str]]:
+        """Return Cloudflare-supported Local Proxy transports in preferred order.
+
+        Modern WARP Proxy mode supports HTTP CONNECT and SOCKS5 on the same
+        local listener. Prefer CONNECT because it has proven more interoperable
+        with TLS/SNI for MetaBrainz endpoints; keep SOCKS5 as a strict-TLS
+        fallback for hosts where CONNECT is unavailable.
+        """
+        host = settings.warp_proxy_host
+        port = settings.warp_proxy_port
+        return [
+            ("warp_http_connect", f"http://{host}:{port}"),
+            ("warp_socks5", f"socks5://{host}:{port}"),
+        ]
 
     def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
         settings = self._settings_store.load()
@@ -177,14 +187,14 @@ class ExternalNetworkTransport:
                 raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
             return [("custom_proxy", self._custom_proxy_url(settings))]
         if settings.mode is NetworkMode.WARP:
-            return [("warp", self._warp_proxy_url(settings))]
+            return list(self._warp_routes(settings))
 
         # AUTO is intentionally cheap: an untouched default proxy field is not a
         # configured route and therefore does not add another failing timeout.
         routes: list[tuple[str, str | None]] = [("direct", None)]
         if settings.proxy_configured:
             routes.append(("custom_proxy", self._custom_proxy_url(settings)))
-        routes.append(("warp", self._warp_proxy_url(settings)))
+        routes.extend(self._warp_routes(settings))
         with self._lock:
             healthy = self._health.get(host)
             if healthy and healthy.expires_at > time.monotonic():
@@ -220,10 +230,9 @@ class ExternalNetworkTransport:
                     trust_env=False,
                     follow_redirects=False,
                     http1=True,
-                    # HTTPX documents HTTP/1.1 as the more mature transport. For
-                    # low-volume metadata calls we do not gain anything from
-                    # HTTP/2 over a SOCKS tunnel, while WARP+MusicBrainz has shown
-                    # real RemoteProtocolError failures in that combination.
+                    # Use HTTP/1.1 over both WARP proxy transports. This avoids
+                    # introducing HTTP/2 state into an already-tunnelled metadata
+                    # connection and keeps fallback behavior deterministic.
                     http2=proxy is None,
                 ) as client:
                     response = client.request(method, url, **kwargs)

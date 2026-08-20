@@ -264,6 +264,8 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       };
 
   String _networkDetail(Map<String, dynamic> item, V012Strings s) {
+    final state = '${item['state'] ?? ''}';
+    if (state == 'not_configured') return s.notConfigured;
     if (item['reachable'] == true) {
       final status = item['statusCode'];
       if (status == null) return 'OK';
@@ -276,7 +278,11 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   }
 
   IconData _networkIcon(Map<String, dynamic> item) {
-    if (item['reachable'] != true) return Icons.error_outline;
+    final state = '${item['state'] ?? ''}';
+    if (state == 'not_configured') return Icons.settings_outlined;
+    if (item['reachable'] != true) {
+      return item['optional'] == true ? Icons.info_outline : Icons.error_outline;
+    }
     final status = item['statusCode'];
     if (status is num && status >= 400) return Icons.warning_amber_outlined;
     return Icons.check_circle_outline;
@@ -297,15 +303,10 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       if (_warpServiceMode.isNotEmpty) _warpServiceMode,
       if (_warpMessage.isNotEmpty) _warpMessage,
     ].join(' · ');
-    final apiOk = _networkItems.where((item) {
-      final status = item['statusCode'];
-      return item['reachable'] == true && status is num && status < 400;
-    }).length;
-    final hostReached = _networkItems.where((item) {
-      final status = item['statusCode'];
-      return item['reachable'] == true && status is num && status >= 400;
-    }).length;
-    final failed = _networkItems.where((item) => item['reachable'] != true).length;
+    final apiOk = _networkItems.where((item) => item['state'] == 'ok').length;
+    final hostReached = _networkItems.where((item) => item['state'] == 'host_reached').length;
+    final notConfigured = _networkItems.where((item) => item['state'] == 'not_configured').length;
+    final failed = _networkItems.where((item) => item['state'] == 'failed' && item['optional'] != true).length;
 
     return Card(
       key: const Key('network-settings-card'),
@@ -379,7 +380,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
             Text(_message!, key: const Key('network-result')),
           ] else if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(s.networkSummary(apiOk, hostReached, failed), key: const Key('network-result')),
+            Text(s.networkSummary(apiOk, hostReached, notConfigured, failed), key: const Key('network-result')),
           ],
           if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),

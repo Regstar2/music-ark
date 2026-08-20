@@ -14,11 +14,12 @@ from musicark.storage.download_migration import migrate_download_v07
 from musicark.storage.metadata_migration import migrate_metadata_v081
 from musicark.storage.metadata_editor_migration import migrate_metadata_editor_v082
 from musicark.storage.migrations import ensure_schema_version_seed, migrate_schema
+from musicark.storage.recovery_migration import migrate_recovery_v0111
 from musicark.storage.sync_migration import migrate_sync_v08
 from musicark.storage.variant_acceptance_migration import migrate_variant_acceptance_v084
 
 
-CURRENT_SCHEMA_VERSION = "1.8.4"
+CURRENT_SCHEMA_VERSION = "1.9.0"
 _DATABASE_LOCK_TIMEOUT_SECONDS = 10.0
 _DATABASE_BUSY_RETRY_DELAYS = (0.25,)
 
@@ -231,6 +232,7 @@ def _initialize_once(database_path: Path) -> None:
             migrate_metadata_editor_v082(conn)
             migrate_content_labels_v083(conn)
             migrate_variant_acceptance_v084(conn)
+            migrate_recovery_v0111(conn)
             conn.commit()
         except Exception:
             conn.rollback()

@@ -22,6 +22,7 @@ import 'settings_page.dart';
 import 'sync_bridge.dart';
 import 'sync_page.dart';
 import 'yandex_app.dart' as yandex;
+import 'yandex_upload_bridge.dart';
 
 class MusicArkShell extends StatefulWidget {
   const MusicArkShell({
@@ -35,6 +36,7 @@ class MusicArkShell extends StatefulWidget {
     required this.accountSession,
     this.metadataBridge = const MetadataBridge(),
     this.contentLabelBridge = const ContentLabelBridge(),
+    this.yandexUploadBridge,
   });
 
   final MusicArkBridgeClient bridge;
@@ -49,6 +51,7 @@ class MusicArkShell extends StatefulWidget {
   // v0.9.x session observation and must never be used as a runtime capability test.
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
+  final YandexUploadBridgeClient? yandexUploadBridge;
 
   @override
   State<MusicArkShell> createState() => _MusicArkShellState();
@@ -250,6 +253,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                               bridge: widget.bridge,
                               metadataBridge: widget.metadataBridge,
                               contentLabelBridge: widget.contentLabelBridge,
+                              yandexUploadBridge: widget.yandexUploadBridge,
                             )
                           : const SizedBox.shrink(),
                       _matchingOpened

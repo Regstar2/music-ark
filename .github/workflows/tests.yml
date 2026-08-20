@@ -37,6 +37,13 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
+      - name: Run production Yandex upload tests
+        shell: pwsh
+        run: |
+          Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
+          Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_production_*.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   yandex-upload-research:
     runs-on: self-hosted
@@ -59,9 +66,11 @@ jobs:
       - name: Install package
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install -e .'
-      - name: Run upload feasibility tests
+      - name: Run upload feasibility and compatibility tests
         shell: pwsh
         run: |
+          Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
+          Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_*.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_experimental_upload.py" -v
@@ -70,6 +79,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
+          Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
           $asar = Join-Path $env:LOCALAPPDATA "Programs\YandexMusic\resources\app.asar"
           & py "-$env:MUSICARK_PYTHON_VERSION" .\tools\yandex_upload_research_ci.py `
             $asar `
@@ -105,6 +116,9 @@ jobs:
       - name: Flutter analyze
         shell: pwsh
         run: flutter analyze --no-fatal-infos
+      - name: Focused Yandex upload UI tests
+        shell: pwsh
+        run: flutter test test/yandex_upload_dialog_test.dart test/yandex_upload_local_library_test.dart
       - name: Flutter tests
         shell: pwsh
         run: flutter test

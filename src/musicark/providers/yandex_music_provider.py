@@ -57,11 +57,11 @@ class YandexMusicProvider(MusicProvider):
             can_scan_library=True,
             can_scan_playlists=True,
             can_download_tracks=False,
-            can_upload_tracks=False,
+            can_upload_tracks=True,
             can_create_playlists=False,
             can_edit_playlists=False,
             supports_track_availability=True,
-            supports_user_uploads=False,
+            supports_user_uploads=True,
         )
 
     def health_check(self) -> dict[str, str]:

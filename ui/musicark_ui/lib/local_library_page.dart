@@ -10,8 +10,10 @@ import 'folder_picker.dart';
 import 'metadata_bridge.dart';
 import 'metadata_editor_page.dart';
 import 'musicark_bridge.dart';
+import 'yandex_upload_bridge.dart';
+import 'yandex_upload_dialog.dart';
 
-enum _TrackMenuAction { details, reveal }
+enum _TrackMenuAction { uploadYandex, details, reveal }
 
 enum _RootMenuAction { remove }
 
@@ -23,17 +25,21 @@ class LocalLibraryPage extends StatefulWidget {
     this.fileActions = const SystemLocalFileActions(),
     MetadataBridgeClient? metadataBridge,
     ContentLabelBridgeClient? contentLabelBridge,
+    YandexUploadBridgeClient? yandexUploadBridge,
   }) : folderPicker = folderPicker ?? const SystemLocalFolderPicker(),
        metadataBridge = metadataBridge ??
            (bridge is MusicArkBridge ? const MetadataBridge() : null),
        contentLabelBridge = contentLabelBridge ??
-           (bridge is MusicArkBridge ? const ContentLabelBridge() : null);
+           (bridge is MusicArkBridge ? const ContentLabelBridge() : null),
+       yandexUploadBridge = yandexUploadBridge ??
+           (bridge is MusicArkBridge ? const YandexUploadBridge() : null);
 
   final MusicArkBridgeClient bridge;
   final LocalFolderPicker folderPicker;
   final LocalFileActions fileActions;
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
+  final YandexUploadBridgeClient? yandexUploadBridge;
 
   @override
   State<LocalLibraryPage> createState() => _LocalLibraryPageState();
@@ -418,6 +424,23 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       if (mounted) {
         setState(() => _error = context.l10n.localRevealFailed('$error'));
       }
+    }
+  }
+
+  Future<void> _uploadToYandex(Map<String, dynamic> track) async {
+    final bridge = widget.yandexUploadBridge;
+    if (bridge == null) return;
+    final result = await showYandexUploadDialog(
+      context: context,
+      track: track,
+      bridge: bridge,
+    );
+    if (!mounted || result == null) return;
+    if (result.status == YandexUploadStatus.verified) {
+      setState(() {
+        _status = context.l10n.yandexUploadSuccess;
+        _statusIsError = false;
+      });
     }
   }
 
@@ -1326,6 +1349,9 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
           tooltip: l10n.localMoreActions,
           onSelected: (action) {
             switch (action) {
+              case _TrackMenuAction.uploadYandex:
+                _uploadToYandex(track);
+                break;
               case _TrackMenuAction.details:
                 _showDetails(track);
                 break;
@@ -1335,6 +1361,16 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
             }
           },
           itemBuilder: (context) => [
+            if (widget.yandexUploadBridge != null)
+              PopupMenuItem(
+                key: Key('local-upload-yandex-${track['id']}'),
+                value: _TrackMenuAction.uploadYandex,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.cloud_upload_outlined),
+                  title: Text(l10n.yandexUploadMenuAction),
+                ),
+              ),
             PopupMenuItem(
               value: _TrackMenuAction.details,
               child: ListTile(

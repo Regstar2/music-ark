@@ -1,19 +1,20 @@
-"""Isolated experimental transport for the recovered Yandex Music UGC upload flow.
+"""Yandex Music UGC upload transports.
 
-The official desktop runtime has verified the production stage-one host and
-response contract. Stage one is ``POST /loader/upload-url`` on an explicit
-Yandex HTTPS origin and uses account OAuth authorization. The successful desktop
-response exposes ``post-target``, ``poll-result`` and ``ugc-track-id``.
+``YandexDirectUploadTransport`` is the production v0.11.0 transport. It follows
+only the direct protocol verified by the v0.10.0 live Python proof: one fixed
+stage-one request, one multipart stage-two request, no credentials on either
+request and no automatic retry.
 
-The transport remains experimental and fail-closed unless a requester is
-injected explicitly. No production upload capability is enabled by this module.
+The older ``YandexUploadTransport`` and ``YandexOAuthStage1Requester`` symbols
+remain unchanged as deprecated research compatibility boundaries. Production
+code must not use them.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -22,30 +23,193 @@ import requests
 from musicark.providers.yandex_music_provider import YandexMusicError
 
 
+YANDEX_DIRECT_UPLOAD_URL = "https://api.music.yandex.net/loader/upload-url"
+_ALLOWED_YANDEX_DOMAINS = ("yandex.ru", "yandex.net", "yandex.com")
+
+
 class YandexUploadProtocolError(YandexMusicError):
-    """Raised when the recovered upload protocol cannot be followed safely."""
+    """Raised when an upload protocol cannot be followed safely."""
+
+
+class YandexUploadNetworkError(YandexUploadProtocolError):
+    """Sanitized production transport failure that omits URL/error text."""
+
+    def __init__(self, stage: str, exception_type: str) -> None:
+        super().__init__(f"Yandex upload {stage} transport failed ({exception_type}).")
+        self.stage = stage
+        self.exception_type = exception_type
+
+
+class YandexUploadHttpError(YandexUploadProtocolError):
+    """Production HTTP status failure without response body or signed URL exposure."""
+
+    def __init__(self, stage: str, status_code: int) -> None:
+        super().__init__(f"Yandex upload {stage} returned HTTP {status_code}.")
+        self.stage = stage
+        self.status_code = int(status_code)
+
+
+@dataclass(slots=True, frozen=True)
+class YandexDirectUploadSlot:
+    """Internal production stage-one response; signed URLs never cross the service boundary."""
+
+    post_target: str
+    poll_result: str | None
+    ugc_track_id: str | None
+    status_code: int
+
+
+@dataclass(slots=True, frozen=True)
+class YandexDirectUploadTransferResult:
+    """Sanitized successful production stage-two response metadata."""
+
+    status_code: int
+
+
+HttpxClientFactory = Callable[..., httpx.Client]
+
+
+class YandexDirectUploadTransport:
+    """Production two-stage single-file upload transport for v0.11.0."""
+
+    def __init__(
+        self,
+        *,
+        stage1_timeout_seconds: float = 30.0,
+        stage2_timeout_seconds: float = 120.0,
+        client_factory: HttpxClientFactory = httpx.Client,
+    ) -> None:
+        if stage1_timeout_seconds <= 0 or stage2_timeout_seconds <= 0:
+            raise ValueError("Upload timeouts must be positive.")
+        self._stage1_timeout_seconds = float(stage1_timeout_seconds)
+        self._stage2_timeout_seconds = float(stage2_timeout_seconds)
+        self._client_factory = client_factory
+
+    def _client(self, timeout_seconds: float) -> httpx.Client:
+        return self._client_factory(
+            http1=True,
+            http2=True,
+            trust_env=False,
+            follow_redirects=False,
+            timeout=timeout_seconds,
+        )
+
+    @staticmethod
+    def validate_post_target(value: str) -> str:
+        """Allow only credential-free HTTPS URLs hosted by Yandex domains."""
+        clean = str(value or "").strip()
+        parsed = urlparse(clean)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        allowed_host = any(
+            host == suffix or host.endswith(f".{suffix}")
+            for suffix in _ALLOWED_YANDEX_DOMAINS
+        )
+        if (
+            parsed.scheme.lower() != "https"
+            or not host
+            or not allowed_host
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise YandexUploadProtocolError(
+                "Stage-two target must be a credential-free HTTPS Yandex URL."
+            )
+        return clean
+
+    @staticmethod
+    def _required_string(payload: Any, key: str) -> str:
+        if not isinstance(payload, dict):
+            raise YandexUploadProtocolError("Stage-one response must be a JSON object.")
+        value = payload.get(key)
+        clean = str(value or "").strip()
+        if not clean:
+            raise YandexUploadProtocolError(f"Stage-one response is missing {key}.")
+        return clean
+
+    def prepare_upload(
+        self,
+        *,
+        uid: str | int,
+        playlist_kind: str | int,
+        file_path: Path,
+    ) -> YandexDirectUploadSlot:
+        """Perform exactly one credential-free production stage-one request."""
+        path = Path(file_path)
+        params = {
+            "uid": str(uid),
+            "playlist-id": f"{uid}:{playlist_kind}",
+            "path": path.name,
+        }
+        try:
+            with self._client(self._stage1_timeout_seconds) as client:
+                response = client.post(YANDEX_DIRECT_UPLOAD_URL, params=params)
+        except httpx.HTTPError as exc:
+            raise YandexUploadNetworkError("stage1", type(exc).__name__) from exc
+
+        status_code = int(response.status_code)
+        if status_code != 200:
+            raise YandexUploadHttpError("stage1", status_code)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise YandexUploadProtocolError("Stage-one response contained invalid JSON.") from exc
+
+        post_target = self.validate_post_target(self._required_string(payload, "post-target"))
+        poll_result_raw = payload.get("poll-result") if isinstance(payload, dict) else None
+        track_id_raw = payload.get("ugc-track-id") if isinstance(payload, dict) else None
+        poll_result = str(poll_result_raw).strip() if poll_result_raw is not None else None
+        ugc_track_id = str(track_id_raw).strip() if track_id_raw is not None else None
+        return YandexDirectUploadSlot(
+            post_target=post_target,
+            poll_result=poll_result or None,
+            ugc_track_id=ugc_track_id or None,
+            status_code=status_code,
+        )
+
+    def upload_file(
+        self,
+        slot: YandexDirectUploadSlot,
+        file_path: Path,
+    ) -> YandexDirectUploadTransferResult:
+        """Perform exactly one multipart production stage-two POST without auth/session headers."""
+        path = Path(file_path)
+        target = self.validate_post_target(slot.post_target)
+        try:
+            with path.open("rb") as stream:
+                with self._client(self._stage2_timeout_seconds) as client:
+                    response = client.post(
+                        target,
+                        files={"file": (path.name, stream)},
+                    )
+        except httpx.HTTPError as exc:
+            raise YandexUploadNetworkError("stage2", type(exc).__name__) from exc
+
+        status_code = int(response.status_code)
+        if status_code != 201:
+            raise YandexUploadHttpError("stage2", status_code)
+        return YandexDirectUploadTransferResult(status_code=status_code)
+
+
+# ---------------------------------------------------------------------------
+# Deprecated v0.10 research compatibility surface. Keep behavior stable for
+# research tooling and tests; production v0.11.0 uses only the direct classes
+# above.
+# ---------------------------------------------------------------------------
 
 
 class YandexUploadStage1UnavailableError(YandexUploadProtocolError):
-    """Raised when no verified public stage-one request profile is available."""
+    """Raised when no verified research stage-one request profile is available."""
 
 
 class YandexUploadStage1Requester(Protocol):
-    """Injectable stage-one boundary used only after a profile is independently verified."""
+    """Injectable research stage-one boundary."""
 
     def post_upload_url(self, params: dict[str, str]) -> Any:
         """Return the decoded response from the recovered loader/upload-url request."""
 
 
 def _safe_exception_kinds(exc: BaseException) -> str:
-    """Return only exception class names from a transport failure tree.
-
-    HTTP clients often nest lower-level protocol/socket errors inside ``args`` or
-    exception causes. Class names distinguish HTTP profile failures from
-    TLS/socket/protocol failures without exposing URLs, query values, credentials,
-    proxy values, or response bodies.
-    """
-
+    """Return only exception class names from a transport failure tree."""
     names: list[str] = []
     seen: set[int] = set()
 
@@ -72,20 +236,7 @@ _DESKTOP_CLIENT_LABEL = "YandexMusicDesktopApp"
 
 
 class YandexOAuthStage1Requester:
-    """Explicit OAuth requester for a ground-truth-verified Yandex stage-one prefix.
-
-    The requester deliberately has no default host. A caller must provide the
-    exact HTTPS Yandex prefix observed from the official client. Authorization
-    uses the account OAuth credential because recovered request data-flow links
-    the request class to ``common.oauth`` and does not reference
-    ``customApiToken`` in that authorization path.
-
-    ``transport_mode=http2`` uses HTTPX with HTTP/2 enabled. The optional
-    ``desktop`` client profile adds only the statically evidenced public
-    ``X-Yandex-Music-Client: YandexMusicDesktopApp`` header. It does not invent a
-    browser User-Agent, accept-language, device ID, request ID, cookies, or any
-    secret/session header. There is no retry or profile permutation behavior.
-    """
+    """Deprecated OAuth requester retained only for v0.10 research compatibility."""
 
     def __init__(
         self,
@@ -149,7 +300,7 @@ class YandexOAuthStage1Requester:
 
     @property
     def sanitized_profile(self) -> dict[str, Any]:
-        """Return only public/non-secret request-profile choices."""
+        """Return only public/non-secret research request-profile choices."""
         return {
             "transport": self._transport_mode,
             "clientProfile": self._client_profile,
@@ -234,7 +385,7 @@ class YandexOAuthStage1Requester:
 
 @dataclass(slots=True, frozen=True)
 class YandexUploadSlot:
-    """Prepared server-side upload slot returned by ``loader/upload-url``."""
+    """Prepared server-side research upload slot returned by ``loader/upload-url``."""
 
     upload_url: str
     response_shape: dict[str, Any]
@@ -244,7 +395,7 @@ class YandexUploadSlot:
 
 @dataclass(slots=True, frozen=True)
 class YandexUploadTransferResult:
-    """Sanitized result of sending one file to the prepared dynamic URL."""
+    """Sanitized research result of sending one file to the prepared dynamic URL."""
 
     status_code: int
     response_shape: dict[str, Any]
@@ -252,12 +403,7 @@ class YandexUploadTransferResult:
 
 
 class YandexUploadTransport:
-    """Recovered two-stage upload transport with a fail-closed stage one.
-
-    A stage-one requester must still be injected explicitly. Stage two uses a
-    fresh HTTP request without Music API OAuth/session headers, matching the
-    recovered ``excludeHeaders`` / ``withoutHeaders`` behavior.
-    """
+    """Deprecated v0.10 two-stage research transport with fail-closed stage one."""
 
     def __init__(
         self,
@@ -270,7 +416,7 @@ class YandexUploadTransport:
 
     @property
     def stage1_available(self) -> bool:
-        """Whether an explicitly verified stage-one requester was supplied."""
+        """Whether an explicitly verified research stage-one requester was supplied."""
         return self._stage1_requester is not None
 
     @property
@@ -282,7 +428,7 @@ class YandexUploadTransport:
         return dict(value) if isinstance(value, dict) else None
 
     def require_stage1_profile(self) -> None:
-        """Fail before an upload mutation when the stage-one requester is unavailable."""
+        """Preserve the v0.10 fail-closed research behavior."""
         if self._stage1_requester is None:
             raise YandexUploadStage1UnavailableError(
                 "Yandex single-track upload stage one is BLOCKED: no ground-truth-verified "
@@ -373,7 +519,7 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> dict[str, str]:
-        """Build only the recovered stage-one query contract."""
+        """Build only the recovered research stage-one query contract."""
         clean_path = str(path).strip()
         if not clean_path:
             raise YandexUploadProtocolError("Upload path is empty.")
@@ -394,7 +540,7 @@ class YandexUploadTransport:
         path: str,
         visibility: str | None = None,
     ) -> YandexUploadSlot:
-        """Request a dynamic upload URL only through an injected verified requester."""
+        """Request a dynamic URL only through the deprecated research requester."""
         params = self.build_prepare_params(
             uid=uid,
             playlist_id=playlist_id,
@@ -412,10 +558,7 @@ class YandexUploadTransport:
         )
 
     def upload_file(self, slot: YandexUploadSlot, file_path: Path) -> YandexUploadTransferResult:
-        """POST one local file as multipart field ``file`` to the dynamic URL.
-
-        No Yandex OAuth/session headers are copied to the dynamic host.
-        """
+        """Preserve the deprecated research Stage 2 behavior for compatibility tests."""
         path = Path(file_path)
         if not path.is_file():
             raise YandexUploadProtocolError(f"Upload file does not exist: {path}")

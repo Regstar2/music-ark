@@ -16,7 +16,8 @@ class WarpV012Tests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.db = self.root / "musicark.db"
-        initialize_database(self.db)
+        connection = initialize_database(self.db)
+        connection.close()
 
     def tearDown(self) -> None:
         self.temp.cleanup()

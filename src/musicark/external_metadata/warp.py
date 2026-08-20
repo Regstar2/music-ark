@@ -8,14 +8,13 @@ from enum import StrEnum
 from pathlib import Path
 import json
 import os
-import re
 import shutil
 import socket
 import sqlite3
 import subprocess
 import tempfile
 from typing import Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -39,6 +38,7 @@ class WarpStatus:
     version: str = ""
     installed_by_musicark: bool = False
     message: str = ""
+    service_mode: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -46,11 +46,14 @@ class WarpStatus:
             "version": self.version,
             "installedByMusicArk": self.installed_by_musicark,
             "message": self.message,
+            "serviceMode": self.service_mode,
         }
 
 
 class WarpService:
-    RELEASES_PAGE = "https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/download/"
+    # This endpoint is the "Download latest stable release" Windows link exposed
+    # by Cloudflare's official stable releases page as of 2026-08-20.
+    OFFICIAL_WINDOWS_STABLE_URL = "https://downloads.cloudflareclient.com/v1/download/windows/ga"
     ALLOWED_DOWNLOAD_HOST = "downloads.cloudflareclient.com"
 
     def __init__(
@@ -126,6 +129,21 @@ class WarpService:
         except OSError:
             return False
 
+    def _service_mode(self) -> str:
+        try:
+            result = self._run_cli("settings")
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        text = f"{result.stdout}\n{result.stderr}"
+        if "WarpProxy" in text:
+            return "WarpProxy"
+        for mode in ("WarpWithDnsOverHttps", "DnsOverHttps", "TunnelOnly", "PostureOnly"):
+            if mode in text:
+                return mode
+        return ""
+
     def status(self) -> WarpStatus:
         cli = self._cli()
         if not cli:
@@ -137,24 +155,46 @@ class WarpService:
             result = self._run_cli("status")
         except (OSError, subprocess.SubprocessError) as exc:
             return WarpStatus(WarpState.ERROR, version=version, installed_by_musicark=self._owned(), message=type(exc).__name__)
+        service_mode = self._service_mode()
         text = f"{result.stdout}\n{result.stderr}".casefold()
-        if self._proxy_ready():
+        message = ""
+        if self._proxy_ready() and service_mode in {"", "WarpProxy"}:
             state = WarpState.PROXY_READY
         elif "connecting" in text:
             state = WarpState.CONNECTING
         elif "connected" in text:
             state = WarpState.CONNECTED
+            if service_mode and service_mode != "WarpProxy":
+                message = "WARP is connected but Local proxy mode (WarpProxy) is not active."
         elif "disconnected" in text:
             state = WarpState.DISCONNECTED
         else:
             state = WarpState.INSTALLED if result.returncode == 0 else WarpState.ERROR
-        return WarpStatus(state, version=version, installed_by_musicark=self._owned())
+        return WarpStatus(
+            state,
+            version=version,
+            installed_by_musicark=self._owned(),
+            message=message,
+            service_mode=service_mode,
+        )
 
     def connect(self) -> WarpStatus:
         result = self._run_cli("connect")
         if result.returncode != 0:
             return WarpStatus(WarpState.ERROR, installed_by_musicark=self._owned(), message="warp-cli connect failed")
-        return self.status()
+        status = self.status()
+        # Official documentation confirms that Local proxy mode appears as
+        # `WarpProxy` in `warp-cli settings`, but does not document a stable
+        # consumer CLI command for switching into that mode. Do not guess one.
+        if status.state is WarpState.CONNECTED and status.service_mode not in {"", "WarpProxy"}:
+            return WarpStatus(
+                WarpState.UNSUPPORTED_VERSION,
+                version=status.version,
+                installed_by_musicark=status.installed_by_musicark,
+                service_mode=status.service_mode,
+                message="Cloudflare Local proxy mode must be enabled by a supported client configuration before MusicArk can route through port 40000.",
+            )
+        return status
 
     def disconnect(self) -> WarpStatus:
         result = self._run_cli("disconnect")
@@ -162,27 +202,36 @@ class WarpService:
             return WarpStatus(WarpState.ERROR, installed_by_musicark=self._owned(), message="warp-cli disconnect failed")
         return self.status()
 
-    def _official_installer_url(self) -> str:
-        with self._http_factory(timeout=20, follow_redirects=False, trust_env=False) as client:
-            page = client.get(self.RELEASES_PAGE)
-        page.raise_for_status()
-        # Cloudflare's official releases page contains download links hosted on
-        # downloads.cloudflareclient.com. Prefer a Windows MSI link when exposed;
-        # otherwise use the page's first Windows stable-download link.
-        links = re.findall(r'href=["\']([^"\']+)["\']', page.text, flags=re.IGNORECASE)
-        candidates: list[str] = []
-        for raw in links:
-            url = urljoin(self.RELEASES_PAGE, raw)
-            host = (urlsplit(url).hostname or "").casefold()
-            if host != self.ALLOWED_DOWNLOAD_HOST:
-                continue
-            if ".msi" in url.casefold() or "windows" in url.casefold():
-                candidates.insert(0, url)
-            else:
-                candidates.append(url)
-        if not candidates:
-            raise RuntimeError("Cloudflare stable Windows installer link was not found on the official releases page.")
-        return candidates[0]
+    @staticmethod
+    def _trusted_download_url(url: str) -> bool:
+        parsed = urlsplit(url)
+        return (
+            parsed.scheme == "https"
+            and parsed.username is None
+            and parsed.password is None
+            and (parsed.hostname or "").casefold() == WarpService.ALLOWED_DOWNLOAD_HOST
+        )
+
+    def _download_installer(self) -> bytes:
+        url = self.OFFICIAL_WINDOWS_STABLE_URL
+        if not self._trusted_download_url(url):
+            raise RuntimeError("Cloudflare installer URL failed the trusted-host check.")
+        with self._http_factory(timeout=60, follow_redirects=False, trust_env=False) as client:
+            response = client.get(url)
+            for _ in range(3):
+                if response.status_code not in {301, 302, 303, 307, 308}:
+                    break
+                location = response.headers.get("location", "")
+                if not self._trusted_download_url(location):
+                    raise RuntimeError("Cloudflare installer redirect left the trusted download host.")
+                response = client.get(location)
+        response.raise_for_status()
+        content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().casefold()
+        if content_type not in {"application/octet-stream", "application/x-msi", "application/x-msdownload", ""}:
+            raise RuntimeError("Cloudflare stable endpoint returned an unexpected content type.")
+        if len(response.content) < 1024 * 1024:
+            raise RuntimeError("Downloaded Cloudflare installer is unexpectedly small.")
+        return bytes(response.content)
 
     def _verify_signature(self, path: Path) -> bool:
         if os.name != "nt":
@@ -211,18 +260,10 @@ class WarpService:
         if before.state is not WarpState.NOT_INSTALLED:
             return before
         try:
-            url = self._official_installer_url()
-            host = (urlsplit(url).hostname or "").casefold()
-            if host != self.ALLOWED_DOWNLOAD_HOST or urlsplit(url).scheme != "https":
-                raise RuntimeError("Cloudflare installer URL failed the trusted-host check.")
-            with self._http_factory(timeout=60, follow_redirects=True, trust_env=False) as client:
-                response = client.get(url)
-            response.raise_for_status()
-            if len(response.content) < 1024 * 1024:
-                raise RuntimeError("Downloaded Cloudflare installer is unexpectedly small.")
+            data = self._download_installer()
             with tempfile.TemporaryDirectory(prefix="musicark-warp-") as temp_dir:
                 path = Path(temp_dir) / "Cloudflare_WARP.msi"
-                path.write_bytes(response.content)
+                path.write_bytes(data)
                 if not self._verify_signature(path):
                     raise RuntimeError("Cloudflare installer Authenticode signature is not valid.")
                 result = self._runner(

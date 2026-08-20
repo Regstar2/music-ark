@@ -217,6 +217,40 @@ void main() {
     expect(find.byKey(const Key('yandex-upload-state-error')), findsNothing);
   });
 
+  testWidgets('stage2 HTTP failure exposes only safe technical diagnostics', (
+    tester,
+  ) async {
+    final bridge = FakeYandexUploadBridge(
+      playlists: const [
+        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+      ],
+      nextResult: const YandexUploadResult(
+        status: YandexUploadStatus.stage2HttpFailed,
+        localFileId: 77,
+        playlistKind: '7',
+        trackId: 'ugc-1',
+        stage1HttpStatus: 200,
+        stage2HttpStatus: 503,
+        readBackVerified: false,
+        readBackAttempts: 3,
+        errorCode: 'stage2_http_failed',
+        safeMessage: 'safe',
+      ),
+    );
+    await pumpDialog(tester, bridge: bridge);
+    await satisfyRequirements(tester);
+    await tester.tap(find.byKey(const Key('yandex-upload-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('yandex-upload-state-error')), findsOneWidget);
+    expect(find.textContaining('Stage 1 HTTP 200'), findsOneWidget);
+    expect(find.textContaining('Stage 2 HTTP 503'), findsOneWidget);
+    expect(find.textContaining('Code: stage2_http_failed'), findsOneWidget);
+    expect(find.textContaining('Read-back: 3'), findsOneWidget);
+    expect(find.textContaining('token='), findsNothing);
+    expect(find.textContaining('yandex.net/'), findsNothing);
+  });
+
   testWidgets('unsupported format is fail closed in UI', (tester) async {
     final track = _mp3Track()
       ..['path'] = r'C:\Music\track.flac'

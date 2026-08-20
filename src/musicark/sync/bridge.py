@@ -42,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--external-id", default=None)
     parser.add_argument("--action", default=None)
     parser.add_argument("--filter", default="all")
+    parser.add_argument("--playlist-kind", default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--confirm", action="store_true")
@@ -89,6 +90,7 @@ def _dispatch(args: argparse.Namespace, service: SyncService) -> dict[str, Any]:
     if args.command == "recovery_tracks":
         return service.recovery(
             filter_name=args.filter,
+            playlist_kind=args.playlist_kind,
             limit=max(1, min(args.limit, 1000)),
             offset=max(0, args.offset),
         )

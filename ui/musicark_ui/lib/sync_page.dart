@@ -11,6 +11,8 @@ import 'yandex_batch_upload_bridge.dart';
 
 enum SyncPlanFilter { all, download, decision, matching, variant, localOnly }
 
+enum _SyncWorkspaceTab { plan, recovery }
+
 class SyncPage extends StatefulWidget {
   const SyncPage({
     super.key,
@@ -44,6 +46,8 @@ class _SyncPageState extends State<SyncPage> {
   Map<String, dynamic> _recovery = const {};
   Map<String, dynamic> _managed = const {};
   String _recoveryFilter = 'all';
+  String _recoveryPlaylistKind = '';
+  _SyncWorkspaceTab _workspaceTab = _SyncWorkspaceTab.plan;
 
   @override
   void initState() {
@@ -347,6 +351,9 @@ class _SyncPageState extends State<SyncPage> {
   Future<void> _reloadRecoveryAndManaged() async {
     final recovery = await widget.bridge.recoveryTracks(
       filter: _recoveryFilter,
+      playlistKind: _recoveryPlaylistKind.isEmpty
+          ? null
+          : _recoveryPlaylistKind,
     );
     final managed = widget.managedPlaylistBridge == null
         ? const <String, dynamic>{}
@@ -371,7 +378,26 @@ class _SyncPageState extends State<SyncPage> {
     if (_busy || filter == _recoveryFilter) return;
     setState(() => _recoveryFilter = filter);
     await _run(() async {
-      final data = await widget.bridge.recoveryTracks(filter: filter);
+      final data = await widget.bridge.recoveryTracks(
+        filter: filter,
+        playlistKind: _recoveryPlaylistKind.isEmpty
+            ? null
+            : _recoveryPlaylistKind,
+      );
+      if (mounted) setState(() => _recovery = Map<String, dynamic>.from(data));
+    });
+  }
+
+  Future<void> _changeRecoveryPlaylist(String value) async {
+    if (_busy) return;
+    final next = value == 'all' ? '' : value;
+    if (next == _recoveryPlaylistKind) return;
+    setState(() => _recoveryPlaylistKind = next);
+    await _run(() async {
+      final data = await widget.bridge.recoveryTracks(
+        filter: _recoveryFilter,
+        playlistKind: next.isEmpty ? null : next,
+      );
       if (mounted) setState(() => _recovery = Map<String, dynamic>.from(data));
     });
   }
@@ -625,6 +651,10 @@ class _SyncPageState extends State<SyncPage> {
 
   Widget _recoverySection() {
     final items = _maps(_recovery['items']);
+    final playlists = _maps(_recovery['playlists']);
+    final playlistValue = _recoveryPlaylistKind.isEmpty
+        ? 'all'
+        : _recoveryPlaylistKind;
     return Card(
       key: const Key('sync-recovery-section'),
       child: Padding(
@@ -655,6 +685,40 @@ class _SyncPageState extends State<SyncPage> {
                   context.l10n.v0111RecoveryNeedsReview,
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: 360,
+              child: DropdownButtonFormField<String>(
+                key: const Key('sync-recovery-playlist-filter'),
+                initialValue: playlistValue,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: context.l10n.v0111PlaylistFilter,
+                  prefixIcon: const Icon(Icons.queue_music_outlined),
+                  isDense: true,
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: 'all',
+                    child: Text(context.l10n.v0111AllPlaylists),
+                  ),
+                  for (final playlist in playlists)
+                    DropdownMenuItem(
+                      value: '${playlist['playlistKind']}',
+                      child: Text(
+                        '${playlist['title'] ?? playlist['playlistKind']}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value != null) _changeRecoveryPlaylist(value);
+                      },
+              ),
             ),
             const SizedBox(height: 10),
             if (items.isEmpty)
@@ -742,6 +806,54 @@ class _SyncPageState extends State<SyncPage> {
     );
   }
 
+  Widget _workspace(Map<String, dynamic> diff) {
+    final summary = _summary(diff);
+    final operationCount = _int(summary['operationCount']);
+    final recoveryCount = _int(_recovery['count']);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          key: const Key('sync-workspace-tabs'),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: SegmentedButton<_SyncWorkspaceTab>(
+              segments: [
+                ButtonSegment(
+                  value: _SyncWorkspaceTab.plan,
+                  icon: const Icon(Icons.sync_alt_outlined),
+                  label: Text(
+                    '${context.l10n.v0111SyncPlanTab} ($operationCount)',
+                  ),
+                ),
+                ButtonSegment(
+                  value: _SyncWorkspaceTab.recovery,
+                  icon: const Icon(Icons.restore_outlined),
+                  label: Text(
+                    '${context.l10n.v0111RecoveryTab} ($recoveryCount)',
+                  ),
+                ),
+              ],
+              selected: {_workspaceTab},
+              onSelectionChanged: _busy
+                  ? null
+                  : (selection) =>
+                        setState(() => _workspaceTab = selection.first),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppUiTokens.sectionGap),
+        if (_workspaceTab == _SyncWorkspaceTab.plan)
+          _details(diff)
+        else ...[
+          _managedPlaylistsCard(),
+          const SizedBox(height: AppUiTokens.sectionGap),
+          _recoverySection(),
+        ],
+      ],
+    );
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     if (mounted) {
@@ -804,11 +916,7 @@ class _SyncPageState extends State<SyncPage> {
                 const SizedBox(height: AppUiTokens.sectionGap),
                 _v0111Summary(_diff!),
                 const SizedBox(height: AppUiTokens.sectionGap),
-                _managedPlaylistsCard(),
-                const SizedBox(height: AppUiTokens.sectionGap),
-                _recoverySection(),
-                const SizedBox(height: AppUiTokens.sectionGap),
-                _details(_diff!),
+                _workspace(_diff!),
               ],
             ],
           ),

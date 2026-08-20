@@ -64,6 +64,7 @@ void main() {
     Map<String, dynamic>? track,
   }) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       MaterialApp(
         locale: locale,
@@ -99,10 +100,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  tearDown(() async {
-    await TestWidgetsFlutterBinding.ensureInitialized().setSurfaceSize(null);
-  });
-
   testWidgets('playlist and rights confirmation are required', (tester) async {
     final bridge = FakeYandexUploadBridge(
       playlists: const [
@@ -126,45 +123,56 @@ void main() {
     await tester.tap(find.text('My playlist').last);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('yandex-upload-submit'))).onPressed,
+      tester
+          .widget<FilledButton>(find.byKey(const Key('yandex-upload-submit')))
+          .onPressed,
       isNull,
     );
 
     await tester.tap(find.byKey(const Key('yandex-upload-rights')));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('yandex-upload-submit'))).onPressed,
+      tester
+          .widget<FilledButton>(find.byKey(const Key('yandex-upload-submit')))
+          .onPressed,
       isNotNull,
     );
   });
 
-  testWidgets('payload uses local id, playlist kind and explicit confirmations', (
-    tester,
-  ) async {
-    final bridge = FakeYandexUploadBridge(
-      playlists: const [
-        YandexUploadTarget(
-          playlistKind: '7',
-          title: 'My playlist',
-          trackCount: 4,
-        ),
-      ],
-    );
-    await pumpDialog(tester, bridge: bridge);
-    await satisfyRequirements(tester);
-    await tester.tap(find.byKey(const Key('yandex-upload-submit')));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'payload uses local id, playlist kind and explicit confirmations',
+    (tester) async {
+      final bridge = FakeYandexUploadBridge(
+        playlists: const [
+          YandexUploadTarget(
+            playlistKind: '7',
+            title: 'My playlist',
+            trackCount: 4,
+          ),
+        ],
+      );
+      await pumpDialog(tester, bridge: bridge);
+      await satisfyRequirements(tester);
+      await tester.tap(find.byKey(const Key('yandex-upload-submit')));
+      await tester.pumpAndSettle();
 
-    expect(bridge.submissions, hasLength(1));
-    expect(bridge.submissions.single, {
-      'local_file_id': 77,
-      'playlist_kind': '7',
-      'confirm': true,
-      'rights_confirmed': true,
-    });
-    expect(bridge.submissions.single.toString(), isNot(contains(r'C:\Music')));
-    expect(find.byKey(const Key('yandex-upload-state-completed')), findsOneWidget);
-  });
+      expect(bridge.submissions, hasLength(1));
+      expect(bridge.submissions.single, {
+        'local_file_id': 77,
+        'playlist_kind': '7',
+        'confirm': true,
+        'rights_confirmed': true,
+      });
+      expect(
+        bridge.submissions.single.toString(),
+        isNot(contains(r'C:\Music')),
+      );
+      expect(
+        find.byKey(const Key('yandex-upload-state-completed')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('double submit is impossible while upload is in progress', (
     tester,
@@ -176,9 +184,14 @@ void main() {
     await tester.pump();
 
     expect(bridge.calls, 1);
-    expect(find.byKey(const Key('yandex-upload-state-uploading')), findsOneWidget);
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('yandex-upload-submit'))).onPressed,
+      find.byKey(const Key('yandex-upload-state-uploading')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('yandex-upload-submit')))
+          .onPressed,
       isNull,
     );
 
@@ -190,7 +203,11 @@ void main() {
   testWidgets('processing is distinct from completed', (tester) async {
     final bridge = FakeYandexUploadBridge(
       playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+        YandexUploadTarget(
+          playlistKind: '7',
+          title: 'My playlist',
+          trackCount: 0,
+        ),
       ],
       nextResult: _result(YandexUploadStatus.processing),
     );
@@ -198,14 +215,24 @@ void main() {
     await satisfyRequirements(tester);
     await tester.tap(find.byKey(const Key('yandex-upload-submit')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('yandex-upload-state-processing')), findsOneWidget);
-    expect(find.byKey(const Key('yandex-upload-state-completed')), findsNothing);
+    expect(
+      find.byKey(const Key('yandex-upload-state-processing')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('yandex-upload-state-completed')),
+      findsNothing,
+    );
   });
 
   testWidgets('delivery unknown has its own state', (tester) async {
     final bridge = FakeYandexUploadBridge(
       playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+        YandexUploadTarget(
+          playlistKind: '7',
+          title: 'My playlist',
+          trackCount: 0,
+        ),
       ],
       nextResult: _result(YandexUploadStatus.deliveryUnknown),
     );
@@ -213,7 +240,10 @@ void main() {
     await satisfyRequirements(tester);
     await tester.tap(find.byKey(const Key('yandex-upload-submit')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('yandex-upload-state-delivery-unknown')), findsOneWidget);
+    expect(
+      find.byKey(const Key('yandex-upload-state-delivery-unknown')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('yandex-upload-state-error')), findsNothing);
   });
 
@@ -222,7 +252,11 @@ void main() {
   ) async {
     final bridge = FakeYandexUploadBridge(
       playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+        YandexUploadTarget(
+          playlistKind: '7',
+          title: 'My playlist',
+          trackCount: 0,
+        ),
       ],
       nextResult: const YandexUploadResult(
         status: YandexUploadStatus.stage2HttpFailed,
@@ -259,26 +293,39 @@ void main() {
       ..['codec'] = 'flac';
     final bridge = FakeYandexUploadBridge(
       playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+        YandexUploadTarget(
+          playlistKind: '7',
+          title: 'My playlist',
+          trackCount: 0,
+        ),
       ],
     );
     await pumpDialog(tester, bridge: bridge, track: track);
     expect(find.byKey(const Key('yandex-upload-mp3-only')), findsOneWidget);
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('yandex-upload-submit'))).onPressed,
+      tester
+          .widget<FilledButton>(find.byKey(const Key('yandex-upload-submit')))
+          .onPressed,
       isNull,
     );
     expect(bridge.submissions, isEmpty);
   });
 
-  testWidgets('auth required and no-playlist states block upload', (tester) async {
+  testWidgets('auth required and no-playlist states block upload', (
+    tester,
+  ) async {
     await pumpDialog(
       tester,
       bridge: FakeYandexUploadBridge(authenticated: false, playlists: const []),
     );
-    expect(find.byKey(const Key('yandex-upload-auth-required')), findsOneWidget);
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('yandex-upload-submit'))).onPressed,
+      find.byKey(const Key('yandex-upload-auth-required')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('yandex-upload-submit')))
+          .onPressed,
       isNull,
     );
   });
@@ -288,7 +335,11 @@ void main() {
   ) async {
     final bridge = FakeYandexUploadBridge(
       playlists: const [
-        YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),
+        YandexUploadTarget(
+          playlistKind: '7',
+          title: 'My playlist',
+          trackCount: 0,
+        ),
       ],
     );
     await pumpDialog(tester, bridge: bridge, locale: const Locale('en'));

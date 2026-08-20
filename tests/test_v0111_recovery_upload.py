@@ -236,6 +236,20 @@ class RecoveryAndBatchV0111Tests(unittest.TestCase):
         self.assertEqual(tracks[0].state, RecoveryState.UNAVAILABLE_LOCAL_AVAILABLE)
         self.assertEqual(tracks[0].local_file_id, 1)
 
+    def test_recovery_payload_filters_by_source_playlist(self) -> None:
+        self._insert_playlist_track("playlist-track-1", availability="unavailable", playlist_id="playlist:1")
+        self._insert_playlist_track("playlist-track-2", availability="unavailable", playlist_id="playlist:2")
+
+        payload = RecoveryService(self.db).payload(playlist_kind="1")
+
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["externalId"], "playlist-track-1")
+        self.assertEqual(
+            {item["playlistKind"] for item in payload["playlists"]},
+            {"1", "2"},
+        )
+        self.assertEqual(payload["selectedPlaylistKind"], "1")
+
     def test_disappearance_alone_becomes_review_not_unavailable(self) -> None:
         repo = RecoveryStorageRepository(self.db)
         repo.upsert_availability(

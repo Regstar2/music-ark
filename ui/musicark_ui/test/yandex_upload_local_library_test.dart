@@ -74,14 +74,12 @@ class _LocalUploadBridge extends FakeMusicArkBridge {
 }
 
 void main() {
-  tearDown(() async {
-    await TestWidgetsFlutterBinding.ensureInitialized().setSurfaceSize(null);
-  });
 
   testWidgets('Local Library exposes single-track Yandex upload action for MP3', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final uploadBridge = FakeYandexUploadBridge(
       playlists: const [
         YandexUploadTarget(playlistKind: '7', title: 'My playlist', trackCount: 0),

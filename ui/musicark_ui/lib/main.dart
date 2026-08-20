@@ -15,6 +15,7 @@ import 'matching_bridge.dart';
 import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
+import 'yandex_batch_upload_bridge.dart';
 import 'yandex_upload_bridge.dart';
 
 void main() {
@@ -49,6 +50,7 @@ class MusicArkDesktopApp extends StatefulWidget {
     this.metadataBridge,
     this.contentLabelBridge,
     this.yandexUploadBridge,
+    this.yandexBatchUploadBridge,
     this.settingsStorage,
   });
 
@@ -60,6 +62,7 @@ class MusicArkDesktopApp extends StatefulWidget {
   final MetadataBridgeClient? metadataBridge;
   final ContentLabelBridgeClient? contentLabelBridge;
   final YandexUploadBridgeClient? yandexUploadBridge;
+  final YandexBatchUploadBridgeClient? yandexBatchUploadBridge;
   final AppSettingsStorage? settingsStorage;
 
   @override
@@ -80,7 +83,8 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
     super.initState();
     final injectedMode = widget.bridge != null;
     _settings = AppSettingsController(
-      storage: widget.settingsStorage ??
+      storage:
+          widget.settingsStorage ??
           (injectedMode ? const _InjectedDefaultsStorage() : null),
     );
     _accountSession = AccountSessionController();
@@ -114,17 +118,21 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
   @override
   Widget build(BuildContext context) {
     final injectedMode = widget.bridge != null;
-    final featureLabels = widget.contentLabelBridge ??
+    final featureLabels =
+        widget.contentLabelBridge ??
         (injectedMode ? null : const ContentLabelBridge());
-    final featureYandexUpload = widget.yandexUploadBridge ??
+    final featureYandexUpload =
+        widget.yandexUploadBridge ??
         (injectedMode ? null : const YandexUploadBridge());
+    final featureYandexBatchUpload =
+        widget.yandexBatchUploadBridge ??
+        (injectedMode ? null : const YandexBatchUploadBridge());
     return AnimatedBuilder(
       animation: _settings,
       builder: (context, _) {
-        final effectiveLocale = _settings.locale ??
-            resolveAppLocale(
-              WidgetsBinding.instance.platformDispatcher.locale,
-            );
+        final effectiveLocale =
+            _settings.locale ??
+            resolveAppLocale(WidgetsBinding.instance.platformDispatcher.locale);
         return MaterialApp(
           onGenerateTitle: (context) => context.l10n.appName,
           theme: AppTheme.light,
@@ -147,6 +155,7 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
             metadataBridge: widget.metadataBridge ?? const MetadataBridge(),
             contentLabelBridge: featureLabels,
             yandexUploadBridge: featureYandexUpload,
+            yandexBatchUploadBridge: featureYandexBatchUpload,
             settings: _settings,
             accountSession: _accountSession,
           ),

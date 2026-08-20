@@ -163,8 +163,20 @@ class SyncService:
             )
         return {"items": items}
 
-    def recovery(self, *, filter_name: str = "all", limit: int = 500, offset: int = 0) -> dict[str, Any]:
-        return self._recovery.payload(filter_name=filter_name, limit=limit, offset=offset)
+    def recovery(
+        self,
+        *,
+        filter_name: str = "all",
+        playlist_kind: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._recovery.payload(
+            filter_name=filter_name,
+            playlist_kind=playlist_kind,
+            limit=limit,
+            offset=offset,
+        )
 
     def managed_playlists(self) -> dict[str, Any]:
         return self._managed.state()

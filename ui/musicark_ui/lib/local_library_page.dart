@@ -31,13 +31,17 @@ class LocalLibraryPage extends StatefulWidget {
     YandexUploadBridgeClient? yandexUploadBridge,
     YandexBatchUploadBridgeClient? yandexBatchUploadBridge,
   }) : folderPicker = folderPicker ?? const SystemLocalFolderPicker(),
-       metadataBridge = metadataBridge ??
+       metadataBridge =
+           metadataBridge ??
            (bridge is MusicArkBridge ? const MetadataBridge() : null),
-       contentLabelBridge = contentLabelBridge ??
+       contentLabelBridge =
+           contentLabelBridge ??
            (bridge is MusicArkBridge ? const ContentLabelBridge() : null),
-       yandexUploadBridge = yandexUploadBridge ??
+       yandexUploadBridge =
+           yandexUploadBridge ??
            (bridge is MusicArkBridge ? const YandexUploadBridge() : null),
-       yandexBatchUploadBridge = yandexBatchUploadBridge ??
+       yandexBatchUploadBridge =
+           yandexBatchUploadBridge ??
            (bridge is MusicArkBridge ? const YandexBatchUploadBridge() : null);
 
   final MusicArkBridgeClient bridge;
@@ -106,10 +110,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
     return next;
   }
 
-  bool _allSelected({
-    List<Map<String, dynamic>>? roots,
-    Set<int>? selected,
-  }) {
+  bool _allSelected({List<Map<String, dynamic>>? roots, Set<int>? selected}) {
     final ids = _rootIds(roots ?? _roots);
     final selection = selected ?? _selectedRootIds;
     return ids.isNotEmpty &&
@@ -156,12 +157,14 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       final byId = raw is Map
           ? Map<String, dynamic>.from(raw)
           : <String, dynamic>{};
-      return tracks.map((track) {
-        final copy = Map<String, dynamic>.from(track);
-        final label = byId['${track['id']}'];
-        if (label != null) copy['contentLabel'] = '$label';
-        return copy;
-      }).toList(growable: false);
+      return tracks
+          .map((track) {
+            final copy = Map<String, dynamic>.from(track);
+            final label = byId['${track['id']}'];
+            if (label != null) copy['contentLabel'] = '$label';
+            return copy;
+          })
+          .toList(growable: false);
     } on MusicArkBridgeException {
       return tracks;
     }
@@ -178,16 +181,18 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       await labels.setLocal(id, label);
       if (!mounted) return;
       setState(() {
-        _tracks = _tracks.map((item) {
-          if ('${item['id']}' != '$id') return item;
-          final copy = Map<String, dynamic>.from(item);
-          if (label.isEmpty) {
-            copy.remove('contentLabel');
-          } else {
-            copy['contentLabel'] = label;
-          }
-          return copy;
-        }).toList(growable: false);
+        _tracks = _tracks
+            .map((item) {
+              if ('${item['id']}' != '$id') return item;
+              final copy = Map<String, dynamic>.from(item);
+              if (label.isEmpty) {
+                copy.remove('contentLabel');
+              } else {
+                copy['contentLabel'] = label;
+              }
+              return copy;
+            })
+            .toList(growable: false);
       });
     } on MusicArkBridgeException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -209,14 +214,16 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       final items = raw is Map
           ? Map<String, dynamic>.from(raw)
           : <String, dynamic>{};
-      return tracks.map((track) {
-        final copy = Map<String, dynamic>.from(track);
-        final artwork = items['${track['id']}'];
-        if (artwork is Map) {
-          copy['artwork'] = Map<String, dynamic>.from(artwork);
-        }
-        return copy;
-      }).toList(growable: false);
+      return tracks
+          .map((track) {
+            final copy = Map<String, dynamic>.from(track);
+            final artwork = items['${track['id']}'];
+            if (artwork is Map) {
+              copy['artwork'] = Map<String, dynamic>.from(artwork);
+            }
+            return copy;
+          })
+          .toList(growable: false);
     } on MusicArkBridgeException {
       return tracks;
     }
@@ -254,7 +261,9 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
             .map((item) => int.tryParse('${item['id']}'))
             .whereType<int>()
             .toSet();
-        _selectedTrackIds = _selectedTrackIds.where(visibleIds.contains).toSet();
+        _selectedTrackIds = _selectedTrackIds
+            .where(visibleIds.contains)
+            .toSet();
         _total = int.tryParse('${tracksPayload['count'] ?? 0}') ?? 0;
       });
     } on MusicArkBridgeException catch (error) {
@@ -497,7 +506,9 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   void _clearTrackSelection() => setState(() => _selectedTrackIds.clear());
 
   List<Map<String, dynamic>> _selectedTracks() => _tracks
-      .where((track) => _selectedTrackIds.contains(int.tryParse('${track['id']}')))
+      .where(
+        (track) => _selectedTrackIds.contains(int.tryParse('${track['id']}')),
+      )
       .toList(growable: false);
 
   Future<void> _bulkUploadToYandex() async {
@@ -775,10 +786,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         if ('${root['id']}' == '$id') return _rootName(root);
       }
     }
-    return l10n.localFoldersSelected(
-      _selectedRootIds.length,
-      _roots.length,
-    );
+    return l10n.localFoldersSelected(_selectedRootIds.length, _roots.length);
   }
 
   String _singleSelectedRootPath() {
@@ -962,6 +970,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                   child: DropdownButtonFormField<String>(
                     key: const Key('local-sort'),
                     initialValue: _sort,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: l10n.localSortLabel,
                       border: const OutlineInputBorder(),
@@ -970,23 +979,43 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                     items: [
                       DropdownMenuItem(
                         value: 'artist',
-                        child: Text(l10n.localSortArtist),
+                        child: Text(
+                          l10n.localSortArtist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'title',
-                        child: Text(l10n.localSortTitle),
+                        child: Text(
+                          l10n.localSortTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'album',
-                        child: Text(l10n.localSortAlbum),
+                        child: Text(
+                          l10n.localSortAlbum,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'duration',
-                        child: Text(l10n.localSortDuration),
+                        child: Text(
+                          l10n.localSortDuration,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'path',
-                        child: Text(l10n.localSortPath),
+                        child: Text(
+                          l10n.localSortPath,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                     onChanged: _busy
@@ -1109,11 +1138,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
               leading: const Icon(Icons.folder_outlined),
               title: Tooltip(
                 message: path,
-                child: Text(
-                  path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(path, maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
               subtitle: Text(l10n.localLastScanned(_lastScanned(root))),
               trailing: Wrap(
@@ -1187,9 +1212,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         title: hasSearch
             ? l10n.localEmptySearchTitle
             : l10n.localEmptyTracksTitle,
-        body: hasSearch
-            ? l10n.localEmptySearchBody
-            : l10n.localEmptyTracksBody,
+        body: hasSearch ? l10n.localEmptySearchBody : l10n.localEmptyTracksBody,
       );
     }
 
@@ -1273,7 +1296,10 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
           Expanded(flex: 5, child: Text(l10n.localColumnTrack, style: style)),
           Expanded(flex: 3, child: Text(l10n.localColumnAlbum, style: style)),
           SizedBox(width: 64, child: Text(l10n.localColumnYear, style: style)),
-          SizedBox(width: 74, child: Text(l10n.localColumnFormat, style: style)),
+          SizedBox(
+            width: 74,
+            child: Text(l10n.localColumnFormat, style: style),
+          ),
           SizedBox(
             width: 132,
             child: Text(l10n.localColumnVersion, style: style),
@@ -1293,7 +1319,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       track['artwork'] as Map? ?? const {},
     );
     final album = '${track['album'] ?? '—'}';
-    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'.toUpperCase();
+    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'
+        .toUpperCase();
     return Material(
       key: Key('local-track-${track['id']}'),
       color: Colors.transparent,
@@ -1336,18 +1363,20 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
                                 .toString(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             _artists(track),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
                           ),
                         ],
                       ),
@@ -1357,7 +1386,11 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
               ),
               Expanded(
                 flex: 3,
-                child: Text(album, maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  album,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               SizedBox(width: 64, child: Text('${track['year'] ?? '—'}')),
               SizedBox(width: 74, child: Text(codec)),
@@ -1379,7 +1412,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       track['artwork'] as Map? ?? const {},
     );
     final album = '${track['album'] ?? '—'}';
-    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'.toUpperCase();
+    final codec = '${track['codec'] ?? track['extension'] ?? '—'}'
+        .toUpperCase();
     return Material(
       key: Key('local-track-${track['id']}'),
       color: Colors.transparent,
@@ -1391,14 +1425,14 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
             children: [
               Checkbox(
                 key: Key('local-select-${track['id']}'),
-                value: _selectedTrackIds.contains(int.tryParse('${track['id']}')),
-                onChanged: (value) => _toggleTrackSelection(track, value == true),
+                value: _selectedTrackIds.contains(
+                  int.tryParse('${track['id']}'),
+                ),
+                onChanged: (value) =>
+                    _toggleTrackSelection(track, value == true),
               ),
               const SizedBox(width: 4),
-              _LocalArtwork(
-                artwork: artwork,
-                size: AppUiTokens.artworkSize,
-              ),
+              _LocalArtwork(artwork: artwork, size: AppUiTokens.artworkSize),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1587,10 +1621,7 @@ class _EmptyLocalState extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 16),
-              action!,
-            ],
+            if (action != null) ...[const SizedBox(height: 16), action!],
           ],
         ),
       ),

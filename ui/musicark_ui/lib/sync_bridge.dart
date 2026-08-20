@@ -21,6 +21,7 @@ abstract interface class SyncBridgeClient {
   Future<Map<String, dynamic>> setAction(String externalId, String action);
   Future<Map<String, dynamic>> recoveryTracks({
     String filter = 'all',
+    String? playlistKind,
     int limit = 500,
     int offset = 0,
   });
@@ -77,11 +78,13 @@ class SyncBridge implements SyncBridgeClient {
   @override
   Future<Map<String, dynamic>> recoveryTracks({
     String filter = 'all',
+    String? playlistKind,
     int limit = 500,
     int offset = 0,
   }) => _run(
     'recovery_tracks',
     filter: filter,
+    playlistKind: playlistKind,
     limit: limit,
     offset: offset,
   );
@@ -95,6 +98,7 @@ class SyncBridge implements SyncBridgeClient {
     String? externalId,
     String? action,
     String? filter,
+    String? playlistKind,
     int? limit,
     int? offset,
     bool confirm = false,
@@ -138,6 +142,10 @@ class SyncBridge implements SyncBridgeClient {
       ],
       if (action != null && action.isNotEmpty) ...['--action', action],
       if (filter != null && filter.isNotEmpty) ...['--filter', filter],
+      if (playlistKind != null && playlistKind.isNotEmpty) ...[
+        '--playlist-kind',
+        playlistKind,
+      ],
       if (limit != null) ...['--limit', '$limit'],
       if (offset != null) ...['--offset', '$offset'],
       if (confirm) '--confirm',
@@ -208,9 +216,7 @@ class SyncBridge implements SyncBridgeClient {
 
   bool _looksLikeRepoRoot(Directory directory) {
     final separator = Platform.pathSeparator;
-    return File(
-          '${directory.path}${separator}pyproject.toml',
-        ).existsSync() &&
+    return File('${directory.path}${separator}pyproject.toml').existsSync() &&
         File(
           '${directory.path}${separator}src${separator}musicark${separator}sync${separator}bridge.py',
         ).existsSync();
@@ -239,16 +245,18 @@ class SyncBridge implements SyncBridgeClient {
     for (final candidate in candidates) {
       if (await _pythonWorks(candidate)) return candidate;
     }
-    throw const SyncBridgeException('python_not_found', 'Python was not found.');
+    throw const SyncBridgeException(
+      'python_not_found',
+      'Python was not found.',
+    );
   }
 
   Future<bool> _pythonWorks(_PythonCommand candidate) async {
     try {
-      final result = await Process.run(
-        candidate.executable,
-        [...candidate.prefixArgs, '--version'],
-        runInShell: false,
-      );
+      final result = await Process.run(candidate.executable, [
+        ...candidate.prefixArgs,
+        '--version',
+      ], runInShell: false);
       return result.exitCode == 0;
     } on ProcessException {
       return false;
@@ -381,7 +389,10 @@ class FakeSyncBridge implements SyncBridgeClient {
         'externalId': '3',
         'reason': 'identity_needs_review',
         'status': 'informational',
-        'metadata': {'title': 'Review Identity', 'artists': ['Artist']},
+        'metadata': {
+          'title': 'Review Identity',
+          'artists': ['Artist'],
+        },
         'result': {},
       },
       {
@@ -417,7 +428,10 @@ class FakeSyncBridge implements SyncBridgeClient {
         'externalId': '99',
         'reason': 'local_only',
         'status': 'informational',
-        'metadata': {'title': 'Local Only', 'artists': ['Artist']},
+        'metadata': {
+          'title': 'Local Only',
+          'artists': ['Artist'],
+        },
         'result': {},
       },
     ],
@@ -517,6 +531,7 @@ class FakeSyncBridge implements SyncBridgeClient {
   @override
   Future<Map<String, dynamic>> recoveryTracks({
     String filter = 'all',
+    String? playlistKind,
     int limit = 500,
     int offset = 0,
   }) async {
@@ -537,6 +552,16 @@ class FakeSyncBridge implements SyncBridgeClient {
         'localMp3Ready': true,
       },
     ];
+    final filtered = playlistKind == null || playlistKind.isEmpty
+        ? items
+        : items
+              .where((item) {
+                final collections = item['collections'] as List? ?? const [];
+                return collections.whereType<Map>().any(
+                  (entry) => '${entry['playlistKind'] ?? ''}' == playlistKind,
+                );
+              })
+              .toList(growable: false);
     return {
       'summary': {
         'unavailableTracks': 1,
@@ -547,8 +572,12 @@ class FakeSyncBridge implements SyncBridgeClient {
         'censoredNeedsReview': 0,
         'needsReview': 0,
       },
-      'count': items.length,
-      'items': items,
+      'count': filtered.length,
+      'playlists': const [
+        {'playlistKind': 'focus', 'title': 'Focus'},
+      ],
+      'selectedPlaylistKind': playlistKind,
+      'items': filtered,
     };
   }
 

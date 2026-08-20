@@ -249,6 +249,7 @@ class RecoveryService:
         self,
         *,
         filter_name: str = "all",
+        playlist_kind: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -276,10 +277,35 @@ class RecoveryService:
                 if item.state
                 in {RecoveryState.UNAVAILABLE_NEEDS_REVIEW, RecoveryState.CENSORSHIP_NEEDS_REVIEW}
             ]
+        playlist_map: dict[str, str] = {}
+        for item in all_items:
+            for collection in item.collections:
+                kind = str(collection.get("playlistKind") or "").strip()
+                if not kind:
+                    continue
+                title = str(collection.get("title") or kind).strip() or kind
+                playlist_map.setdefault(kind, title)
+
+        selected_playlist_kind = str(playlist_kind or "").strip()
+        if selected_playlist_kind:
+            items = [
+                item
+                for item in items
+                if any(
+                    str(collection.get("playlistKind") or "").strip() == selected_playlist_kind
+                    for collection in item.collections
+                )
+            ]
+
         safe_limit = max(1, min(int(limit), 1000))
         safe_offset = max(0, int(offset))
         return {
             "summary": self._summary_for(all_items),
             "count": len(items),
+            "playlists": [
+                {"playlistKind": kind, "title": playlist_map[kind]}
+                for kind in sorted(playlist_map, key=lambda value: (playlist_map[value].casefold(), value))
+            ],
+            "selectedPlaylistKind": selected_playlist_kind or None,
             "items": [item.to_dict() for item in items[safe_offset : safe_offset + safe_limit]],
         }

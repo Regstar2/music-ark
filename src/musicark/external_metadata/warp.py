@@ -175,7 +175,7 @@ class WarpService:
             if service_mode and service_mode != "WarpProxy":
                 message = "WARP is connected but Local proxy mode (WarpProxy) is not active."
             elif service_mode == "WarpProxy":
-                message = "WARP Local proxy mode is active but port 40000 is not ready yet."
+                message = f"WARP Local proxy mode is active but port {self._proxy_port} is not ready yet."
         elif "disconnected" in text:
             state = WarpState.DISCONNECTED
         else:
@@ -190,7 +190,7 @@ class WarpService:
 
     def _wait_for_proxy(self, latest: WarpStatus | None = None) -> WarpStatus:
         current = latest or self.status()
-        for _ in range(20):
+        for _ in range(40):
             if current.state is WarpState.PROXY_READY:
                 return current
             if current.state in {WarpState.ERROR, WarpState.NOT_INSTALLED, WarpState.UNSUPPORTED_VERSION}:
@@ -203,7 +203,7 @@ class WarpService:
                 version=current.version,
                 installed_by_musicark=current.installed_by_musicark,
                 service_mode=current.service_mode,
-                message="WARP Local proxy mode is active but port 40000 did not become ready in time.",
+                message=f"WARP Local proxy mode is active but port {self._proxy_port} did not become ready in time.",
             )
         return WarpStatus(
             WarpState.UNSUPPORTED_VERSION,
@@ -211,6 +211,59 @@ class WarpService:
             installed_by_musicark=current.installed_by_musicark,
             service_mode=current.service_mode,
             message="warp-cli accepted proxy mode but WarpProxy was not confirmed by client settings.",
+        )
+
+    def _configure_proxy_port(self) -> WarpStatus | None:
+        """Set the Local Proxy listener port using only commands exposed by this CLI."""
+        try:
+            proxy_help = self._run_cli("proxy", "--help")
+        except (OSError, subprocess.SubprocessError) as exc:
+            current = self.status()
+            return WarpStatus(
+                WarpState.ERROR,
+                version=current.version,
+                installed_by_musicark=current.installed_by_musicark,
+                service_mode=current.service_mode,
+                message=f"Failed to inspect warp-cli proxy command: {type(exc).__name__}",
+            )
+        proxy_help_text = f"{proxy_help.stdout}\n{proxy_help.stderr}".casefold()
+        if proxy_help.returncode == 0 and "port" in proxy_help_text:
+            result = self._run_cli("proxy", "port", str(self._proxy_port))
+            if result.returncode == 0:
+                return None
+            current = self.status()
+            return WarpStatus(
+                WarpState.ERROR,
+                version=current.version,
+                installed_by_musicark=current.installed_by_musicark,
+                service_mode=current.service_mode,
+                message=f"warp-cli proxy port {self._proxy_port} failed",
+            )
+
+        # Older Cloudflare clients exposed the same supported setting as
+        # `set-proxy-port`. Only use it if this installed CLI advertises it.
+        top_help = self._run_cli("--help")
+        top_help_text = f"{top_help.stdout}\n{top_help.stderr}".casefold()
+        if top_help.returncode == 0 and "set-proxy-port" in top_help_text:
+            result = self._run_cli("set-proxy-port", str(self._proxy_port))
+            if result.returncode == 0:
+                return None
+            current = self.status()
+            return WarpStatus(
+                WarpState.ERROR,
+                version=current.version,
+                installed_by_musicark=current.installed_by_musicark,
+                service_mode=current.service_mode,
+                message=f"warp-cli set-proxy-port {self._proxy_port} failed",
+            )
+
+        current = self.status()
+        return WarpStatus(
+            WarpState.UNSUPPORTED_VERSION,
+            version=current.version,
+            installed_by_musicark=current.installed_by_musicark,
+            service_mode=current.service_mode,
+            message="Installed warp-cli does not expose a supported Local Proxy port command.",
         )
 
     def connect(self) -> WarpStatus:
@@ -244,16 +297,39 @@ class WarpService:
                 message="warp-cli mode proxy failed",
             )
 
-        # Changing mode may reconfigure an already-connected client by itself.
-        # Check first so an "already connected" response cannot turn a healthy
-        # proxy transition into a false error.
+        port_error = self._configure_proxy_port()
+        if port_error is not None:
+            return port_error
+
+        # The current client may apply mode/port changes immediately. Give it a
+        # short chance before reconnecting an already-active tunnel.
         current = self.status()
         if current.state is WarpState.PROXY_READY:
             return current
-        if current.service_mode == "WarpProxy" and current.state in {WarpState.CONNECTED, WarpState.CONNECTING}:
-            return self._wait_for_proxy(current)
+        for _ in range(8):
+            self._sleep(0.25)
+            current = self.status()
+            if current.state is WarpState.PROXY_READY:
+                return current
 
-        if current.state in {WarpState.DISCONNECTED, WarpState.INSTALLED}:
+        # Proxy-port changes on some desktop versions are applied only after a
+        # reconnect. This action is user-initiated from MusicArk, so perform one
+        # bounded reconnect rather than leaving WarpProxy with no listener.
+        if current.state in {WarpState.CONNECTED, WarpState.CONNECTING}:
+            disconnect_result = self._run_cli("disconnect")
+            if disconnect_result.returncode != 0:
+                after = self.status()
+                return WarpStatus(
+                    WarpState.ERROR,
+                    version=after.version,
+                    installed_by_musicark=after.installed_by_musicark,
+                    service_mode=after.service_mode,
+                    message="WARP Local Proxy was configured but reconnect could not start (disconnect failed).",
+                )
+            self._sleep(0.5)
+            current = self.status()
+
+        if current.state in {WarpState.DISCONNECTED, WarpState.INSTALLED, WarpState.CONNECTED, WarpState.CONNECTING}:
             result = self._run_cli("connect")
             if result.returncode != 0:
                 after = self.status()
@@ -268,8 +344,6 @@ class WarpService:
                 )
             return self._wait_for_proxy()
 
-        # If the CLI reports another transient state after mode switch, give the
-        # service a bounded chance to settle before deciding it is unsupported.
         return self._wait_for_proxy(current)
 
     def disconnect(self) -> WarpStatus:

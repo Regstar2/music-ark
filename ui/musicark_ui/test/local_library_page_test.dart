@@ -512,14 +512,12 @@ void main() {
     await desktop(tester, LocalLibraryPage(bridge: bridge));
     await applyRootSelection(tester, [1]);
 
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('local-load-more')),
-      500,
-      scrollable: find.descendant(
-        of: find.byKey(const Key('local-track-list')),
-        matching: find.byType(Scrollable),
-      ),
-    );
+    final trackList = find.byKey(const Key('local-track-list'));
+    final loadMore = find.byKey(const Key('local-load-more'));
+    for (var i = 0; i < 12 && loadMore.evaluate().isEmpty; i++) {
+      await tester.drag(trackList, const Offset(0, -4000));
+      await tester.pump();
+    }
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-load-more')), findsOneWidget);
     await tester.tap(find.byKey(const Key('local-load-more')));

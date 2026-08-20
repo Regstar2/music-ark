@@ -44,7 +44,8 @@ class YandexBatchUploadDialog extends StatefulWidget {
   final String? localContextTooltip;
 
   @override
-  State<YandexBatchUploadDialog> createState() => _YandexBatchUploadDialogState();
+  State<YandexBatchUploadDialog> createState() =>
+      _YandexBatchUploadDialogState();
 }
 
 class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
@@ -88,7 +89,9 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
   bool _isMp3(Map<String, dynamic> track) {
     final extension = '${track['extension'] ?? ''}'.trim().toLowerCase();
     final fileName = '${track['fileName'] ?? ''}'.trim().toLowerCase();
-    return extension == '.mp3' || extension == 'mp3' || fileName.endsWith('.mp3');
+    return extension == '.mp3' ||
+        extension == 'mp3' ||
+        fileName.endsWith('.mp3');
   }
 
   Future<void> _load() async {
@@ -107,12 +110,16 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
       for (final role in roles) {
         if (role['role'] == 'uploaded' && role['configured'] == true) {
           final candidate = '${role['playlistKind'] ?? ''}'.trim();
-          if (targets.playlists.any((item) => item.playlistKind == candidate)) {
+          if (targets.playlists.any(
+            (item) => item.playlistKind == candidate,
+          )) {
             selected = candidate;
           }
         }
       }
-      selected ??= targets.playlists.isEmpty ? null : targets.playlists.first.playlistKind;
+      selected ??= targets.playlists.isEmpty
+          ? null
+          : targets.playlists.first.playlistKind;
       setState(() {
         _targets = targets.playlists;
         _managed = managed;
@@ -131,7 +138,9 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
   String _sizeLabel() {
     if (_bytes <= 0) return '—';
     final mb = _bytes / (1024 * 1024);
-    return mb >= .1 ? '${mb.toStringAsFixed(1)} MB' : '${(_bytes / 1024).toStringAsFixed(0)} KB';
+    return mb >= .1
+        ? '${mb.toStringAsFixed(1)} MB'
+        : '${(_bytes / 1024).toStringAsFixed(0)} KB';
   }
 
   String _newBatchId() =>
@@ -151,7 +160,10 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
       _total = ids.length;
     });
     _poll?.cancel();
-    _poll = Timer.periodic(const Duration(milliseconds: 450), (_) => _pollStatus(batchId));
+    _poll = Timer.periodic(
+      const Duration(milliseconds: 450),
+      (_) => _pollStatus(batchId),
+    );
     try {
       final result = await widget.batchBridge.uploadBatch(
         localFileIds: ids,
@@ -164,7 +176,8 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
       _poll?.cancel();
       setState(() {
         _result = Map<String, dynamic>.from(result);
-        _completed = int.tryParse('${result['completed'] ?? ids.length}') ?? ids.length;
+        _completed =
+            int.tryParse('${result['completed'] ?? ids.length}') ?? ids.length;
         _total = int.tryParse('${result['total'] ?? ids.length}') ?? ids.length;
         _running = false;
       });
@@ -184,12 +197,12 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
       final status = await widget.batchBridge.batchStatus(batchId);
       if (!mounted || _batchId != batchId) return;
       setState(() {
-        _completed = int.tryParse('${status['completed'] ?? _completed}') ?? _completed;
+        _completed =
+            int.tryParse('${status['completed'] ?? _completed}') ?? _completed;
         _total = int.tryParse('${status['total'] ?? _total}') ?? _total;
       });
     } catch (_) {
-      // Polling is presentation-only. The authoritative upload invocation still
-      // returns the final aggregate result.
+      // Presentation-only polling. The invocation result stays authoritative.
     }
   }
 
@@ -205,19 +218,27 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
 
   Map<String, dynamic> get _counts {
     final raw = _result?['counts'];
-    return raw is Map ? Map<String, dynamic>.from(raw) : const {};
+    return raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : const <String, dynamic>{};
   }
 
   List<int> get _retryable {
     final raw = _result?['retryableLocalFileIds'];
     if (raw is! List) return const [];
-    return raw.map((value) => int.tryParse('$value')).whereType<int>().toList(growable: false);
+    return raw
+        .map((value) => int.tryParse('$value'))
+        .whereType<int>()
+        .toList(growable: false);
   }
 
   List<int> get _manualCheck {
     final raw = _result?['manualCheckLocalFileIds'];
     if (raw is! List) return const [];
-    return raw.map((value) => int.tryParse('$value')).whereType<int>().toList(growable: false);
+    return raw
+        .map((value) => int.tryParse('$value'))
+        .whereType<int>()
+        .toList(growable: false);
   }
 
   int _count(String key) => int.tryParse('${_counts[key] ?? 0}') ?? 0;
@@ -279,7 +300,10 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
                       .map(
                         (target) => DropdownMenuItem<String>(
                           value: target.playlistKind,
-                          child: Text(target.title, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            target.title,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       )
                       .toList(growable: false),
@@ -301,7 +325,11 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
               if (_running) ...[
                 const SizedBox(height: 8),
                 LinearProgressIndicator(
-                  value: _total > 0 ? (_completed / _total).clamp(0.0, 1.0) : null,
+                  value: _total > 0
+                      ? (_completed / _total)
+                            .clamp(0.0, 1.0)
+                            .toDouble()
+                      : null,
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -331,12 +359,20 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
                           spacing: 14,
                           runSpacing: 6,
                           children: [
-                            Text('${l10n.v0111Verified}: ${_count('verified')}'),
-                            Text('${l10n.v0111Processing}: ${_count('processing')}'),
-                            Text('${l10n.v0111DeliveryUnknown}: ${_count('deliveryUnknown')}'),
+                            Text(
+                              '${l10n.v0111Verified}: ${_count('verified')}',
+                            ),
+                            Text(
+                              '${l10n.v0111Processing}: ${_count('processing')}',
+                            ),
+                            Text(
+                              '${l10n.v0111DeliveryUnknown}: ${_count('deliveryUnknown')}',
+                            ),
                             Text('${l10n.v0111Failed}: ${_count('failed')}'),
                             Text('${l10n.v0111Skipped}: ${_count('skipped')}'),
-                            Text('${l10n.v0111Cancelled}: ${_count('cancelled')}'),
+                            Text(
+                              '${l10n.v0111Cancelled}: ${_count('cancelled')}',
+                            ),
                           ],
                         ),
                         if (_manualCheck.isNotEmpty) ...[
@@ -356,11 +392,11 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
                 Text(
                   l10n.yandexUploadNetworkError,
                   key: const Key('yandex-batch-error'),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
               ],
-              // Keep the managed state in the dialog's dependency graph so the
-              // default role selection is testable without exposing numeric kinds.
               if (_managed.isEmpty) const SizedBox.shrink(),
             ],
           ),
@@ -388,7 +424,9 @@ class _YandexBatchUploadDialogState extends State<YandexBatchUploadDialog> {
         else if (!hasResult)
           FilledButton.icon(
             key: const Key('yandex-batch-submit'),
-            onPressed: !_loading && _selectedKind != null && _rights ? () => _start() : null,
+            onPressed: !_loading && _selectedKind != null && _rights
+                ? () => _start()
+                : null,
             icon: const Icon(Icons.cloud_upload_outlined),
             label: Text(l10n.v0111UploadToYandex),
           ),

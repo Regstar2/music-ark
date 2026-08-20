@@ -214,7 +214,7 @@ void main() {
     await pumpDialog(tester, bridge: bridge);
     await satisfyRequirements(tester);
     await tester.tap(find.byKey(const Key('yandex-upload-submit')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(
       find.byKey(const Key('yandex-upload-state-processing')),
       findsOneWidget,

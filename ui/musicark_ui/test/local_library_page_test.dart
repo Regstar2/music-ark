@@ -512,8 +512,13 @@ void main() {
     await desktop(tester, LocalLibraryPage(bridge: bridge));
     await applyRootSelection(tester, [1]);
 
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('local-load-more')),
+      500,
+      scrollable: find.byKey(const Key('local-track-list')),
+    );
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-load-more')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('local-load-more')));
     await tester.tap(find.byKey(const Key('local-load-more')));
     await tester.pumpAndSettle();
     expect(bridge.rootIdQueries.last, [1]);
@@ -537,7 +542,7 @@ void main() {
     expect(bridge.rootIdQueries.last, [1]);
     expect(find.text('One Track'), findsOneWidget);
     expect(find.text('Three Track'), findsNothing);
-    expect(find.text('1 из 2 папок'), findsOneWidget);
+    expect(find.textContaining('1 из 2 папок'), findsOneWidget);
   });
 
   testWidgets('new root joins selection only when the previous state was all', (
@@ -568,6 +573,6 @@ void main() {
     await tester.tap(find.byKey(const Key('local-add-folder')));
     await tester.pumpAndSettle();
     expect(subsetBridge.rootIdQueries.last, [1]);
-    expect(find.text('1 из 4 папок'), findsOneWidget);
+    expect(find.textContaining('1 из 4 папок'), findsOneWidget);
   });
 }

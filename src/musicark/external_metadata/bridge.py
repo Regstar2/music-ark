@@ -65,6 +65,49 @@ def _safe_network_error_detail(exc: Exception) -> str:
     return text[:180]
 
 
+def _network_probe(
+    transport: ExternalNetworkTransport,
+    source: str,
+    url: str,
+    *,
+    optional: bool = False,
+) -> dict[str, Any]:
+    try:
+        response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
+        status = int(response.status_code)
+        if 200 <= status < 400:
+            state = "ok"
+        elif status < 500:
+            state = "host_reached"
+        else:
+            state = "failed"
+        return {
+            "source": source,
+            "state": state,
+            "optional": optional,
+            "reachable": status < 500,
+            "statusCode": status,
+        }
+    except Exception as exc:  # noqa: BLE001 - diagnostics must isolate each provider.
+        return {
+            "source": source,
+            "state": "failed",
+            "optional": optional,
+            "reachable": False,
+            "error": type(exc).__name__,
+            "errorDetail": _safe_network_error_detail(exc),
+        }
+
+
+def _not_configured(source: str) -> dict[str, Any]:
+    return {
+        "source": source,
+        "state": "not_configured",
+        "optional": True,
+        "reachable": None,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="musicark-external-metadata-bridge")
     parser.add_argument("--base-dir", default=None)
@@ -113,38 +156,62 @@ def main() -> int:
         elif args.command == "network_test":
             current_settings = settings.load()
             warp_status = warp.status()
-            probes = {
-                "musicbrainz": "https://musicbrainz.org/ws/2/recording?query=recording%3Atest&limit=1&fmt=json",
-                "listenbrainz_mapper": "https://mapper.listenbrainz.org/mapping/lookup?artist_credit_name=Portishead&recording_name=Glory%20Box",
-                "acoustid": "https://api.acoustid.org/",
-                "cover_art_archive": "https://coverartarchive.org/",
-                "discogs": "https://api.discogs.com/",
-                "theaudiodb": "https://www.theaudiodb.com/",
-                "lastfm": "https://ws.audioscrobbler.com/2.0/",
-            }
-            items = []
+            credentials = ExternalCredentialStore()
+            items: list[dict[str, Any]] = []
             if current_settings.mode is NetworkMode.WARP and warp_status.state is not WarpState.PROXY_READY:
                 items = [
-                    {"source": source, "reachable": False, "error": "warp_local_proxy_not_ready"}
-                    for source in probes
+                    {
+                        "source": source,
+                        "state": "failed",
+                        "optional": False,
+                        "reachable": False,
+                        "error": "warp_local_proxy_not_ready",
+                    }
+                    for source in ("musicbrainz", "cover_art_archive")
                 ]
             else:
                 transport = ExternalNetworkTransport(settings)
-                for source, url in probes.items():
-                    try:
-                        response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
-                        items.append({
-                            "source": source,
-                            "reachable": response.status_code < 500,
-                            "statusCode": response.status_code,
-                        })
-                    except Exception as exc:  # noqa: BLE001
-                        items.append({
-                            "source": source,
-                            "reachable": False,
-                            "error": type(exc).__name__,
-                            "errorDetail": _safe_network_error_detail(exc),
-                        })
+
+                # MusicBrainz is the primary catalog. The ListenBrainz mapper is
+                # tested only if the primary endpoint fails; it is a fallback,
+                # not another mandatory dependency that should make a healthy
+                # configuration look broken.
+                musicbrainz = _network_probe(
+                    transport,
+                    "musicbrainz",
+                    "https://musicbrainz.org/ws/2/recording?query=recording%3Atest&limit=1&fmt=json",
+                )
+                items.append(musicbrainz)
+                if musicbrainz.get("state") != "ok":
+                    items.append(_network_probe(
+                        transport,
+                        "listenbrainz_mapper",
+                        "https://mapper.listenbrainz.org/mapping/lookup?artist_credit_name=Portishead&recording_name=Glory%20Box",
+                        optional=True,
+                    ))
+
+                items.append(_network_probe(
+                    transport,
+                    "cover_art_archive",
+                    "https://coverartarchive.org/",
+                ))
+
+                # These providers require credentials for actual lookups. Do not
+                # report their unauthenticated 403/404 landing responses as API
+                # health. A missing credential is a configuration state, not a
+                # network error.
+                credential_probes = (
+                    ("acoustid", "acoustid_key", "https://api.acoustid.org/"),
+                    ("discogs", "discogs_token", "https://api.discogs.com/"),
+                    ("theaudiodb", "theaudiodb_key", "https://www.theaudiodb.com/"),
+                    ("lastfm", "lastfm_key", "https://ws.audioscrobbler.com/2.0/"),
+                )
+                for source, credential_name, url in credential_probes:
+                    if credentials.get(credential_name):
+                        items.append(_network_probe(transport, source, url, optional=True))
+                    else:
+                        items.append(_not_configured(source))
+
             payload = {
                 "items": items,
                 "warp": warp_status.as_dict(),

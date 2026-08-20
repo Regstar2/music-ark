@@ -198,8 +198,6 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     final items = result['items'];
     if (items is List) {
       _networkItems = items.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList();
-      final reachable = _networkItems.where((item) => item['reachable'] == true).length;
-      _message = '$reachable/${_networkItems.length}';
     }
   }
 
@@ -264,11 +262,11 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
         _ => source,
       };
 
-  String _networkDetail(Map<String, dynamic> item) {
+  String _networkDetail(Map<String, dynamic> item, V012Strings s) {
     if (item['reachable'] == true) {
       final status = item['statusCode'];
       if (status == null) return 'OK';
-      if (status is num && status >= 400) return 'HTTP $status · host reached';
+      if (status is num && status >= 400) return 'HTTP $status · ${s.hostReached}';
       return 'HTTP $status';
     }
     return '${item['error'] ?? 'unreachable'}';
@@ -296,6 +294,15 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
       if (_warpServiceMode.isNotEmpty) _warpServiceMode,
       if (_warpMessage.isNotEmpty) _warpMessage,
     ].join(' · ');
+    final apiOk = _networkItems.where((item) {
+      final status = item['statusCode'];
+      return item['reachable'] == true && status is num && status < 400;
+    }).length;
+    final hostReached = _networkItems.where((item) {
+      final status = item['statusCode'];
+      return item['reachable'] == true && status is num && status >= 400;
+    }).length;
+    final failed = _networkItems.where((item) => item['reachable'] != true).length;
 
     return Card(
       key: const Key('network-settings-card'),
@@ -364,7 +371,13 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
             const SizedBox(height: 6),
             Text(warpDetails, key: const Key('warp-status-detail'), style: Theme.of(context).textTheme.bodySmall),
           ],
-          if (_message != null) ...[const SizedBox(height: 8), Text(_message!, key: const Key('network-result'))],
+          if (_message != null) ...[
+            const SizedBox(height: 8),
+            Text(_message!, key: const Key('network-result')),
+          ] else if (_networkItems.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(s.networkSummary(apiOk, hostReached, failed), key: const Key('network-result')),
+          ],
           if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(
@@ -375,7 +388,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
                   Chip(
                     key: Key('network-source-${item['source']}'),
                     avatar: Icon(_networkIcon(item), size: 18),
-                    label: Text('${_sourceLabel('${item['source'] ?? ''}')} · ${_networkDetail(item)}'),
+                    label: Text('${_sourceLabel('${item['source'] ?? ''}')} · ${_networkDetail(item, s)}'),
                   ),
               ],
             ),

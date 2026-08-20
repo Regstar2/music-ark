@@ -20,11 +20,13 @@ class V012Strings {
   String get testConnection => ru ? 'Проверить подключение' : 'Test connection';
   String get installWarp => ru ? 'Установить WARP' : 'Install WARP';
   String get enableWarp => ru ? 'Включить WARP' : 'Enable WARP';
+  String get configureWarpProxy => ru ? 'Настроить Local Proxy' : 'Configure Local Proxy';
   String get disableWarp => ru ? 'Отключить WARP' : 'Disable WARP';
   String get save => ru ? 'Сохранить' : 'Save';
   String get notInstalled => ru ? 'Не установлен' : 'Not installed';
   String get installed => ru ? 'Установлен' : 'Installed';
   String get connected => ru ? 'Подключён' : 'Connected';
+  String get configuring => ru ? 'Настраивается…' : 'Configuring…';
   String get localProxyReady => ru ? 'Local Proxy готов' : 'Local Proxy ready';
   String get localProxyNotReady => ru ? 'Подключён, Local Proxy не готов' : 'Connected, Local Proxy not ready';
   String get loading => ru ? 'Проверка…' : 'Checking…';

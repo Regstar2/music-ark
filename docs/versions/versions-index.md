@@ -11,54 +11,38 @@
 | v0.6.0 | Missing Tracks / Library Coverage | complete |
 | v0.7.0 | Download + Local Playback | complete |
 | v0.8.0 | Controlled Sync | complete |
-| v0.8.1 | Yandex Metadata Preservation / Rich Download Metadata | complete |
-| v0.8.2 | Local Metadata Editor / Yandex Metadata Import | complete |
-| v0.9.0 | UI, Account & Settings | complete |
-| v0.9.1 | Main Screen UI Polish | complete |
-| v0.9.2 | Local Library UI & Multi-Root Selection | complete |
-| v0.9.3 | Matching UI Redesign | complete |
-| v0.9.4 | Coverage / Missing UI Polish | complete |
-| v0.9.5 | Downloads UI, Safe Deletion & Bulk Actions | complete |
-| v0.9.6 | Sync Page UI Polish | complete |
-| v0.9.7 | Settings, Help & About UI Polish | complete |
-| v0.10.0 | Yandex Upload Feasibility | complete / blocked |
-| next | Upload architecture / production decision | decision required |
+| v0.8.1 | Rich Yandex download metadata/provenance | complete |
+| v0.8.2 | Local Metadata Editor / Yandex Metadata | complete |
+| v0.9.x | Desktop UI improvement line | complete |
+| v0.10.0 | Yandex Upload Feasibility | complete |
+| v0.11.0 | Production Single-Track Yandex Upload | complete |
+| v0.11.1 | Bulk Upload, Recovery Sync & Scope Context | complete |
+| v0.12.0 | External Metadata & Resilient Network Access | complete |
+| v0.13.0 | Multi-Format Audio & Safe Yandex Conversion | complete |
+| v0.14.0 | Large Library Performance & Release Hardening | implementation |
+| v0.15.0 | Installer, Auto-Update, Feedback & Packaging | planned |
+| v1.0.0 | Release Freeze & Public Release | planned |
 
-Version notes:
+## Version notes
 
-- `docs/versions/v0.1.0.md`
-- `docs/versions/v0.2.0.md`
-- `docs/versions/v0.3.0.md`
-- `docs/versions/v0.4.0.md`
-- `docs/versions/v0.5.0.md`
-- `docs/versions/v0.5.1.md`
-- `docs/versions/v0.6.0.md`
-- `docs/versions/v0.7.0.md`
-- `docs/versions/v0.8.0.md`
-- `docs/versions/v0.8.1.md`
-- `docs/versions/v0.8.2.md`
-- `docs/versions/v0.9.0.md`
-- `docs/versions/v0.9.1.md`
-- `docs/versions/v0.9.2.md`
-- `docs/versions/v0.9.3.md`
-- `docs/versions/v0.9.4.md`
-- `docs/versions/v0.9.5.md`
-- `docs/versions/v0.9.6.md`
-- `docs/versions/v0.9.7.md`
-- `docs/versions/v0.10.0.md`
+Historical version notes are stored under `docs/versions/`. The release-hardening line uses:
 
-Current package/application version is `0.10.0`; current schema target remains `1.8.4`.
+- `docs/versions/v0.11.1.md`;
+- `docs/versions/v0.12.0.md`;
+- `docs/versions/v0.14.0.md`.
 
-v0.9.x is complete. v0.10.0 is a research/technical feasibility milestone and ends as `BLOCKED`: Yandex Music's user-facing own-track workflow is documented, but MusicArk does not have a verified programmatic endpoint/authentication/request/response contract for it.
+A standalone `docs/versions/v0.13.0.md` was not present in the repository when v0.14 work began; v0.14 does not fabricate historical validation results for that merged version. The current source and regression suites remain authoritative for its multi-format/conversion behavior.
 
-The v0.10.0 result does not enable `can_upload_tracks` or `supports_user_uploads`, does not add Upload UI/queue/reverse Sync, and does not claim that MusicArk can upload a local file to Yandex Music.
+Current application/backend version target is `0.14.0`, Flutter is `0.14.0+1`, and the core SQLite schema target remains `1.9.0` because v0.14 introduces no schema migration.
 
-The obsolete experimental upload compatibility entry point is fail-closed: it does not read the candidate local file, log its path or send a Yandex upload request.
+## Release line
 
-v0.9.6 Controlled Sync boundaries remain authoritative: existing local audio is not deleted/moved/renamed/retagged, Yandex collections are not mutated, Apply still requires confirmation, and `DIFFERENT_VERSION` never triggers automatic replacement.
+The remaining pre-1.0 roadmap is intentionally frozen:
 
-v0.9.5 safe task deletion remains unchanged: removing a failed/needs-review download task removes only the task record and does not delete the final audio file, Local Library, Matching, Coverage, Wanted state or audit history.
+```text
+v0.14.0 — Large Library Performance & Release Hardening
+v0.15.0 — Installer, Auto-Update, Feedback & Packaging
+v1.0.0  — Release Freeze & Public Release
+```
 
-v0.8.2 safety remains authoritative: ordinary Scan/Matching/Coverage/Sync do not rewrite existing user audio files, and Metadata Editor remains the explicit write boundary.
-
-This index describes source state and does not by itself indicate that v0.10.0 has been published as a GitHub Release. The next upload-related product version requires an explicit architecture decision based on new evidence.
+No version note or status in this index by itself implies that a GitHub Release or tag has been published.

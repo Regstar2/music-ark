@@ -50,6 +50,8 @@ class _DownloadPageState extends State<DownloadPage> {
   List<Map<String, dynamic>> _wantedItems = const [];
   int _wantedTotal = 0;
   Timer? _pollTimer;
+  int _loadGeneration = 0;
+  int _wantedLoadGeneration = 0;
 
   @override
   void initState() {
@@ -85,6 +87,7 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Future<void> _load({bool showSpinner = false}) async {
+    final generation = ++_loadGeneration;
     if (showSpinner && mounted) setState(() => _loading = true);
     try {
       final taskStatus = _filter == 'failed' ? '' : _filter;
@@ -92,7 +95,7 @@ class _DownloadPageState extends State<DownloadPage> {
         widget.bridge.summary(),
         widget.bridge.tasks(status: taskStatus, limit: 5000),
       ]);
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       final rawItems = results[1]['items'];
       var items = rawItems is List
           ? rawItems.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
@@ -113,7 +116,7 @@ class _DownloadPageState extends State<DownloadPage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _error = error.toString();
         _loading = false;
@@ -122,6 +125,7 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Future<void> _loadWanted({bool showSpinner = false}) async {
+    final generation = ++_wantedLoadGeneration;
     final bridge = widget.coverageBridge;
     if (bridge == null) {
       if (mounted) {
@@ -143,7 +147,7 @@ class _DownloadPageState extends State<DownloadPage> {
         userAction: 'wanted',
         sort: 'artist',
       );
-      if (!mounted) return;
+      if (!mounted || generation != _wantedLoadGeneration) return;
       final rawItems = payload['items'];
       final items = rawItems is List
           ? rawItems.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
@@ -157,7 +161,7 @@ class _DownloadPageState extends State<DownloadPage> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _wantedLoadGeneration) return;
       setState(() {
         _wantedLoading = false;
         _error = error.toString();

@@ -55,6 +55,7 @@ class _CoveragePageState extends State<CoveragePage> {
   bool _matching = false;
   bool _analysisExpanded = false;
   String? _error;
+  int _requestGeneration = 0;
 
   int get _pageLimit => _pageSize;
 
@@ -77,6 +78,7 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   Future<void> _load({bool initial = false}) async {
+    final generation = ++_requestGeneration;
     if (mounted) {
       setState(() {
         _loading = true;
@@ -98,7 +100,7 @@ class _CoveragePageState extends State<CoveragePage> {
           variantStatus: _variantStatus,
         ),
       ]);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       final summary = Map<String, dynamic>.from(results[0]);
       final tracks = Map<String, dynamic>.from(results.last);
       setState(() {
@@ -111,7 +113,7 @@ class _CoveragePageState extends State<CoveragePage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _loading = false;
         _error = error.toString();
@@ -123,6 +125,7 @@ class _CoveragePageState extends State<CoveragePage> {
     bool refreshSummary = true,
     bool clearSelection = false,
   }) async {
+    final generation = ++_requestGeneration;
     if (mounted) {
       setState(() {
         _loading = true;
@@ -145,7 +148,7 @@ class _CoveragePageState extends State<CoveragePage> {
         ),
       ];
       final results = await Future.wait(futures);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       var tracks = Map<String, dynamic>.from(results.last);
       var items = _maps(tracks['items']);
       var total = _asInt(tracks['count']);
@@ -162,7 +165,7 @@ class _CoveragePageState extends State<CoveragePage> {
           userAction: _userAction,
           variantStatus: _variantStatus,
         );
-        if (!mounted) return;
+        if (!mounted || generation != _requestGeneration) return;
         items = _maps(tracks['items']);
         total = _asInt(tracks['count']);
         _offset = nextOffset;
@@ -178,7 +181,7 @@ class _CoveragePageState extends State<CoveragePage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _loading = false;
         _error = error.toString();

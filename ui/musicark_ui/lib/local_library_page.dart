@@ -57,7 +57,7 @@ class LocalLibraryPage extends StatefulWidget {
 }
 
 class _LocalLibraryPageState extends State<LocalLibraryPage> {
-  static const _pageSize = 500;
+  static const _pageSize = 250;
   static const _wideTrackTable = 980.0;
 
   final _search = TextEditingController();
@@ -72,6 +72,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   String? _status;
   bool _statusIsError = false;
   String? _error;
+  int _requestGeneration = 0;
 
   @override
   void initState() {
@@ -137,9 +138,8 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   }
 
   Future<void> _activate() async {
+    // Opening Local Library is cache-first. Filesystem traversal is explicit.
     await _reload();
-    if (!mounted || _roots.isEmpty) return;
-    await _scan();
   }
 
   Future<List<Map<String, dynamic>>> _withContentLabels(
@@ -230,6 +230,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
   }
 
   Future<void> _reload({bool preserveStatus = false}) async {
+    final generation = ++_requestGeneration;
     setState(() {
       _busy = true;
       _error = null;
@@ -251,7 +252,7 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       );
       var tracks = await _withArtwork(_maps(tracksPayload['items']));
       tracks = await _withContentLabels(tracks);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _roots = roots;
         _selectedRootIds = selected;
@@ -267,14 +268,19 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         _total = int.tryParse('${tracksPayload['count'] ?? 0}') ?? 0;
       });
     } on MusicArkBridgeException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = error.message);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _busy = false);
+      }
     }
   }
 
   Future<void> _loadMore() async {
     if (_tracks.length >= _total || _busy) return;
+    final generation = _requestGeneration;
     setState(() => _busy = true);
     try {
       final payload = await widget.bridge.localTracks(
@@ -286,15 +292,19 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
       );
       var items = await _withArtwork(_maps(payload['items']));
       items = await _withContentLabels(items);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _tracks = [..._tracks, ...items];
         _total = int.tryParse('${payload['count'] ?? _total}') ?? _total;
       });
     } on MusicArkBridgeException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = error.message);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _busy = false);
+      }
     }
   }
 

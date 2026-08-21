@@ -66,7 +66,10 @@ class LocalLibraryScanner:
             result.errors += 1
             if len(result.error_items) < 100:
                 result.error_items.append(
-                    {"path": str(getattr(error, "filename", root.path) or root.path), "error": str(error)}
+                    {
+                        "path": str(getattr(error, "filename", root.path) or root.path),
+                        "error": str(error),
+                    }
                 )
 
         for current, dir_names, file_names in os.walk(
@@ -92,6 +95,10 @@ class LocalLibraryScanner:
                 try:
                     info = path.stat()
                 except OSError as exc:
+                    # The walk no longer has a complete view of this root. Failing
+                    # closed on removals is more important than pruning a possibly
+                    # stale row during this scan.
+                    walk_failed = True
                     self._record_error(result, path, exc)
                     continue
 
@@ -99,7 +106,9 @@ class LocalLibraryScanner:
                 seen.add(normalized)
                 result.scanned_files += 1
                 old = existing.get(normalized)
-                modified_ns = int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000)))
+                modified_ns = int(
+                    getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))
+                )
                 if (
                     old is not None
                     and int(old["file_size"]) == int(info.st_size)
@@ -132,10 +141,15 @@ class LocalLibraryScanner:
                 else:
                     result.updated += 1
 
+        # file_states() is already the authoritative pre-scan snapshot. Computing
+        # the missing set in memory avoids pushing every unchanged path through a
+        # temporary SQLite table and avoids O(N) last_seen_at rewrites.
+        missing = set(existing).difference(seen) if not walk_failed else set()
         result.removed = self._repository.apply_scan(
             root.id,
             upserts=upserts,
             seen_normalized_paths=seen,
+            missing_normalized_paths=missing,
             scanned_at=_utc_now(),
             allow_removals=not walk_failed,
         )

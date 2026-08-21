@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -38,7 +39,7 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.db = self.root / "musicark.db"
         initialize_database(self.db)
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             with conn:
                 migrate_external_metadata_v012(conn)
 
@@ -60,7 +61,7 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(payload["evidence"][0]["type"], "EXACT_RECORDING_MBID")
 
     def test_external_migration_is_additive_and_idempotent(self) -> None:
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             with conn:
                 self.assertEqual(migrate_external_metadata_v012(conn), "1")
                 self.assertEqual(migrate_external_metadata_v012(conn), "1")

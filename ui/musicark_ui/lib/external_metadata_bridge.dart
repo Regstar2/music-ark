@@ -11,6 +11,8 @@ abstract interface class ExternalMetadataBridgeClient {
   Future<Map<String, dynamic>> getNetworkSettings();
   Future<Map<String, dynamic>> updateNetworkSettings(Map<String, dynamic> settings);
   Future<Map<String, dynamic>> testNetwork();
+  Future<Map<String, dynamic>> getExternalCredentialStatus();
+  Future<Map<String, dynamic>> updateExternalCredentials(Map<String, dynamic> credentials);
   Future<Map<String, dynamic>> warpStatus();
   Future<Map<String, dynamic>> installWarp();
   Future<Map<String, dynamic>> enableWarp();
@@ -44,6 +46,13 @@ class ExternalMetadataBridge implements ExternalMetadataBridgeClient {
 
   @override
   Future<Map<String, dynamic>> testNetwork() => _run('network_test');
+
+  @override
+  Future<Map<String, dynamic>> getExternalCredentialStatus() => _run('external_credentials_get');
+
+  @override
+  Future<Map<String, dynamic>> updateExternalCredentials(Map<String, dynamic> credentials) =>
+      _run('external_credentials_update', payload: credentials);
 
   @override
   Future<Map<String, dynamic>> warpStatus() => _run('warp_status');
@@ -174,6 +183,12 @@ class FakeExternalMetadataBridge implements ExternalMetadataBridgeClient {
   String networkMode;
   String warpState;
   final List<Map<String, dynamic>> candidates;
+  final Map<String, dynamic> credentialStatus = {
+    'acoustid': {'configured': false, 'origin': 'missing', 'advanced': true},
+    'discogs': {'configured': false, 'origin': 'missing', 'advanced': true},
+    'theaudiodb': {'configured': true, 'origin': 'builtin_free', 'advanced': false},
+    'lastfm': {'configured': false, 'origin': 'missing', 'advanced': true},
+  };
 
   @override
   Future<Map<String, dynamic>> identify(int localFileId, {bool continueSearch = false}) async => {'items': candidates, 'sources': const [], 'earlyStop': !continueSearch};
@@ -188,7 +203,29 @@ class FakeExternalMetadataBridge implements ExternalMetadataBridgeClient {
   @override
   Future<Map<String, dynamic>> updateNetworkSettings(Map<String, dynamic> settings) async { networkMode = '${settings['networkMode'] ?? networkMode}'; return getNetworkSettings(); }
   @override
-  Future<Map<String, dynamic>> testNetwork() async => {'items': const [], 'warp': {'state': warpState}};
+  Future<Map<String, dynamic>> testNetwork() async => {'items': const [], 'warp': {'state': warpState}, 'credentials': credentialStatus};
+  @override
+  Future<Map<String, dynamic>> getExternalCredentialStatus() async => {'credentials': credentialStatus};
+  @override
+  Future<Map<String, dynamic>> updateExternalCredentials(Map<String, dynamic> credentials) async {
+    for (final entry in credentials.entries) {
+      final provider = switch (entry.key) {
+        'acoustid_key' => 'acoustid',
+        'discogs_token' => 'discogs',
+        'theaudiodb_key' => 'theaudiodb',
+        'lastfm_key' => 'lastfm',
+        _ => '',
+      };
+      if (provider.isNotEmpty) {
+        credentialStatus[provider] = {
+          'configured': '${entry.value}'.trim().isNotEmpty,
+          'origin': '${entry.value}'.trim().isNotEmpty ? 'keyring' : 'missing',
+          'advanced': provider != 'theaudiodb',
+        };
+      }
+    }
+    return {'credentials': credentialStatus};
+  }
   @override
   Future<Map<String, dynamic>> warpStatus() async => {'warp': {'state': warpState, 'installedByMusicArk': false}};
   @override

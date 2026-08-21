@@ -149,7 +149,7 @@ class LocalLibraryService:
             if root_ids is None
             else list(dict.fromkeys(int(value) for value in root_ids))
         )
-        page_limit = max(1, min(int(limit), 5000))
+        page_limit = max(1, min(int(limit), 250))
         page_offset = max(0, int(offset))
         items, total = self._repository.list_tracks(
             limit=page_limit,

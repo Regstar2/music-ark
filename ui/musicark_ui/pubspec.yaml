@@ -1,7 +1,7 @@
 name: musicark_ui
 description: "MusicArk desktop UI."
 publish_to: 'none'
-version: 0.13.0+1
+version: 0.14.0+1
 
 environment:
   sdk: ^3.11.5

@@ -14,10 +14,10 @@ from musicark.core.config import load_config
 from musicark.metadata.service import MetadataEditorService
 from musicark.storage.database import initialize_database
 
+from .automatic_resolver import AutomaticExternalMetadataResolver
 from .credentials import ExternalCredentialStore
 from .editor import ExternalMetadataEditor
 from .network import ExternalNetworkTransport, NetworkMode, NetworkSettingsStore
-from .yandex_first_resolver import YandexFirstExternalMetadataResolver
 from .warp import WarpService, WarpState
 
 
@@ -169,9 +169,9 @@ def main() -> int:
                 transport = ExternalNetworkTransport(settings)
 
                 # Network diagnostics exercise the acoustic rescue path rather
-                # than implying that it is the normal first lookup.  Yandex-first
-                # identification uses these services only when catalog text search
-                # cannot produce a strong candidate.
+                # than implying that it is the normal first lookup. Yandex-first
+                # identification uses these services only when cleaned catalog
+                # text search cannot produce a strong candidate.
                 acoustid_key = credentials.get("acoustid_key")
                 if acoustid_key:
                     items.append(_network_probe(
@@ -201,7 +201,7 @@ def main() -> int:
         else:
             if args.local_file_id is None:
                 raise ValueError("--local-file-id is required.")
-            resolver = YandexFirstExternalMetadataResolver(database_path, base_dir)
+            resolver = AutomaticExternalMetadataResolver(database_path, base_dir)
             editor = ExternalMetadataEditor(MetadataEditorService(base_dir=base_dir, database_path=database_path), resolver)
             if args.command == "external_metadata_identify":
                 payload = resolver.identify(args.local_file_id, continue_search=args.continue_search)

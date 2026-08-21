@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -173,7 +174,7 @@ class WarpV012Tests(unittest.TestCase):
     def test_ownership_marker_is_explicit(self) -> None:
         service = WarpService(self.db)
         service._mark_owned("test")  # noqa: SLF001 - verifies persisted uninstaller boundary.
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             row = conn.execute("SELECT installed_by_musicark FROM network_component_state WHERE component_id='cloudflare_warp'").fetchone()
         self.assertEqual(row[0], 1)
 

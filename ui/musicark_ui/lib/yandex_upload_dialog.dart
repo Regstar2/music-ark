@@ -50,18 +50,31 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
 
   int? get _localFileId => int.tryParse('${widget.track['id']}');
 
-  bool get _isMp3 {
+  bool get _legacyMp3 {
     final extension = '${widget.track['extension'] ?? ''}'.trim().toLowerCase();
     final filename = '${widget.track['fileName'] ?? ''}'.trim().toLowerCase();
     return extension == '.mp3' || extension == 'mp3' || filename.endsWith('.mp3');
   }
+
+  String get _uploadMode {
+    final value = '${widget.track['uploadMode'] ?? ''}'.trim().toLowerCase();
+    if (value == 'direct' || value == 'convert' || value == 'unsupported') {
+      return value;
+    }
+    // Compatibility for old/test payloads. Production v0.13 Local Library rows
+    // receive uploadMode from the backend capability registry.
+    return _legacyMp3 ? 'direct' : 'unsupported';
+  }
+
+  bool get _requiresConversion => _uploadMode == 'convert';
+  bool get _uploadSupported => _uploadMode != 'unsupported';
 
   bool get _canSubmit =>
       !_loadingTargets &&
       !_submitting &&
       _result == null &&
       _authenticated &&
-      _isMp3 &&
+      _uploadSupported &&
       _localFileId != null &&
       _selectedPlaylistKind != null &&
       _rightsConfirmed;
@@ -85,12 +98,6 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
             targets.playlists.any((item) => item.playlistKind == preferred)) {
           _selectedPlaylistKind = preferred;
         }
-        _loadingTargets = false;
-      });
-    } on MusicArkBridgeException {
-      if (!mounted) return;
-      setState(() {
-        _loadError = 'bridge';
         _loadingTargets = false;
       });
     } catch (_) {
@@ -120,12 +127,6 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         _result = result;
         _submitting = false;
       });
-    } on MusicArkBridgeException {
-      if (!mounted) return;
-      setState(() {
-        _loadError = 'bridge';
-        _submitting = false;
-      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -138,10 +139,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
   String _artists() {
     final raw = widget.track['artists'];
     if (raw is List) {
-      final text = raw
-          .map((item) => '$item')
-          .where((item) => item.isNotEmpty)
-          .join(', ');
+      final text = raw.map((item) => '$item').where((item) => item.isNotEmpty).join(', ');
       if (text.isNotEmpty) return text;
     }
     return context.l10n.localUnknownArtist;
@@ -156,29 +154,32 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         : '${(raw / 1024).toStringAsFixed(0)} KB';
   }
 
+  String get _sourceFormat {
+    final explicit = '${widget.track['format'] ?? ''}'.trim();
+    if (explicit.isNotEmpty) return explicit;
+    final extension = '${widget.track['extension'] ?? ''}'.trim().replaceFirst('.', '');
+    return extension.isEmpty ? '—' : extension.toUpperCase();
+  }
+
   String _failureBody(YandexUploadResult result) {
-    final details = <String>[];
-    if (result.stage1HttpStatus != null) {
-      details.add('Stage 1 HTTP ${result.stage1HttpStatus}');
-    }
-    if (result.stage2HttpStatus != null) {
-      details.add('Stage 2 HTTP ${result.stage2HttpStatus}');
-    }
     final errorCode = result.errorCode?.trim();
-    if (errorCode != null && errorCode.isNotEmpty) {
-      details.add('Code: $errorCode');
+    if (errorCode == 'ffmpeg_not_available') {
+      return context.v013FfmpegUnavailable;
     }
-    if (result.readBackAttempts > 0) {
-      details.add('Read-back: ${result.readBackAttempts}');
+    if (errorCode == 'unsupported_input_format') {
+      return context.v013UnsupportedFormat;
     }
+    final details = <String>[];
+    if (result.stage1HttpStatus != null) details.add('Stage 1 HTTP ${result.stage1HttpStatus}');
+    if (result.stage2HttpStatus != null) details.add('Stage 2 HTTP ${result.stage2HttpStatus}');
+    if (errorCode != null && errorCode.isNotEmpty) details.add('Code: $errorCode');
+    if (result.readBackAttempts > 0) details.add('Read-back: ${result.readBackAttempts}');
     if (details.isEmpty) return context.l10n.yandexUploadNetworkError;
     return '${context.l10n.yandexUploadNetworkError}\n${details.join(' · ')}';
   }
 
   Widget _artwork() {
-    final artwork = Map<String, dynamic>.from(
-      widget.track['artwork'] as Map? ?? const {},
-    );
+    final artwork = Map<String, dynamic>.from(widget.track['artwork'] as Map? ?? const {});
     final path = '${artwork['cachePath'] ?? ''}';
     final file = path.isEmpty ? null : File(path);
     return ClipRRect(
@@ -187,12 +188,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         width: 72,
         height: 72,
         child: file != null && file.existsSync()
-            ? Image.file(
-                file,
-                fit: BoxFit.cover,
-                cacheWidth: 144,
-                cacheHeight: 144,
-              )
+            ? Image.file(file, fit: BoxFit.cover, cacheWidth: 144, cacheHeight: 144)
             : ColoredBox(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: const Icon(Icons.album_outlined, size: 40),
@@ -205,6 +201,18 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
     final l10n = context.l10n;
     final result = _result;
     if (_submitting) {
+      if (_requiresConversion) {
+        return _UploadStateCard(
+          key: const Key('yandex-upload-state-converting'),
+          icon: const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          title: context.v013Converting,
+          body: context.v013ConvertingHint,
+        );
+      }
       return _UploadStateCard(
         key: const Key('yandex-upload-state-uploading'),
         icon: const SizedBox(
@@ -244,7 +252,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
         key: const Key('yandex-upload-state-unsupported'),
         icon: const Icon(Icons.warning_amber_outlined),
         title: l10n.yandexUploadError,
-        body: l10n.yandexUploadMp3Only,
+        body: context.v013UnsupportedFormat,
       ),
       YandexUploadStatus.ambiguous => _UploadStateCard(
         key: const Key('yandex-upload-state-ambiguous'),
@@ -264,15 +272,8 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final title =
-        (widget.track['title'] ??
-                widget.track['fileName'] ??
-                l10n.localUnknownTrack)
-            .toString();
+    final title = (widget.track['title'] ?? widget.track['fileName'] ?? l10n.localUnknownTrack).toString();
     final fileName = '${widget.track['fileName'] ?? ''}';
-    final format =
-        '${widget.track['codec'] ?? widget.track['extension'] ?? '—'}'
-            .toUpperCase();
     final hasTerminalResult = _result != null;
 
     return AlertDialog(
@@ -294,21 +295,32 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
+                        Text(title, style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 3),
                         Text(_artists()),
                         const SizedBox(height: 8),
                         Text('${l10n.yandexUploadFilename}: $fileName'),
-                        Text('${l10n.yandexUploadFormat}: $format'),
+                        Text('${context.v013SourceFormat}: $_sourceFormat'),
+                        Text('${context.v013UploadFormat}: MP3'),
+                        Text(
+                          '${context.v013ConversionRequired}: '
+                          '${_requiresConversion ? context.v013Yes : context.v013No}',
+                        ),
                         Text('${l10n.yandexUploadSize}: ${_sizeLabel()}'),
                       ],
                     ),
                   ),
                 ],
               ),
+              if (_requiresConversion) ...[
+                const SizedBox(height: 12),
+                _UploadStateCard(
+                  key: const Key('yandex-upload-conversion-warning'),
+                  icon: const Icon(Icons.transform_outlined),
+                  title: context.v013Converting,
+                  body: context.v013ConversionWarning,
+                ),
+              ],
               const SizedBox(height: 18),
               if (_loadingTargets)
                 _UploadStateCard(
@@ -360,8 +372,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                       .toList(growable: false),
                   onChanged: _submitting || hasTerminalResult
                       ? null
-                      : (value) =>
-                            setState(() => _selectedPlaylistKind = value),
+                      : (value) => setState(() => _selectedPlaylistKind = value),
                 ),
                 const SizedBox(height: 10),
                 CheckboxListTile(
@@ -371,19 +382,17 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
                   value: _rightsConfirmed,
                   onChanged: _submitting || hasTerminalResult
                       ? null
-                      : (value) => setState(
-                          () => _rightsConfirmed = value == true,
-                        ),
+                      : (value) => setState(() => _rightsConfirmed = value == true),
                   title: Text(l10n.yandexUploadRightsConfirmation),
                 ),
               ],
-              if (!_isMp3) ...[
+              if (!_uploadSupported) ...[
                 const SizedBox(height: 10),
                 _UploadStateCard(
                   key: const Key('yandex-upload-mp3-only'),
                   icon: const Icon(Icons.warning_amber_outlined),
                   title: l10n.yandexUploadError,
-                  body: l10n.yandexUploadMp3Only,
+                  body: context.v013UnsupportedFormat,
                 ),
               ],
               if (_submitting || _result != null) ...[
@@ -397,9 +406,7 @@ class _YandexUploadDialogState extends State<YandexUploadDialog> {
       actions: [
         TextButton(
           key: const Key('yandex-upload-close'),
-          onPressed: _submitting
-              ? null
-              : () => Navigator.pop(context, _result),
+          onPressed: _submitting ? null : () => Navigator.pop(context, _result),
           child: Text(hasTerminalResult ? l10n.close : l10n.cancel),
         ),
         if (!hasTerminalResult)

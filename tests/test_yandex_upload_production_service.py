@@ -124,14 +124,15 @@ class ProductionServiceTests(unittest.TestCase):
         )
         return service, local, audit, tx
 
-    def test_preflight_rejects_non_mp3_missing_empty_and_invalid_id_before_stage1(self):
+    def test_preflight_rejects_invalid_supported_format_missing_empty_and_invalid_id_before_stage1(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             flac = root / "track.flac"
             flac.write_bytes(b"audio")
             service, _, _, tx = self._service(flac, extension=".flac")
             result = service.upload_track(local_file_id=10, playlist_kind="7", confirm=True, rights_confirmed=True)
-            self.assertEqual(YandexUploadStatus.UNSUPPORTED_FORMAT, result.status)
+            self.assertEqual(YandexUploadStatus.PREFLIGHT_FAILED, result.status)
+            self.assertEqual("conversion_failed", result.error_code)
             self.assertEqual(0, tx.stage1_calls)
 
             missing = root / "missing.mp3"

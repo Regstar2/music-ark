@@ -31,14 +31,38 @@ class V012Strings {
   String get localProxyNotReady => ru ? 'Подключён, Local Proxy не готов' : 'Connected, Local Proxy not ready';
   String get loading => ru ? 'Проверка…' : 'Checking…';
   String get hostReached => ru ? 'хост доступен' : 'host reached';
-  String get notConfigured => ru ? 'не настроен' : 'not configured';
-  String networkSummary(int ok, int reached, int notConfiguredCount, int failed) => ru
-      ? '$ok API OK · $reached хостов доступны · $notConfiguredCount не настроено · $failed ошибок'
-      : '$ok API OK · $reached hosts reached · $notConfiguredCount not configured · $failed failed';
+  String networkSummary(int ok, int reached, int failed) => ru
+      ? '$ok API OK · $reached хостов доступны · $failed ошибок'
+      : '$ok API OK · $reached hosts reached · $failed failed';
   String get password => ru ? 'Пароль прокси' : 'Proxy password';
   String get username => ru ? 'Имя пользователя' : 'Username';
   String get host => ru ? 'Хост' : 'Host';
   String get port => ru ? 'Порт' : 'Port';
+
+  String get sourcesTitle => ru ? 'Источники метаданных' : 'Metadata sources';
+  String get sourcesHint => ru
+      ? 'MusicBrainz и обложки работают без ключей. Ключи приложения для дополнительных источников обычный пользователь вводить не должен.'
+      : 'MusicBrainz and cover art work without keys. Ordinary users should not have to enter application keys for optional sources.';
+  String get builtIn => ru ? 'Встроен' : 'Built in';
+  String get builtInFree => ru ? 'Встроенный free tier' : 'Built-in free tier';
+  String get appCredential => ru ? 'Ключ MusicArk' : 'MusicArk application key';
+  String get localCredential => ru ? 'Локальный ключ для тестирования' : 'Local testing key';
+  String get plannedForRelease => ru ? 'Ключ приложения будет добавлен к релизу' : 'Application key will be supplied for release';
+  String get optionalFallback => ru ? 'Необязательный fallback' : 'Optional fallback';
+  String get advancedSources => ru ? 'Дополнительные источники — разработка/тестирование' : 'Optional sources — development/testing';
+  String get advancedSourcesHint => ru
+      ? 'Эти поля нужны только сейчас для разработки. В релизе AcoustID/Last.fm должны использовать ключи приложения MusicArk. Discogs останется необязательным.'
+      : 'These fields are for development only. Release builds should use MusicArk application keys for AcoustID/Last.fm. Discogs remains optional.';
+  String get acoustIdApplicationKey => ru ? 'AcoustID application key' : 'AcoustID application key';
+  String get discogsToken => ru ? 'Discogs personal token (необязательно)' : 'Discogs personal token (optional)';
+  String get lastFmApiKey => ru ? 'Last.fm API key' : 'Last.fm API key';
+  String get theAudioDbKey => ru ? 'TheAudioDB key (необязательно, сейчас используется 123)' : 'TheAudioDB key (optional, currently uses 123)';
+  String get leaveBlankToKeep => ru ? 'Оставь пустым, чтобы не менять' : 'Leave blank to keep current value';
+  String get saveSourceKeys => ru ? 'Сохранить введённые ключи' : 'Save entered keys';
+  String get clearLocalSourceKeys => ru ? 'Удалить локальные ключи' : 'Clear local keys';
+  String get sourceKeysSaved => ru ? 'Ключи источников сохранены в системном хранилище.' : 'Source keys saved in the system credential store.';
+  String get sourceKeysCleared => ru ? 'Локальные ключи удалены.' : 'Local source keys cleared.';
+
   String get automaticIdentify => ru ? 'Автоматически определить' : 'Identify automatically';
   String get moreAlternatives => ru ? 'Показать больше вариантов' : 'Show more alternatives';
   String get externalMetadata => ru ? 'Внешние метаданные' : 'External metadata';

@@ -8,7 +8,7 @@ import sqlite3
 import struct
 from typing import Any
 
-from .formats.mp3 import Mp3MetadataAdapter
+from .formats.registry import MetadataAdapterRegistry
 from .models import ArtworkInfo
 
 
@@ -34,7 +34,10 @@ def _image_dimensions(data: bytes, mime: str) -> tuple[int | None, int | None]:
             segment = int.from_bytes(data[index:index + 2], "big")
             if segment < 2 or index + segment > len(data):
                 break
-            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+            if marker in {
+                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+            }:
                 if index + 7 <= len(data):
                     height = int.from_bytes(data[index + 3:index + 5], "big")
                     width = int.from_bytes(data[index + 5:index + 7], "big")
@@ -68,13 +71,36 @@ class ArtworkCache:
         self._yandex = self._root / "yandex"
         self._local.mkdir(parents=True, exist_ok=True)
         self._yandex.mkdir(parents=True, exist_ok=True)
-        self._mp3 = Mp3MetadataAdapter()
+        self._adapters = MetadataAdapterRegistry()
 
     @staticmethod
-    def _fingerprint(path: Path) -> str:
+    def _fingerprint(path: Path, source_external_id: str | None = None) -> str:
         stat = path.stat()
         modified_ns = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
-        return f"{int(stat.st_size)}:{modified_ns}"
+        return f"{int(stat.st_size)}:{modified_ns}:{source_external_id or ''}"
+
+    @staticmethod
+    def _info_from_cache_row(
+        row: tuple[Any, ...] | None,
+        fingerprint: str,
+    ) -> ArtworkInfo | None:
+        if row is None or str(row[6] or "") != fingerprint:
+            return None
+        source = str(row[1] or "cache")
+        if source == "none":
+            return ArtworkInfo(source="none")
+        cache_path = str(row[0] or "")
+        if not cache_path or not Path(cache_path).is_file():
+            return None
+        return ArtworkInfo(
+            present=True,
+            cache_path=cache_path,
+            source=source,
+            mime=row[2],
+            width=row[3],
+            height=row[4],
+            byte_size=row[5],
+        )
 
     def _cached(self, local_file_id: int, fingerprint: str) -> ArtworkInfo | None:
         try:
@@ -88,20 +114,37 @@ class ArtworkCache:
                 ).fetchone()
         except sqlite3.Error:
             return None
-        if row is None or str(row[6] or "") != fingerprint:
-            return None
-        cache_path = str(row[0] or "")
-        if not cache_path or not Path(cache_path).is_file():
-            return None
-        return ArtworkInfo(
-            present=True,
-            cache_path=cache_path,
-            source=str(row[1] or "cache"),
-            mime=row[2],
-            width=row[3],
-            height=row[4],
-            byte_size=row[5],
-        )
+        return self._info_from_cache_row(row, fingerprint)
+
+    def _cached_batch(self, local_file_ids: list[int]) -> dict[int, tuple[Any, ...]]:
+        if not local_file_ids:
+            return {}
+        rows_by_id: dict[int, tuple[Any, ...]] = {}
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                for offset in range(0, len(local_file_ids), 400):
+                    batch = local_file_ids[offset:offset + 400]
+                    placeholders = ",".join("?" for _ in batch)
+                    rows = conn.execute(
+                        f"""
+                        SELECT local_file_id, cache_path, source, mime, width, height,
+                               byte_size, fingerprint
+                        FROM local_artwork_cache
+                        WHERE local_file_id IN ({placeholders})
+                        """,
+                        batch,
+                    ).fetchall()
+                    rows_by_id.update(
+                        {
+                            int(row[0]): (
+                                row[1], row[2], row[3], row[4], row[5], row[6], row[7]
+                            )
+                            for row in rows
+                        }
+                    )
+        except sqlite3.Error:
+            return {}
+        return rows_by_id
 
     def _store_local(
         self,
@@ -147,7 +190,40 @@ class ArtworkCache:
                         normalized_mime, width, height, len(data),
                     ),
                 )
-        return ArtworkInfo(True, str(path.resolve()), normalized_mime, width, height, len(data), source)
+        return ArtworkInfo(
+            True, str(path.resolve()), normalized_mime, width, height, len(data), source
+        )
+
+    def _store_absent(self, local_file_id: int, fingerprint: str) -> ArtworkInfo:
+        for stale in self._local.glob(f"{int(local_file_id)}.*"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+        try:
+            with closing(sqlite3.connect(self._database_path)) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO local_artwork_cache(
+                            local_file_id, fingerprint, cache_path, source, mime,
+                            width, height, byte_size, updated_at
+                        ) VALUES (?, ?, '', 'none', NULL, NULL, NULL, NULL, datetime('now'))
+                        ON CONFLICT(local_file_id) DO UPDATE SET
+                            fingerprint=excluded.fingerprint,
+                            cache_path='',
+                            source='none',
+                            mime=NULL,
+                            width=NULL,
+                            height=NULL,
+                            byte_size=NULL,
+                            updated_at=datetime('now')
+                        """,
+                        (int(local_file_id), fingerprint),
+                    )
+        except sqlite3.Error:
+            return ArtworkInfo()
+        return ArtworkInfo(source="none")
 
     def _clear_local(self, local_file_id: int) -> None:
         for stale in self._local.glob(f"{int(local_file_id)}.*"):
@@ -158,7 +234,10 @@ class ArtworkCache:
         try:
             with closing(sqlite3.connect(self._database_path)) as conn:
                 with conn:
-                    conn.execute("DELETE FROM local_artwork_cache WHERE local_file_id=?", (int(local_file_id),))
+                    conn.execute(
+                        "DELETE FROM local_artwork_cache WHERE local_file_id=?",
+                        (int(local_file_id),),
+                    )
         except sqlite3.Error:
             pass
 
@@ -182,26 +261,29 @@ class ArtworkCache:
                 return str(path.resolve())
         return None
 
-    def ensure_local(
+    def _ensure_uncached(
         self,
         local_file_id: int,
         path: Path,
+        fingerprint: str,
         *,
-        source_external_id: str | None = None,
+        source_external_id: str | None,
     ) -> ArtworkInfo:
-        fingerprint = self._fingerprint(path)
-        cached = self._cached(local_file_id, fingerprint)
-        if cached is not None:
-            return cached
-
         embedded: tuple[bytes, str] | None = None
-        if path.suffix.casefold() == ".mp3":
+        adapter = self._adapters.adapter_for(path)
+        if adapter is not None:
             try:
-                embedded = self._mp3.artwork(path)
+                embedded = adapter.artwork(path)
             except Exception:  # noqa: BLE001 - artwork is optional for Local Library rows.
                 embedded = None
         if embedded is not None:
-            return self._store_local(local_file_id, fingerprint, embedded[0], embedded[1], source="embedded")
+            return self._store_local(
+                local_file_id,
+                fingerprint,
+                embedded[0],
+                embedded[1],
+                source="embedded",
+            )
 
         # A confirmed Yandex identity may reuse artwork that an explicit search/import
         # already cached. Never perform a background Yandex request for a library row.
@@ -210,23 +292,69 @@ class ArtworkCache:
             if yandex_path:
                 data = Path(yandex_path).read_bytes()
                 mime = "image/png" if yandex_path.casefold().endswith(".png") else "image/jpeg"
-                return self._store_local(local_file_id, fingerprint, data, mime, source="yandex_identity_cache")
+                return self._store_local(
+                    local_file_id,
+                    fingerprint,
+                    data,
+                    mime,
+                    source="yandex_identity_cache",
+                )
 
-        self._clear_local(local_file_id)
-        return ArtworkInfo()
+        return self._store_absent(local_file_id, fingerprint)
+
+    def ensure_local(
+        self,
+        local_file_id: int,
+        path: Path,
+        *,
+        source_external_id: str | None = None,
+    ) -> ArtworkInfo:
+        fingerprint = self._fingerprint(path, source_external_id)
+        cached = self._cached(local_file_id, fingerprint)
+        if cached is not None:
+            if not cached.present and source_external_id and self.yandex_cached(source_external_id):
+                cached = None
+            else:
+                return cached
+        return self._ensure_uncached(
+            local_file_id,
+            path,
+            fingerprint,
+            source_external_id=source_external_id,
+        )
 
     def batch(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
+        ids = [int(row["id"]) for row in rows]
+        cached_rows = self._cached_batch(ids)
         for row in rows:
             file_id = int(row["id"])
             path = Path(str(row["path"]))
+            source_external_id = (
+                str(row.get("source_external_id"))
+                if row.get("source_external_id")
+                else None
+            )
             if not path.is_file():
                 result[str(file_id)] = ArtworkInfo().as_dict()
                 continue
-            info = self.ensure_local(
+            try:
+                fingerprint = self._fingerprint(path, source_external_id)
+            except OSError:
+                result[str(file_id)] = ArtworkInfo().as_dict()
+                continue
+            info = self._info_from_cache_row(cached_rows.get(file_id), fingerprint)
+            if info is not None:
+                if not info.present and source_external_id and self.yandex_cached(source_external_id):
+                    info = None
+                else:
+                    result[str(file_id)] = info.as_dict()
+                    continue
+            info = self._ensure_uncached(
                 file_id,
                 path,
-                source_external_id=(str(row.get("source_external_id")) if row.get("source_external_id") else None),
+                fingerprint,
+                source_external_id=source_external_id,
             )
             result[str(file_id)] = info.as_dict()
         return result

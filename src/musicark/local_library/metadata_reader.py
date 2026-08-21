@@ -1,8 +1,7 @@
 """Read-only metadata extraction for local audio files.
 
-This module deliberately exposes no write operation. MusicArk never mutates
-user audio while scanning; v0.8.1 only recognizes provenance already embedded
-in files created by the download pipeline.
+This module deliberately exposes no write operation. Scanner/Matching/Coverage
+never mutate user audio; explicit writes remain in the Metadata Editor service.
 """
 
 from __future__ import annotations
@@ -11,6 +10,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from musicark.audio.probe import probe_audio
 from musicark.core.errors import MusicArkError
 from musicark.provenance import trusted_yandex_origin
 from .models import LocalTrackMetadata
@@ -66,6 +66,7 @@ def _year(raw: str | None) -> int | None:
 
 
 def _provenance(path: Path) -> tuple[str | None, str | None]:
+    # Existing trusted provenance uses ID3 TXXX and therefore remains MP3-only.
     if path.suffix.casefold() != ".mp3":
         return None, None
     try:
@@ -84,7 +85,7 @@ def _provenance(path: Path) -> tuple[str | None, str | None]:
 
 
 class LocalMetadataReader:
-    """Extract matching-relevant tags, technical properties, and trusted origin."""
+    """Extract normalized tags, technical properties and trusted origin."""
 
     def read(self, path: Path) -> LocalTrackMetadata:
         try:
@@ -97,7 +98,6 @@ class LocalMetadataReader:
             raise LocalMetadataError(f"Unsupported or corrupted audio file: {path}")
 
         tags = getattr(audio, "tags", None)
-        info = getattr(audio, "info", None)
         title = _first(tags, "title") or path.stem
         artists = _values(tags, "artist") or _values(tags, "artists")
         album = _first(tags, "album")
@@ -107,29 +107,10 @@ class LocalMetadataReader:
         year = _year(_first(tags, "date", "year"))
         genre = _first(tags, "genre")
         source_provider_id, source_external_id = _provenance(path)
-
-        duration = None
-        bitrate = None
-        sample_rate = None
-        if info is not None:
-            raw_duration = getattr(info, "length", None)
-            if raw_duration:
-                try:
-                    duration = float(raw_duration)
-                except (TypeError, ValueError):
-                    duration = None
-            raw_bitrate = getattr(info, "bitrate", None)
-            if raw_bitrate:
-                try:
-                    bitrate = int(raw_bitrate)
-                except (TypeError, ValueError):
-                    bitrate = None
-            raw_sample_rate = getattr(info, "sample_rate", None)
-            if raw_sample_rate:
-                try:
-                    sample_rate = int(raw_sample_rate)
-                except (TypeError, ValueError):
-                    sample_rate = None
+        try:
+            technical = probe_audio(path)
+        except Exception as exc:  # noqa: BLE001
+            raise LocalMetadataError(f"Cannot read technical audio information: {path}") from exc
 
         return LocalTrackMetadata(
             title=title,
@@ -140,10 +121,13 @@ class LocalMetadataReader:
             disc_number=disc_number,
             year=year,
             genre=genre,
-            duration_seconds=duration,
-            codec=path.suffix.lower().lstrip("."),
-            bitrate=bitrate,
-            sample_rate=sample_rate,
+            duration_seconds=technical.duration_seconds,
+            codec=technical.codec,
+            container=technical.container,
+            bitrate=technical.bitrate,
+            sample_rate=technical.sample_rate,
+            channels=technical.channels,
+            bit_depth=technical.bit_depth,
             source_provider_id=source_provider_id,
             source_external_id=source_external_id,
         )

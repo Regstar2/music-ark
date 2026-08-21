@@ -9,14 +9,16 @@ from musicark.credentials import CredentialStoreError, SystemCredentialStore
 
 
 class ExternalCredentialStore:
-    """Keep provider/proxy secrets in the OS keyring, never in preference JSON.
+    """Resolve external-provider credentials without exposing user secrets.
 
-    Provider application keys are not user-account credentials. Release builds
-    may supply them through the process environment/build configuration, while
-    local developers can override them through the OS keyring. TheAudioDB's
-    documented public free-tier key is a non-secret built-in fallback for the
-    development/free integration and must be reviewed again before app-store or
-    commercial distribution.
+    AcoustID distinguishes an application's ``client`` key from a user's API
+    key. MusicArk only performs read-only lookups and therefore bundles its
+    application client key. The user API key required for AcoustID submissions
+    is deliberately not supported or stored here.
+
+    Environment variables and the OS keyring remain higher-priority developer
+    overrides. Proxy passwords and provider tokens that are actual user secrets
+    stay in the OS keyring and never enter preference JSON.
     """
 
     SERVICE_NAME = "MusicArk.ExternalMetadata"
@@ -29,6 +31,10 @@ class ExternalCredentialStore:
         "lastfm_secret": "MUSICARK_LASTFM_API_SECRET",
     }
     _BUILTIN = {
+        # AcoustID application client key. This is the application identifier
+        # sent in the public `client` lookup parameter, not a user's submission
+        # key. See https://acoustid.org/webservice#api-keys.
+        "acoustid_key": "yAmYe5r7tw",
         # Public free V1 key documented by TheAudioDB. This is intentionally not
         # treated as a secret. Publishing/commercial terms are documented in
         # docs/architecture/external-metadata-sources.md and must be rechecked.
@@ -63,7 +69,9 @@ class ExternalCredentialStore:
 
         builtin = self._BUILTIN.get(name)
         if builtin:
-            return builtin, "builtin_free"
+            # AcoustID is a MusicArk application key; TheAudioDB is a documented
+            # provider-wide public free-tier key. Keep those UI states distinct.
+            return builtin, "application" if name == "acoustid_key" else "builtin_free"
         return None, "missing"
 
     def get(self, name: str) -> str | None:
@@ -82,10 +90,9 @@ class ExternalCredentialStore:
             result[provider] = {
                 "configured": bool(value),
                 "origin": origin,
-                # These are application/developer integration credentials. An
-                # ordinary MusicArk end user should not be required to obtain
-                # them for the default MusicBrainz + CAA workflow.
-                "advanced": provider in {"acoustid", "discogs", "lastfm"},
+                # AcoustID is zero-config for users. Discogs and Last.fm remain
+                # optional developer/fallback integrations for v0.12.
+                "advanced": provider in {"discogs", "lastfm"},
             }
         return result
 

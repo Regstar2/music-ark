@@ -72,7 +72,7 @@ class SettingsPage extends StatelessWidget {
                       key: const Key('locale-selector'),
                       segments: [
                         ButtonSegment(value: AppLocalePreference.system, icon: const Icon(Icons.language_outlined), label: Text(l10n.languageSystem)),
-                        ButtonSegment(value: AppLocalePreference.light, label: Text(l10n.languageRussian)),
+                        ButtonSegment(value: AppLocalePreference.ru, label: Text(l10n.languageRussian)),
                         ButtonSegment(value: AppLocalePreference.en, label: Text(l10n.languageEnglish)),
                       ],
                       selected: {settings.localePreference},

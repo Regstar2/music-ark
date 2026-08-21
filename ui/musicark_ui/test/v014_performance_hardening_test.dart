@@ -22,7 +22,7 @@ class _LargeLocalBridge extends FakeMusicArkBridge {
     List<int>? rootIds,
   }) async {
     requestedLimits.add(limit);
-    final available = (10_000 - offset).clamp(0, limit);
+    final available = (10_000 - offset).clamp(0, limit).toInt();
     return {
       'count': 10_000,
       'limit': limit,

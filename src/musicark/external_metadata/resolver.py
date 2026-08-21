@@ -12,20 +12,14 @@ from typing import Any
 from musicark.download.metadata import YandexTrackMetadata
 from musicark.metadata.yandex import YandexMetadataGateway, identity_fields, metadata_fields
 
+from .acoustid_metadata import AcoustIdMetadataSource
 from .artwork import ExternalArtworkCache
 from .cache import ExternalMetadataCache
 from .credentials import ExternalCredentialStore
 from .fingerprint import FingerprintError, FingerprintService
-from .models import (
-    Confidence,
-    EvidenceType,
-    ExternalArtworkCandidate,
-    ExternalMetadataCandidate,
-    MetadataEvidence,
-)
+from .models import Confidence, ExternalArtworkCandidate, ExternalMetadataCandidate
 from .network import ExternalNetworkTransport, NetworkSettingsStore
 from .sources import (
-    AcoustIdSource,
     CoverArtArchiveSource,
     DiscogsSource,
     ExternalSourceError,
@@ -50,7 +44,7 @@ class ExternalMetadataResolver:
         self._cache = ExternalMetadataCache(database_path)
         self._fingerprints = FingerprintService(database_path)
         self._yandex = YandexMetadataGateway(base_dir, database_path)
-        self._acoustid = AcoustIdSource(self._transport, self._credentials)
+        self._acoustid = AcoustIdMetadataSource(self._transport, self._credentials)
         self._musicbrainz = MusicBrainzSource(self._transport)
         self._listenbrainz = ListenBrainzMusicBrainzSource(self._transport)
         self._caa = CoverArtArchiveSource(self._transport)
@@ -182,18 +176,25 @@ class ExternalMetadataResolver:
     ) -> list[ExternalMetadataCandidate]:
         result: list[ExternalMetadataCandidate] = []
         attempts = 0
-        musicbrainz_sources = {"musicbrainz", "listenbrainz_mapper"}
+        artwork_sources = {"musicbrainz", "listenbrainz_mapper", "acoustid"}
         for item in candidates:
-            if item.artwork is not None or not item.source_release_id or item.source not in musicbrainz_sources or attempts >= limit:
+            release_group = str(item.identities.get("musicbrainz_release_group_mbid") or "").strip()
+            has_identity = bool(item.source_release_id or release_group)
+            if item.artwork is not None or not has_identity or item.source not in artwork_sources or attempts >= limit:
                 result.append(item)
                 continue
             attempts += 1
             try:
-                url = self._caa.front_url(release_mbid=item.source_release_id, size=500)
+                url = self._caa.front_url(
+                    release_mbid=item.source_release_id,
+                    release_group_mbid=release_group or None,
+                    size=500,
+                )
                 artwork = None
                 if url:
+                    identity = item.source_release_id or release_group
                     artwork = self._artwork.fetch(
-                        f"caa:release:{item.source_release_id}:500",
+                        f"caa:{identity}:500",
                         "cover_art_archive",
                         url,
                     )
@@ -216,27 +217,21 @@ class ExternalMetadataResolver:
         return result
 
     @staticmethod
-    def _enrich_acoustid(items: list[ExternalMetadataCandidate], acoustid_value: str) -> list[ExternalMetadataCandidate]:
-        if not acoustid_value:
-            return items
-        enriched: list[ExternalMetadataCandidate] = []
+    def _recording_mbid(items: list[ExternalMetadataCandidate]) -> str:
         for item in items:
-            identities = dict(item.identities)
-            identities["acoustid"] = acoustid_value
-            evidence = (*item.evidence, MetadataEvidence(EvidenceType.ACOUSTID_FINGERPRINT, "acoustid", acoustid_value))
-            enriched.append(ExternalMetadataCandidate(
-                source=item.source,
-                source_display_name=item.source_display_name,
-                source_track_id=item.source_track_id,
-                source_release_id=item.source_release_id,
-                fields=item.fields,
-                identities=identities,
-                provenance=item.provenance,
-                evidence=evidence,
-                confidence=item.confidence,
-                artwork=item.artwork,
-            ))
-        return enriched
+            value = str(item.identities.get("musicbrainz_recording_mbid") or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _strong_fingerprint_result(items: list[ExternalMetadataCandidate]) -> bool:
+        return any(
+            item.confidence in {Confidence.EXACT, Confidence.STRONG}
+            and item.identities.get("musicbrainz_recording_mbid")
+            and bool(item.fields.get("title"))
+            for item in items
+        )
 
     def identify(self, local_file_id: int, *, continue_search: bool = False) -> dict[str, Any]:
         local = self._local(local_file_id)
@@ -265,35 +260,46 @@ class ExternalMetadataResolver:
             except Exception as exc:  # noqa: BLE001
                 statuses.append(self._status("yandex_music", "unavailable", str(exc)))
 
-        recording_mbid = ""
-        acoustid_value = ""
+        fingerprint_items: list[ExternalMetadataCandidate] = []
         try:
             fp = self._fingerprints.fingerprint(int(local_file_id), Path(str(local["path"])))
-            acoustid_results = self._call(statuses, "acoustid", lambda: self._acoustid.lookup(fp.fingerprint, fp.duration)) or []
-            if acoustid_results:
-                best = max(acoustid_results, key=lambda item: float(item.get("score") or 0))
-                acoustid_value = str(best.get("acoustid") or "")
-                mbids = best.get("recordingMbids") or []
-                if mbids:
-                    recording_mbid = str(mbids[0])
+            fingerprint_items = self._call(
+                statuses,
+                "acoustid",
+                lambda: self._acoustid.lookup(fp.fingerprint, fp.duration),
+            ) or []
+            fingerprint_items = self._with_artwork(fingerprint_items, statuses)
+            candidates.extend(fingerprint_items)
+            if self._strong_fingerprint_result(fingerprint_items) and not continue_search:
+                return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
         except FingerprintError as exc:
             statuses.append(self._status("acoustid", "fingerprint_unavailable", str(exc)))
 
-        if recording_mbid:
-            items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.recording(recording_mbid)) or []
+        recording_mbid = self._recording_mbid(fingerprint_items)
+        if recording_mbid and not self._strong_fingerprint_result(fingerprint_items):
+            # Once AcoustID has produced a Recording MBID, enrich through the
+            # ListenBrainz recording metadata cache first. This endpoint consumes
+            # an MBID and does not require musicbrainz.org text search.
+            items = self._call(
+                statuses,
+                "listenbrainz_metadata",
+                lambda: self._listenbrainz.recording(recording_mbid, fallback_title=title),
+            ) or []
             if not items:
-                items = self._call(
-                    statuses,
-                    "listenbrainz_mapper",
-                    lambda: self._listenbrainz.recording(recording_mbid, fallback_title=title),
-                ) or []
-            items = self._enrich_acoustid(items, acoustid_value)
+                # Direct MusicBrainz is retained as a best-effort fallback only.
+                items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.recording(recording_mbid)) or []
             items = self._with_artwork(items, statuses)
             candidates.extend(items)
-            if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} and item.source_release_id for item in items) and not continue_search:
+            if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} for item in items) and not continue_search:
                 return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
 
-        if title:
+        # Text fallback starts with the zero-configuration source. We deliberately
+        # do not make blocked musicbrainz.org the first thing a user waits for.
+        if title and artist and not candidates:
+            audio_items = self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or []
+            candidates.extend(audio_items)
+
+        if title and (continue_search or not candidates):
             mb_items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
             if not mb_items and artist:
                 mb_items = self._call(
@@ -303,12 +309,11 @@ class ExternalMetadataResolver:
                 ) or []
             mb_items = self._with_artwork(mb_items, statuses)
             candidates.extend(mb_items)
-            if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} for item in mb_items) and not continue_search:
-                return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
 
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
-            candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
+            if title and artist:
+                candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist, recording_mbid=recording_mbid)) or [])
 
         return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=False)
@@ -322,17 +327,20 @@ class ExternalMetadataResolver:
             payload["fromCache"] = True
             return payload
         statuses: list[dict[str, str]] = []
-        candidates = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
-        if not candidates and artist:
-            candidates = self._call(
-                statuses,
-                "listenbrainz_mapper",
-                lambda: self._listenbrainz.search(title=title, artist=artist, album=album),
-            ) or []
-        candidates = self._with_artwork(candidates, statuses)
+        candidates: list[ExternalMetadataCandidate] = []
+        if title and artist:
+            candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
+        if continue_search or not candidates:
+            mb_items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
+            if not mb_items and artist:
+                mb_items = self._call(
+                    statuses,
+                    "listenbrainz_mapper",
+                    lambda: self._listenbrainz.search(title=title, artist=artist, album=album),
+                ) or []
+            candidates.extend(self._with_artwork(mb_items, statuses))
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
-            candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist)) or [])
         payload = self._response(local_file_id, candidates, statuses, early_stop=False)
         self._cache.put(cache_key, "resolver", payload, ttl_seconds=3600)

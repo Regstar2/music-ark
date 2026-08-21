@@ -70,11 +70,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run v0.12 external metadata and network regressions
         shell: pwsh
-        run: |
-          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*v012.py" -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_v012_*.py" -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*v012.py" -v'
 
   yandex-upload-research:
     runs-on: self-hosted

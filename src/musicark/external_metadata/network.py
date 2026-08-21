@@ -83,11 +83,18 @@ class NetworkSettingsStore:
         username = str(payload.get("proxyUsername", current.proxy_username)).strip()
         if "proxyPassword" in payload:
             self.credentials.set("proxy_password", str(payload.get("proxyPassword") or ""))
-        explicitly_updated = any(
-            key in payload
-            for key in ("proxyScheme", "proxyHost", "proxyPort", "proxyUsername", "proxyPassword")
-        )
-        proxy_configured = bool(payload.get("proxyConfigured", current.proxy_configured or explicitly_updated))
+
+        # The Flutter form always carries the visible default host/port fields.
+        # Merely saving Auto/Direct must therefore not turn 127.0.0.1:1080 into
+        # a configured fallback proxy. A proxy becomes configured only when the
+        # user explicitly selects Custom Proxy, an existing configuration is
+        # already present, or an explicit proxyConfigured value is supplied.
+        explicit_proxy_flag = payload.get("proxyConfigured")
+        if explicit_proxy_flag is None:
+            proxy_configured = current.proxy_configured or mode is NetworkMode.CUSTOM_PROXY
+        else:
+            proxy_configured = bool(explicit_proxy_flag)
+
         settings = NetworkSettings(
             mode=mode,
             proxy_configured=proxy_configured,
@@ -133,8 +140,6 @@ class _RouteHealth:
 class ExternalNetworkTransport:
     """Use deterministic routes and fallback only for transport-level failures."""
 
-    _WARP_CONNECT_ONLY_HOSTS = {"musicbrainz.org", "mapper.listenbrainz.org"}
-
     def __init__(
         self,
         settings_store: NetworkSettingsStore,
@@ -162,24 +167,22 @@ class ExternalNetworkTransport:
             auth += "@"
         return f"{settings.proxy_scheme}://{auth}{settings.proxy_host}:{settings.proxy_port}"
 
-    @classmethod
-    def _warp_routes(cls, settings: NetworkSettings, host: str) -> list[tuple[str, str]]:
-        """Return Cloudflare Local Proxy transports in preferred order.
+    @staticmethod
+    def _warp_routes(settings: NetworkSettings) -> list[tuple[str, str]]:
+        """Return both WARP Local Proxy transports in deterministic order.
 
-        MetaBrainz hosts are deliberately HTTP-CONNECT-only. Real Windows/WARP
-        testing showed that SOCKS5 could present a hostname-mismatched TLS path
-        for those hosts while CONNECT returned the correct MusicBrainz endpoint.
-        Strict certificate verification remains enabled; we never paper over the
-        mismatch with verify=False.
+        Real Windows testing showed that neither transport is universally better:
+        Cover Art Archive and MusicBrainz can behave differently per endpoint or
+        WARP session. Keep strict TLS verification and fall back from HTTP CONNECT
+        to SOCKS5 only after a transport/TLS-connect failure. This is the behavior
+        that previously produced a successful MusicBrainz HTTP 200 on the user's
+        machine; restricting MetaBrainz to CONNECT-only was a regression.
         """
-        proxy_host = settings.warp_proxy_host
+        host = settings.warp_proxy_host
         port = settings.warp_proxy_port
-        connect = ("warp_http_connect", f"http://{proxy_host}:{port}")
-        if host.casefold() in cls._WARP_CONNECT_ONLY_HOSTS:
-            return [connect]
         return [
-            connect,
-            ("warp_socks5", f"socks5://{proxy_host}:{port}"),
+            ("warp_http_connect", f"http://{host}:{port}"),
+            ("warp_socks5", f"socks5://{host}:{port}"),
         ]
 
     def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
@@ -193,12 +196,12 @@ class ExternalNetworkTransport:
                 raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
             return [("custom_proxy", self._custom_proxy_url(settings))]
         if settings.mode is NetworkMode.WARP:
-            return list(self._warp_routes(settings, host))
+            return list(self._warp_routes(settings))
 
         routes: list[tuple[str, str | None]] = [("direct", None)]
         if settings.proxy_configured:
             routes.append(("custom_proxy", self._custom_proxy_url(settings)))
-        routes.extend(self._warp_routes(settings, host))
+        routes.extend(self._warp_routes(settings))
         with self._lock:
             healthy = self._health.get(host)
             if healthy and healthy.expires_at > time.monotonic():
@@ -227,32 +230,26 @@ class ExternalNetworkTransport:
         host = urlsplit(url).hostname or ""
         last: Exception | None = None
         for route, proxy in self._routes(host, force_direct=force_direct):
-            # CONNECT to MetaBrainz occasionally fails transiently immediately
-            # after a blocked direct attempt. One bounded retry is cheaper and
-            # safer than falling through to the known-bad SOCKS TLS path.
-            attempts = 2 if route == "warp_http_connect" and host.casefold() in self._WARP_CONNECT_ONLY_HOSTS else 1
-            for attempt in range(attempts):
-                try:
-                    with self._factory(
-                        proxy=proxy,
-                        timeout=self._timeout,
-                        trust_env=False,
-                        follow_redirects=False,
-                        http1=True,
-                        http2=proxy is None,
-                    ) as client:
-                        response = client.request(method, url, **kwargs)
-                    with self._lock:
-                        self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
-                    return response
-                except Exception as exc:  # noqa: BLE001 - fallback classification is explicit below.
-                    last = exc
-                    if not self._is_network_failure(exc):
-                        raise
-                    if attempt + 1 < attempts:
-                        time.sleep(0.15)
-                        continue
-                    break
+            try:
+                with self._factory(
+                    proxy=proxy,
+                    timeout=self._timeout,
+                    trust_env=False,
+                    follow_redirects=False,
+                    http1=True,
+                    # Keep proxied metadata traffic on HTTP/1.1. Direct traffic
+                    # may still negotiate HTTP/2 where supported.
+                    http2=proxy is None,
+                ) as client:
+                    response = client.request(method, url, **kwargs)
+                response.extensions["musicark_route"] = route
+                with self._lock:
+                    self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
+                return response
+            except Exception as exc:  # noqa: BLE001 - fallback classification is explicit below.
+                last = exc
+                if not self._is_network_failure(exc):
+                    raise
         if last is not None:
             raise last
         raise RuntimeError("No network route is configured.")

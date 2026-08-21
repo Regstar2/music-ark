@@ -68,11 +68,14 @@ class _CountingReader:
 
 
 class _NoArtworkAdapter:
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
         self.calls = 0
+        self.fail = fail
 
     def artwork(self, path: Path):
         self.calls += 1
+        if self.fail:
+            raise ValueError("corrupt artwork")
         return None
 
 
@@ -247,7 +250,7 @@ class PerformanceHardeningV014Tests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(root_scan, ("new-scan",))
 
-    def test_negative_artwork_cache_is_multiformat_and_invalidates_on_file_change(self) -> None:
+    def test_negative_artwork_cache_is_multiformat_and_invalidates_on_fingerprint_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             db_path = root / "musicark.db"
@@ -265,11 +268,47 @@ class PerformanceHardeningV014Tests(unittest.TestCase):
             self.assertFalse(second["77"]["present"])
             self.assertEqual(adapter.calls, 1)
 
+            # Same size but new mtime invalidates the negative cache.
             previous = audio.stat().st_mtime_ns
-            audio.write_bytes(b"changed-flac")
+            audio.write_bytes(b"fake-flac")
             os.utime(audio, ns=(previous + 2_000_000_000, previous + 2_000_000_000))
             cache.batch([row])
             self.assertEqual(adapter.calls, 2)
+
+            # A trusted provider identity is part of the cache fingerprint as well.
+            provider_row = {
+                "id": 77,
+                "path": str(audio),
+                "source_external_id": "yandex-1",
+            }
+            cache.batch([provider_row])
+            cache.batch([provider_row])
+            self.assertEqual(adapter.calls, 3)
+            provider_row["source_external_id"] = "yandex-2"
+            cache.batch([provider_row])
+            self.assertEqual(adapter.calls, 4)
+
+            # Size changes also invalidate even if the path identity stays stable.
+            audio.write_bytes(b"different-size")
+            cache.batch([provider_row])
+            self.assertEqual(adapter.calls, 5)
+
+    def test_corrupt_artwork_is_isolated_and_becomes_negative_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "musicark.db"
+            initialize_database(db_path)
+            audio = root / "broken-art.opus"
+            audio.write_bytes(b"synthetic-opus")
+            cache = ArtworkCache(db_path, root)
+            adapter = _NoArtworkAdapter(fail=True)
+            cache._adapters = _FixedRegistry(adapter)  # type: ignore[attr-defined]
+            payload = cache.batch([{"id": 91, "path": str(audio), "source_external_id": None}])
+            self.assertFalse(payload["91"]["present"])
+            self.assertEqual(payload["91"]["source"], "none")
+            self.assertEqual(adapter.calls, 1)
+            cache.batch([{"id": 91, "path": str(audio), "source_external_id": None}])
+            self.assertEqual(adapter.calls, 1)
 
     def test_cached_artwork_page_uses_one_batch_sqlite_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,6 +356,56 @@ class PerformanceHardeningV014Tests(unittest.TestCase):
                     "SELECT value FROM app_metadata WHERE key='schema_version'"
                 ).fetchone()
             self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+
+    def test_representative_precurrent_upgrade_preserves_existing_user_rows(self) -> None:
+        """v0.14 has no new schema; re-running the existing forward chain is safe."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "musicark.db"
+            initialize_database(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                with conn:
+                    root_id = int(
+                        conn.execute(
+                            "INSERT INTO local_library_roots(path, normalized_path) VALUES (?, ?)",
+                            ("D:/Музыка Existing", "d:/музыка existing"),
+                        ).lastrowid
+                    )
+                    _insert_track(
+                        conn,
+                        root_id=root_id,
+                        path="D:/Музыка Existing/keep.mp3",
+                        modified_ns=123,
+                        last_seen_at="preserve-me",
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO provider_track_actions(provider_id, external_id, action)
+                        VALUES ('yandex_music', 'existing-track', 'wanted')
+                        """
+                    )
+                    conn.execute(
+                        "UPDATE app_metadata SET value='1.8.4' WHERE key='schema_version'"
+                    )
+
+            initialize_database(db_path)
+
+            with closing(sqlite3.connect(db_path)) as conn:
+                version = conn.execute(
+                    "SELECT value FROM app_metadata WHERE key='schema_version'"
+                ).fetchone()
+                local = conn.execute(
+                    "SELECT path, last_seen_at FROM local_audio_files WHERE normalized_path=?",
+                    ("d:/музыка existing/keep.mp3",),
+                ).fetchone()
+                action = conn.execute(
+                    """
+                    SELECT action FROM provider_track_actions
+                    WHERE provider_id='yandex_music' AND external_id='existing-track'
+                    """
+                ).fetchone()
+            self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+            self.assertEqual(local, ("D:/Музыка Existing/keep.mp3", "preserve-me"))
+            self.assertEqual(action, ("wanted",))
 
 
 if __name__ == "__main__":

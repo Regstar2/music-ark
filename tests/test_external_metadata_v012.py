@@ -123,6 +123,18 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertNotIn("secret", raw)
         self.assertTrue(store.public()["proxyPasswordConfigured"])
 
+    def test_auto_does_not_treat_visible_default_proxy_fields_as_configured(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({
+            "networkMode": "auto",
+            "proxyScheme": "socks5",
+            "proxyHost": "127.0.0.1",
+            "proxyPort": 1080,
+            "proxyUsername": "",
+        })
+        self.assertFalse(store.load().proxy_configured)
+
     def test_http_status_does_not_trigger_proxy_fallback(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
@@ -141,10 +153,16 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(routes, [None])
 
-    def test_connect_error_falls_back_from_direct(self) -> None:
+    def test_connect_error_falls_back_from_direct_to_configured_proxy(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
-        store.save({"networkMode": NetworkMode.AUTO.value, "proxyScheme": "http", "proxyHost": "127.0.0.1", "proxyPort": 8080})
+        store.save({
+            "networkMode": NetworkMode.AUTO.value,
+            "proxyConfigured": True,
+            "proxyScheme": "http",
+            "proxyHost": "127.0.0.1",
+            "proxyPort": 8080,
+        })
         routes = []
 
         class Client:
@@ -180,29 +198,9 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(client_options[0]["proxy"], "http://127.0.0.1:40000")
         self.assertTrue(client_options[0]["http1"])
         self.assertFalse(client_options[0]["http2"])
+        self.assertEqual(response.extensions["musicark_route"], "warp_http_connect")
 
-    def test_metabrainz_warp_retries_connect_without_known_bad_socks_path(self) -> None:
-        credentials = _MemoryCredentials()
-        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
-        store.save({"networkMode": NetworkMode.WARP.value})
-        routes = []
-
-        class Client:
-            def __init__(self, **kwargs):
-                self.proxy = kwargs.get("proxy")
-                routes.append(self.proxy)
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def request(self, method, url, **kwargs):
-                if len(routes) == 1:
-                    raise httpx.ConnectError("transient CONNECT failure", request=httpx.Request(method, url))
-                return httpx.Response(200, request=httpx.Request(method, url))
-
-        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(routes, ["http://127.0.0.1:40000", "http://127.0.0.1:40000"])
-
-    def test_non_metabrainz_warp_can_fall_back_to_socks5(self) -> None:
+    def test_musicbrainz_warp_falls_back_from_connect_to_socks5(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
         store.save({"networkMode": NetworkMode.WARP.value})
@@ -216,17 +214,27 @@ class ExternalMetadataV012Tests(unittest.TestCase):
             def __exit__(self, *args): return False
             def request(self, method, url, **kwargs):
                 if str(self.proxy).startswith("http://"):
-                    raise httpx.ConnectError("CONNECT unavailable", request=httpx.Request(method, url))
+                    raise httpx.ConnectError(
+                        "certificate verify failed: hostname mismatch",
+                        request=httpx.Request(method, url),
+                    )
                 return httpx.Response(200, request=httpx.Request(method, url))
 
-        response = ExternalNetworkTransport(store, client_factory=Client).get("https://example.test/value")  # type: ignore[arg-type]
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(routes, ["http://127.0.0.1:40000", "socks5://127.0.0.1:40000"])
+        self.assertEqual(response.extensions["musicark_route"], "warp_socks5")
 
     def test_protocol_error_is_transport_failure_and_auto_can_fallback(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
-        store.save({"networkMode": NetworkMode.AUTO.value, "proxyScheme": "http", "proxyHost": "127.0.0.1", "proxyPort": 8080})
+        store.save({
+            "networkMode": NetworkMode.AUTO.value,
+            "proxyConfigured": True,
+            "proxyScheme": "http",
+            "proxyHost": "127.0.0.1",
+            "proxyPort": 8080,
+        })
         routes = []
 
         class Client:

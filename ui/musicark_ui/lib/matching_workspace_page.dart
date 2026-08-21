@@ -145,9 +145,13 @@ class _MatchingPageState extends State<MatchingPage> {
         _total = _asInt(results['count']);
       });
     } catch (error) {
-      if (mounted) setState(() => _error = _errorText(error));
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = _errorText(error));
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -210,9 +214,13 @@ class _MatchingPageState extends State<MatchingPage> {
         _total = _asInt(result['count']);
       });
     } catch (error) {
-      if (mounted) setState(() => _error = _errorText(error));
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = _errorText(error));
+      }
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 

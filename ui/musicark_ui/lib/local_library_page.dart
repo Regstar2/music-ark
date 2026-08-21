@@ -268,9 +268,13 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         _total = int.tryParse('${tracksPayload['count'] ?? 0}') ?? 0;
       });
     } on MusicArkBridgeException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = error.message);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -294,9 +298,13 @@ class _LocalLibraryPageState extends State<LocalLibraryPage> {
         _total = int.tryParse('${payload['count'] ?? _total}') ?? _total;
       });
     } on MusicArkBridgeException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _error = error.message);
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && generation == _requestGeneration) {
+        setState(() => _busy = false);
+      }
     }
   }
 

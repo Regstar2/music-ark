@@ -116,7 +116,7 @@ class _DownloadPageState extends State<DownloadPage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _error = error.toString();
         _loading = false;
@@ -161,7 +161,7 @@ class _DownloadPageState extends State<DownloadPage> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _wantedLoadGeneration) return;
       setState(() {
         _wantedLoading = false;
         _error = error.toString();

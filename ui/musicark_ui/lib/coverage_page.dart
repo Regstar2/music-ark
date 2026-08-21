@@ -113,7 +113,7 @@ class _CoveragePageState extends State<CoveragePage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _loading = false;
         _error = error.toString();
@@ -181,7 +181,7 @@ class _CoveragePageState extends State<CoveragePage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _loading = false;
         _error = error.toString();

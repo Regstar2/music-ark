@@ -5,36 +5,34 @@ This document records the v0.12.0 source boundaries. Terms, quotas and commercia
 | Source | Purpose | Authentication | Runtime policy | Important limitations |
 | --- | --- | --- | --- | --- |
 | Yandex Music | Existing trusted identity metadata | Existing MusicArk credential boundary | Existing direct Yandex path | External resolver does not change Yandex upload routing |
-| AcoustID | Audio fingerprint → recording identity hint | MusicArk application client key | Optional in development; intended zero-config in release once the application key is packaged securely | Free web service is intended for non-commercial use; audio file itself is not uploaded |
-| MusicBrainz | Recording/release metadata, ISRC, release alternatives | No API key | Meaningful User-Agent; centralized 1 request/sec limiter | Core DB data and web-service terms are separate; public web service has commercial-use constraints |
+| AcoustID | Audio fingerprint → MusicBrainz-backed recording/release metadata | Bundled MusicArk application client key | Zero-config read-only lookup; centralized <=3 req/s limiter | Free web service is non-commercial; audio file itself is not uploaded |
+| MusicBrainz | Best-effort text/recording fallback, ISRC, release alternatives | No API key | Meaningful User-Agent; centralized 1 request/sec limiter | Direct `musicbrainz.org` is not required after a successful AcoustID fingerprint match |
 | Cover Art Archive | Artwork for MusicBrainz Release/Release Group | None | On demand, bounded artwork handling | Public availability does not make the image copyright-free |
-| ListenBrainz / MusicBrainz Mapper | Optional MetaBrainz fallback to recover MusicBrainz IDs/release context when `musicbrainz.org` is unreachable | None for the read-only endpoints used here | Fallback only; not an additional mandatory dependency | Must not replace MusicBrainz as the canonical primary metadata source |
+| ListenBrainz / MusicBrainz Mapper | Optional MetaBrainz fallback to recover MusicBrainz IDs/release context | None for the read-only endpoints used here | Fallback only; not an additional mandatory dependency | Availability may differ by network; do not make it a single point of failure |
 | Discogs | Optional release-level metadata fallback | Separate token/app auth | Advanced optional/fail-isolated | Images/restricted data are not used as the primary artwork source; authentication and terms must be rechecked before distribution |
 | TheAudioDB | Optional low-priority metadata fallback | Documented public free-tier key in development/free builds; override supported | Optional/fail-isolated | Free-tier/app-store/commercial restrictions must be rechecked before release |
 | Last.fm | Deferred optional supplemental metadata | Application API key | Disabled unless an app/developer key is available; not required for v0.12 completion | API-account availability and commercial-use requirements must be revalidated before enabling in release builds |
 
 ## Provider credentials
 
-Ordinary MusicArk users should not be required to create developer accounts for metadata providers.
+Ordinary MusicArk users must not be required to create developer accounts for the default metadata workflow.
 
-Provider application credentials are separated from user-account credentials:
+AcoustID distinguishes two different key types:
 
 ```text
-AcoustID application client key
-Last.fm application API key
-Discogs application/token boundary
+application client key -> identifies MusicArk for read-only lookup
+user API key           -> identifies a user for fingerprint submissions
 ```
 
-Local development can supply credentials through the OS keyring/Advanced Sources UI. Build or release environments can inject supported application credentials through environment variables such as:
+MusicArk bundles only its application client key and uses it in the public `client` lookup parameter. AcoustID user submission keys are not implemented or stored. The bundled application key is an application identifier shipped with the client, not a user-account secret.
+
+Developers can override the bundled AcoustID key with:
 
 ```text
 MUSICARK_ACOUSTID_CLIENT_KEY
-MUSICARK_LASTFM_API_KEY
-MUSICARK_DISCOGS_TOKEN
-MUSICARK_THEAUDIODB_KEY
 ```
 
-Real credentials must never be committed to the repository, diagnostics or normal preference JSON.
+Other provider secrets/tokens and proxy passwords remain separate from application identifiers and must never be committed to diagnostics or normal preference JSON. Local user/developer overrides are stored through the OS keyring where supported.
 
 TheAudioDB's documented public free-tier key is treated as a non-secret development/free fallback only. Its licensing/distribution conditions must be rechecked before a public/app-store/commercial release.
 
@@ -53,6 +51,23 @@ External source DTO
 
 No source adapter is allowed to mutate local audio.
 
+## Default identification path
+
+The preferred zero-config path is:
+
+```text
+local audio
+-> Chromaprint/fpcalc
+-> AcoustID
+   -> Recording MBID
+   -> title / artist
+   -> release / release-group
+   -> ISRC when available
+-> Cover Art Archive
+```
+
+This deliberately avoids making `musicbrainz.org` a mandatory runtime hop in networks where that host is filtered or behaves inconsistently through a proxy. Direct MusicBrainz remains available as a best-effort text fallback.
+
 ## Rate limiting and cache
 
 Provider rate limits belong to one infrastructure boundary rather than ad-hoc sleeps in UI/provider methods. Positive responses use a bounded cache and negative responses use a shorter TTL. Cache duration must respect provider terms; v0.12.0 intentionally does not make external responses permanent source-of-truth data.
@@ -69,9 +84,9 @@ Text metadata lookups can disclose artist/title/album or provider IDs to the sel
 
 Every external source uses `ExternalNetworkTransport`, which supports Direct, Custom Proxy, WARP local proxy and Auto routing. Auto fallback is triggered only by transport-level connectivity failures. HTTP authorization, not-found, rate-limit and server responses remain provider responses and do not silently change routes.
 
-For the current Windows WARP client, MusicArk prefers HTTP CONNECT over the WARP Local Proxy listener for MetaBrainz hosts because real Windows testing showed correct TLS/SNI behavior there. SOCKS5 remains available as a secondary proxy transport where appropriate. TLS certificate verification remains enabled for every route.
+The default fingerprint flow does not require direct MusicBrainz connectivity. CAA and other external sources can independently use Direct/WARP/custom proxy routing as needed. TLS certificate verification remains enabled for every route.
 
-The Windows-specific Cloudflare integration is an adapter below this provider-neutral layer. Mobile implementations can replace that adapter without changing MusicBrainz/AcoustID source code.
+The Windows-specific Cloudflare integration is an adapter below this provider-neutral layer. Mobile implementations can replace that adapter without changing provider code.
 
 ## Cloudflare component ownership
 

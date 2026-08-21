@@ -41,27 +41,27 @@ class V012Strings {
 
   String get sourcesTitle => ru ? 'Источники метаданных' : 'Metadata sources';
   String get sourcesHint => ru
-      ? 'MusicBrainz и обложки работают без ключей. Ключи приложения для дополнительных источников обычный пользователь вводить не должен.'
-      : 'MusicBrainz and cover art work without keys. Ordinary users should not have to enter application keys for optional sources.';
+      ? 'AcoustID, MusicBrainz-backed данные и обложки работают без ручной настройки ключей. Дополнительные сервисы остаются необязательными.'
+      : 'AcoustID, MusicBrainz-backed metadata and cover art work without manual key setup. Additional services remain optional.';
   String get builtIn => ru ? 'Встроен' : 'Built in';
   String get builtInFree => ru ? 'Встроенный free tier' : 'Built-in free tier';
-  String get appCredential => ru ? 'Ключ MusicArk' : 'MusicArk application key';
-  String get localCredential => ru ? 'Локальный ключ для тестирования' : 'Local testing key';
+  String get appCredential => ru ? 'Встроенный ключ MusicArk' : 'Bundled MusicArk application key';
+  String get localCredential => ru ? 'Локальный override для тестирования' : 'Local testing override';
   String get plannedForRelease => ru ? 'Ключ приложения будет добавлен к релизу' : 'Application key will be supplied for release';
   String get optionalFallback => ru ? 'Необязательный fallback' : 'Optional fallback';
   String get advancedSources => ru ? 'Дополнительные источники — разработка/тестирование' : 'Optional sources — development/testing';
   String get advancedSourcesHint => ru
-      ? 'Эти поля нужны только сейчас для разработки. В релизе AcoustID/Last.fm должны использовать ключи приложения MusicArk. Discogs останется необязательным.'
-      : 'These fields are for development only. Release builds should use MusicArk application keys for AcoustID/Last.fm. Discogs remains optional.';
-  String get acoustIdApplicationKey => ru ? 'AcoustID application key' : 'AcoustID application key';
+      ? 'AcoustID уже настроен внутри MusicArk. Поле AcoustID ниже — только необязательный developer override. Last.fm/Discogs также не требуются для обычной работы.'
+      : 'AcoustID is already configured by MusicArk. The AcoustID field below is only an optional developer override. Last.fm/Discogs are not required for normal use.';
+  String get acoustIdApplicationKey => ru ? 'AcoustID key override (необязательно)' : 'AcoustID key override (optional)';
   String get discogsToken => ru ? 'Discogs personal token (необязательно)' : 'Discogs personal token (optional)';
-  String get lastFmApiKey => ru ? 'Last.fm API key' : 'Last.fm API key';
-  String get theAudioDbKey => ru ? 'TheAudioDB key (необязательно, сейчас используется 123)' : 'TheAudioDB key (optional, currently uses 123)';
-  String get leaveBlankToKeep => ru ? 'Оставь пустым, чтобы не менять' : 'Leave blank to keep current value';
-  String get saveSourceKeys => ru ? 'Сохранить введённые ключи' : 'Save entered keys';
-  String get clearLocalSourceKeys => ru ? 'Удалить локальные ключи' : 'Clear local keys';
-  String get sourceKeysSaved => ru ? 'Ключи источников сохранены в системном хранилище.' : 'Source keys saved in the system credential store.';
-  String get sourceKeysCleared => ru ? 'Локальные ключи удалены.' : 'Local source keys cleared.';
+  String get lastFmApiKey => ru ? 'Last.fm API key (необязательно)' : 'Last.fm API key (optional)';
+  String get theAudioDbKey => ru ? 'TheAudioDB key override (необязательно, сейчас используется 123)' : 'TheAudioDB key override (optional, currently uses 123)';
+  String get leaveBlankToKeep => ru ? 'Оставь пустым, чтобы использовать встроенное/текущее значение' : 'Leave blank to use the bundled/current value';
+  String get saveSourceKeys => ru ? 'Сохранить overrides' : 'Save overrides';
+  String get clearLocalSourceKeys => ru ? 'Удалить локальные overrides' : 'Clear local overrides';
+  String get sourceKeysSaved => ru ? 'Локальные overrides сохранены в системном хранилище.' : 'Local overrides saved in the system credential store.';
+  String get sourceKeysCleared => ru ? 'Локальные overrides удалены; встроенные значения снова используются автоматически.' : 'Local overrides cleared; bundled values are used automatically again.';
 
   String get automaticIdentify => ru ? 'Автоматически определить' : 'Identify automatically';
   String get moreAlternatives => ru ? 'Показать больше вариантов' : 'Show more alternatives';

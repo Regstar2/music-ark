@@ -72,7 +72,7 @@ class SettingsPage extends StatelessWidget {
                       key: const Key('locale-selector'),
                       segments: [
                         ButtonSegment(value: AppLocalePreference.system, icon: const Icon(Icons.language_outlined), label: Text(l10n.languageSystem)),
-                        ButtonSegment(value: AppLocalePreference.ru, label: Text(l10n.languageRussian)),
+                        ButtonSegment(value: AppLocalePreference.light, label: Text(l10n.languageRussian)),
                         ButtonSegment(value: AppLocalePreference.en, label: Text(l10n.languageEnglish)),
                       ],
                       selected: {settings.localePreference},
@@ -81,6 +81,8 @@ class SettingsPage extends StatelessWidget {
                   ),
                   const SizedBox(height: AppUiTokens.sectionGap),
                   _NetworkAccessCard(bridge: externalBridge),
+                  const SizedBox(height: AppUiTokens.sectionGap),
+                  _ExternalSourcesCard(bridge: externalBridge),
                   const SizedBox(height: AppUiTokens.sectionGap),
                   _ProviderAccountCard(session: session, onOpenYandex: onOpenYandex),
                   const SizedBox(height: AppUiTokens.sectionGap * 1.5),
@@ -255,17 +257,11 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   String _sourceLabel(String source) => switch (source) {
         'musicbrainz' => 'MusicBrainz',
         'listenbrainz_mapper' => 'MusicBrainz Mapper',
-        'acoustid' => 'AcoustID',
         'cover_art_archive' => 'Cover Art Archive',
-        'discogs' => 'Discogs',
-        'theaudiodb' => 'TheAudioDB',
-        'lastfm' => 'Last.fm',
         _ => source,
       };
 
   String _networkDetail(Map<String, dynamic> item, V012Strings s) {
-    final state = '${item['state'] ?? ''}';
-    if (state == 'not_configured') return s.notConfigured;
     if (item['reachable'] == true) {
       final status = item['statusCode'];
       if (status == null) return 'OK';
@@ -278,8 +274,6 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
   }
 
   IconData _networkIcon(Map<String, dynamic> item) {
-    final state = '${item['state'] ?? ''}';
-    if (state == 'not_configured') return Icons.settings_outlined;
     if (item['reachable'] != true) {
       return item['optional'] == true ? Icons.info_outline : Icons.error_outline;
     }
@@ -305,7 +299,6 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
     ].join(' · ');
     final apiOk = _networkItems.where((item) => item['state'] == 'ok').length;
     final hostReached = _networkItems.where((item) => item['state'] == 'host_reached').length;
-    final notConfigured = _networkItems.where((item) => item['state'] == 'not_configured').length;
     final failed = _networkItems.where((item) => item['state'] == 'failed' && item['optional'] != true).length;
 
     return Card(
@@ -380,7 +373,7 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
             Text(_message!, key: const Key('network-result')),
           ] else if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(s.networkSummary(apiOk, hostReached, notConfigured, failed), key: const Key('network-result')),
+            Text(s.networkSummary(apiOk, hostReached, failed), key: const Key('network-result')),
           ],
           if (_networkItems.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -396,6 +389,175 @@ class _NetworkAccessCardState extends State<_NetworkAccessCard> {
                   ),
               ],
             ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _ExternalSourcesCard extends StatefulWidget {
+  const _ExternalSourcesCard({required this.bridge});
+  final ExternalMetadataBridgeClient bridge;
+
+  @override
+  State<_ExternalSourcesCard> createState() => _ExternalSourcesCardState();
+}
+
+class _ExternalSourcesCardState extends State<_ExternalSourcesCard> {
+  bool _busy = false;
+  String? _message;
+  Map<String, dynamic> _status = const {};
+  final _acoustId = TextEditingController();
+  final _discogs = TextEditingController();
+  final _lastFm = TextEditingController();
+  final _audioDb = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _acoustId.dispose();
+    _discogs.dispose();
+    _lastFm.dispose();
+    _audioDb.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      _apply(await widget.bridge.getExternalCredentialStatus());
+    } catch (error) {
+      _message = '$error';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _apply(Map<String, dynamic> result) {
+    final credentials = result['credentials'];
+    if (credentials is Map) {
+      _status = Map<String, dynamic>.from(credentials);
+    }
+  }
+
+  Map<String, dynamic> _provider(String name) {
+    final raw = _status[name];
+    return raw is Map ? Map<String, dynamic>.from(raw) : const {};
+  }
+
+  String _originLabel(BuildContext context, String provider) {
+    final s = V012Strings.of(context);
+    final info = _provider(provider);
+    return switch ('${info['origin'] ?? 'missing'}') {
+      'keyring' => s.localCredential,
+      'application' => s.appCredential,
+      'builtin_free' => s.builtInFree,
+      _ => provider == 'discogs' ? s.optionalFallback : s.plannedForRelease,
+    };
+  }
+
+  IconData _providerIcon(String provider) {
+    final configured = _provider(provider)['configured'] == true;
+    return configured ? Icons.check_circle_outline : Icons.info_outline;
+  }
+
+  Future<void> _saveEntered() async {
+    final payload = <String, dynamic>{};
+    if (_acoustId.text.trim().isNotEmpty) payload['acoustid_key'] = _acoustId.text.trim();
+    if (_discogs.text.trim().isNotEmpty) payload['discogs_token'] = _discogs.text.trim();
+    if (_lastFm.text.trim().isNotEmpty) payload['lastfm_key'] = _lastFm.text.trim();
+    if (_audioDb.text.trim().isNotEmpty) payload['theaudiodb_key'] = _audioDb.text.trim();
+    if (payload.isEmpty || _busy) return;
+    setState(() { _busy = true; _message = null; });
+    try {
+      _apply(await widget.bridge.updateExternalCredentials(payload));
+      _acoustId.clear();
+      _discogs.clear();
+      _lastFm.clear();
+      _audioDb.clear();
+      _message = V012Strings.of(context).sourceKeysSaved;
+    } catch (error) {
+      _message = '$error';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _clearLocal() async {
+    if (_busy) return;
+    setState(() { _busy = true; _message = null; });
+    try {
+      _apply(await widget.bridge.updateExternalCredentials({
+        'acoustid_key': '',
+        'discogs_token': '',
+        'lastfm_key': '',
+        'theaudiodb_key': '',
+      }));
+      _message = V012Strings.of(context).sourceKeysCleared;
+    } catch (error) {
+      _message = '$error';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = V012Strings.of(context);
+    return Card(
+      key: const Key('external-sources-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.library_music_outlined),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(s.sourcesTitle, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 3),
+              Text(s.sourcesHint, style: Theme.of(context).textTheme.bodySmall),
+            ])),
+            if (_busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          ]),
+          const SizedBox(height: 10),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.check_circle_outline), title: const Text('MusicBrainz'), subtitle: Text(s.builtIn)),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.check_circle_outline), title: const Text('Cover Art Archive'), subtitle: Text(s.builtIn)),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(_providerIcon('theaudiodb')), title: const Text('TheAudioDB'), subtitle: Text(_originLabel(context, 'theaudiodb'))),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(_providerIcon('acoustid')), title: const Text('AcoustID'), subtitle: Text(_originLabel(context, 'acoustid'))),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(_providerIcon('lastfm')), title: const Text('Last.fm'), subtitle: Text(_originLabel(context, 'lastfm'))),
+          ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(_providerIcon('discogs')), title: const Text('Discogs'), subtitle: Text(_originLabel(context, 'discogs'))),
+          const Divider(),
+          ExpansionTile(
+            key: const Key('external-sources-advanced'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: Text(s.advancedSources),
+            subtitle: Text(s.advancedSourcesHint),
+            children: [
+              TextField(key: const Key('acoustid-key'), controller: _acoustId, obscureText: true, decoration: InputDecoration(labelText: s.acoustIdApplicationKey, helperText: s.leaveBlankToKeep)),
+              const SizedBox(height: 8),
+              TextField(key: const Key('lastfm-key'), controller: _lastFm, obscureText: true, decoration: InputDecoration(labelText: s.lastFmApiKey, helperText: s.leaveBlankToKeep)),
+              const SizedBox(height: 8),
+              TextField(key: const Key('discogs-token'), controller: _discogs, obscureText: true, decoration: InputDecoration(labelText: s.discogsToken, helperText: s.leaveBlankToKeep)),
+              const SizedBox(height: 8),
+              TextField(key: const Key('theaudiodb-key'), controller: _audioDb, obscureText: true, decoration: InputDecoration(labelText: s.theAudioDbKey, helperText: s.leaveBlankToKeep)),
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                FilledButton.tonalIcon(onPressed: _busy ? null : _saveEntered, icon: const Icon(Icons.key_outlined), label: Text(s.saveSourceKeys)),
+                TextButton(onPressed: _busy ? null : _clearLocal, child: Text(s.clearLocalSourceKeys)),
+              ]),
+            ],
+          ),
+          if (_message != null) ...[
+            const SizedBox(height: 8),
+            Text(_message!, key: const Key('external-sources-message')),
           ],
         ]),
       ),

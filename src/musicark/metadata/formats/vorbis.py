@@ -159,7 +159,10 @@ class VorbisMetadataAdapter(MetadataFormatAdapter):
                     picture.data = artwork_data
                     audio.add_picture(picture)
         elif remove_artwork or artwork_data is not None:
-            tags.pop("metadata_block_picture", None)
+            # Mutagen's VCommentDict.pop() does not accept a default argument.
+            # Delete explicitly so Ogg Vorbis and Opus share the same safe path.
+            if "metadata_block_picture" in tags:
+                del tags["metadata_block_picture"]
             if artwork_data is not None:
                 from mutagen.flac import Picture
 

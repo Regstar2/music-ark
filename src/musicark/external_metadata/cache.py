@@ -13,11 +13,20 @@ from musicark.storage.external_metadata_migration import migrate_external_metada
 
 
 class ExternalMetadataCache:
+    # Cache payload contracts changed while v0.12 was still a Draft PR. Prefixing
+    # keys prevents previously persisted empty/raw-status responses from masking
+    # the current resolver after a user pulls a newer branch build.
+    CACHE_NAMESPACE = "v2"
+
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
         with closing(sqlite3.connect(self._database_path)) as conn:
             with conn:
                 migrate_external_metadata_v012(conn)
+
+    @classmethod
+    def _key(cls, key: str) -> str:
+        return f"{cls.CACHE_NAMESPACE}:{key}"
 
     @staticmethod
     def _now() -> datetime:
@@ -27,7 +36,7 @@ class ExternalMetadataCache:
         with closing(sqlite3.connect(self._database_path)) as conn:
             row = conn.execute(
                 "SELECT payload_json, negative, expires_at FROM external_metadata_cache WHERE cache_key=?",
-                (key,),
+                (self._key(key),),
             ).fetchone()
         if row is None:
             return None
@@ -59,5 +68,5 @@ class ExternalMetadataCache:
                         expires_at=excluded.expires_at,
                         updated_at=excluded.updated_at
                     """,
-                    (key, provider, json.dumps(payload, ensure_ascii=False), 1 if negative else 0, expires.isoformat()),
+                    (self._key(key), provider, json.dumps(payload, ensure_ascii=False), 1 if negative else 0, expires.isoformat()),
                 )

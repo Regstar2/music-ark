@@ -12,6 +12,7 @@ from typing import Any, Callable
 from urllib.parse import quote, urlsplit
 
 import httpx
+import requests
 
 from .credentials import ExternalCredentialStore
 
@@ -140,6 +141,17 @@ class _RouteHealth:
 class ExternalNetworkTransport:
     """Use deterministic routes and fallback only for transport-level failures."""
 
+    # The WARP local proxy itself is healthy on the user's Windows machine, but
+    # HTTPX has intermittently received hostname-mismatched certificates from
+    # MetaBrainz hosts through it. requests/urllib3 uses an independent TLS stack
+    # and therefore provides a safe, strictly verified CONNECT path before the
+    # generic HTTPX/SOCKS fallbacks. No certificate verification is disabled.
+    _REQUESTS_CONNECT_HOSTS = {
+        "musicbrainz.org",
+        "mapper.listenbrainz.org",
+        "api.listenbrainz.org",
+    }
+
     def __init__(
         self,
         settings_store: NetworkSettingsStore,
@@ -147,12 +159,15 @@ class ExternalNetworkTransport:
         timeout_seconds: float = 6.0,
         route_ttl_seconds: float = 600.0,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
+        requests_session_factory: Callable[[], requests.Session] = requests.Session,
     ) -> None:
         self._settings_store = settings_store
         self._credentials = settings_store.credentials
+        self._timeout_seconds = timeout_seconds
         self._timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 3.0))
         self._ttl = route_ttl_seconds
         self._factory = client_factory
+        self._requests_session_factory = requests_session_factory
         self._health: dict[str, _RouteHealth] = {}
         self._lock = threading.Lock()
 
@@ -167,23 +182,25 @@ class ExternalNetworkTransport:
             auth += "@"
         return f"{settings.proxy_scheme}://{auth}{settings.proxy_host}:{settings.proxy_port}"
 
-    @staticmethod
-    def _warp_routes(settings: NetworkSettings) -> list[tuple[str, str]]:
-        """Return both WARP Local Proxy transports in deterministic order.
+    @classmethod
+    def _warp_routes(cls, settings: NetworkSettings, host: str) -> list[tuple[str, str]]:
+        """Return WARP Local Proxy transports in deterministic order.
 
-        Real Windows testing showed that neither transport is universally better:
-        Cover Art Archive and MusicBrainz can behave differently per endpoint or
-        WARP session. Keep strict TLS verification and fall back from HTTP CONNECT
-        to SOCKS5 only after a transport/TLS-connect failure. This is the behavior
-        that previously produced a successful MusicBrainz HTTP 200 on the user's
-        machine; restricting MetaBrainz to CONNECT-only was a regression.
+        MetaBrainz gets an additional requests/urllib3 HTTP CONNECT route first.
+        Other hosts keep the generic HTTPX CONNECT -> SOCKS5 path. All routes use
+        normal CA and hostname verification.
         """
-        host = settings.warp_proxy_host
+        proxy_host = settings.warp_proxy_host
         port = settings.warp_proxy_port
-        return [
-            ("warp_http_connect", f"http://{host}:{port}"),
-            ("warp_socks5", f"socks5://{host}:{port}"),
-        ]
+        connect_url = f"http://{proxy_host}:{port}"
+        routes: list[tuple[str, str]] = []
+        if host.casefold() in cls._REQUESTS_CONNECT_HOSTS:
+            routes.append(("warp_requests_connect", connect_url))
+        routes.extend([
+            ("warp_http_connect", connect_url),
+            ("warp_socks5", f"socks5://{proxy_host}:{port}"),
+        ])
+        return routes
 
     def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
         settings = self._settings_store.load()
@@ -196,12 +213,12 @@ class ExternalNetworkTransport:
                 raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
             return [("custom_proxy", self._custom_proxy_url(settings))]
         if settings.mode is NetworkMode.WARP:
-            return list(self._warp_routes(settings))
+            return list(self._warp_routes(settings, host))
 
         routes: list[tuple[str, str | None]] = [("direct", None)]
         if settings.proxy_configured:
             routes.append(("custom_proxy", self._custom_proxy_url(settings)))
-        routes.extend(self._warp_routes(settings))
+        routes.extend(self._warp_routes(settings, host))
         with self._lock:
             healthy = self._health.get(host)
             if healthy and healthy.expires_at > time.monotonic():
@@ -223,26 +240,63 @@ class ExternalNetworkTransport:
                 httpx.PoolTimeout,
                 httpx.ProxyError,
                 httpx.ProtocolError,
+                requests.exceptions.RequestException,
             ),
         )
+
+    def _request_via_requests(self, method: str, url: str, proxy: str, **kwargs: Any) -> httpx.Response:
+        """Use requests/urllib3 for one strict-TLS HTTP CONNECT attempt.
+
+        The rest of the application continues to receive an httpx.Response, so
+        provider adapters do not gain a second response contract.
+        """
+        session = self._requests_session_factory()
+        session.trust_env = False
+        request_kwargs: dict[str, Any] = {
+            "proxies": {"http": proxy, "https": proxy},
+            "timeout": (min(self._timeout_seconds, 3.0), self._timeout_seconds),
+            "allow_redirects": False,
+        }
+        for name in ("params", "headers", "json", "data", "files", "cookies", "auth"):
+            if name in kwargs:
+                request_kwargs[name] = kwargs[name]
+        if "content" in kwargs and "data" not in request_kwargs:
+            request_kwargs["data"] = kwargs["content"]
+        try:
+            result = session.request(method, url, **request_kwargs)
+        finally:
+            session.close()
+
+        response = httpx.Response(
+            int(result.status_code),
+            headers=dict(result.headers),
+            content=result.content,
+            request=httpx.Request(method, url),
+            extensions={"musicark_route": "warp_requests_connect"},
+        )
+        return response
 
     def request(self, method: str, url: str, *, force_direct: bool = False, **kwargs: Any) -> httpx.Response:
         host = urlsplit(url).hostname or ""
         last: Exception | None = None
         for route, proxy in self._routes(host, force_direct=force_direct):
             try:
-                with self._factory(
-                    proxy=proxy,
-                    timeout=self._timeout,
-                    trust_env=False,
-                    follow_redirects=False,
-                    http1=True,
-                    # Keep proxied metadata traffic on HTTP/1.1. Direct traffic
-                    # may still negotiate HTTP/2 where supported.
-                    http2=proxy is None,
-                ) as client:
-                    response = client.request(method, url, **kwargs)
-                response.extensions["musicark_route"] = route
+                if route == "warp_requests_connect":
+                    assert proxy is not None
+                    response = self._request_via_requests(method, url, proxy, **kwargs)
+                else:
+                    with self._factory(
+                        proxy=proxy,
+                        timeout=self._timeout,
+                        trust_env=False,
+                        follow_redirects=False,
+                        http1=True,
+                        # Keep proxied metadata traffic on HTTP/1.1. Direct traffic
+                        # may still negotiate HTTP/2 where supported.
+                        http2=proxy is None,
+                    ) as client:
+                        response = client.request(method, url, **kwargs)
+                    response.extensions["musicark_route"] = route
                 with self._lock:
                     self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
                 return response

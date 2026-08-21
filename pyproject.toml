@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicark"
-version = "0.11.1"
-description = "MusicArk cache-first Yandex, local library, identity matching, coverage, controlled sync, authorized download, explicit local metadata editing, safe Yandex upload/recovery workflows, and desktop settings app"
+version = "0.12.0"
+description = "MusicArk cache-first Yandex, local library, identity matching, coverage, controlled sync, authorized download, external metadata recovery, resilient network access, safe Yandex upload/recovery workflows, and desktop settings app"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "MusicArk Team" }]
 dependencies = [
-  "httpx[http2]>=0.28,<1",
+  "httpx[http2,socks]>=0.28,<1",
   "imageio-ffmpeg==0.6.0",
   "keyring==25.7.0",
   "mutagen>=1.47.0",
@@ -24,6 +24,7 @@ musicark-mvp-bridge = "musicark.mvp_bridge:main"
 musicark-download-bridge = "musicark.download.bridge:main"
 musicark-sync-bridge = "musicark.sync.bridge:main"
 musicark-metadata-bridge = "musicark.metadata.bridge:main"
+musicark-external-metadata-bridge = "musicark.external_metadata.bridge:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

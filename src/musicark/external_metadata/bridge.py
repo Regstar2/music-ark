@@ -42,8 +42,7 @@ def _json_env(name: str, default: Any) -> Any:
     raw = os.getenv(name, "").strip()
     if not raw:
         return default
-    value = json.loads(raw)
-    return value
+    return json.loads(raw)
 
 
 def _database(base_dir: Path | None) -> Path:
@@ -59,10 +58,9 @@ def _error(exc: Exception) -> dict[str, Any]:
 
 
 def _safe_network_error_detail(exc: Exception) -> str:
-    """Return useful diagnostics without exposing proxy/API credentials."""
     text = str(exc).strip().replace("\r", " ").replace("\n", " ")
     text = re.sub(r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+)@", r"\1***@", text)
-    text = re.sub(r"(?i)\b(token|api[_-]?key|password|secret)=([^&\s]+)", r"\1=***", text)
+    text = re.sub(r"(?i)\b(token|api[_-]?key|password|secret|client)=([^&\s]+)", r"\1=***", text)
     return text[:180]
 
 
@@ -71,10 +69,11 @@ def _network_probe(
     source: str,
     url: str,
     *,
+    params: dict[str, Any] | None = None,
     optional: bool = False,
 ) -> dict[str, Any]:
     try:
-        response = transport.get(url, headers={"User-Agent": "MusicArk/0.12.0"})
+        response = transport.get(url, params=params, headers={"User-Agent": "MusicArk/0.12.0"})
         status = int(response.status_code)
         if 200 <= status < 400:
             state = "ok"
@@ -153,6 +152,7 @@ def main() -> int:
         elif args.command == "network_test":
             current_settings = settings.load()
             warp_status = warp.status()
+            credentials = ExternalCredentialStore()
             items: list[dict[str, Any]] = []
             if current_settings.mode is NetworkMode.WARP and warp_status.state is not WarpState.PROXY_READY:
                 items = [
@@ -163,26 +163,27 @@ def main() -> int:
                         "reachable": False,
                         "error": "warp_local_proxy_not_ready",
                     }
-                    for source in ("musicbrainz", "cover_art_archive")
+                    for source in ("acoustid", "cover_art_archive")
                 ]
             else:
                 transport = ExternalNetworkTransport(settings)
 
-                # This card diagnoses routing, not application credentials. Test
-                # only the zero-config catalog/artwork path. Optional authenticated
-                # providers have their own source-status UI below the network card.
-                musicbrainz = _network_probe(
-                    transport,
-                    "musicbrainz",
-                    "https://musicbrainz.org/ws/2/recording?query=recording%3Atest&limit=1&fmt=json",
-                )
-                items.append(musicbrainz)
-                if musicbrainz.get("state") != "ok":
+                # Diagnose the actual default identification path. AcoustID can
+                # return MusicBrainz recording/release metadata directly, so a
+                # blocked musicbrainz.org text-search endpoint is not a required
+                # runtime dependency after fingerprint identification.
+                acoustid_key = credentials.get("acoustid_key")
+                if acoustid_key:
                     items.append(_network_probe(
                         transport,
-                        "listenbrainz_mapper",
-                        "https://mapper.listenbrainz.org/mapping/lookup?artist_credit_name=Portishead&recording_name=Glory%20Box",
-                        optional=True,
+                        "acoustid",
+                        "https://api.acoustid.org/v2/lookup",
+                        params={
+                            "client": acoustid_key,
+                            "trackid": "9ff43b6a-4f16-427c-93c2-92307ca505e0",
+                            "meta": "recordings releasegroups compress",
+                            "format": "json",
+                        },
                     ))
 
                 items.append(_network_probe(
@@ -195,7 +196,7 @@ def main() -> int:
                 "items": items,
                 "warp": warp_status.as_dict(),
                 "settings": settings.public(),
-                "credentials": ExternalCredentialStore().public_status(),
+                "credentials": credentials.public_status(),
             }
         else:
             if args.local_file_id is None:

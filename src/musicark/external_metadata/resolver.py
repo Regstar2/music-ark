@@ -128,7 +128,12 @@ class ExternalMetadataResolver:
                     )
 
     @staticmethod
-    def _yandex_candidate(metadata: YandexTrackMetadata, public: dict[str, Any]) -> ExternalMetadataCandidate:
+    def _yandex_candidate(
+        metadata: YandexTrackMetadata,
+        public: dict[str, Any],
+        *,
+        confidence: Confidence = Confidence.EXACT,
+    ) -> ExternalMetadataCandidate:
         fields = metadata_fields(metadata)
         fields = {key: value for key, value in fields.items() if value not in (None, "", [])}
         identities = identity_fields(metadata)
@@ -144,9 +149,38 @@ class ExternalMetadataResolver:
             fields=fields,
             identities=normalized,
             provenance={key: "yandex_music" for key in fields},
-            confidence=Confidence.EXACT,
+            confidence=confidence,
             artwork=artwork,
         )
+
+    @staticmethod
+    def _same_text(left: Any, right: Any) -> bool:
+        return str(left or "").strip().casefold() == str(right or "").strip().casefold()
+
+    def _yandex_search_candidates(
+        self,
+        *,
+        title: str,
+        artist: str,
+        limit: int = 8,
+    ) -> list[ExternalMetadataCandidate]:
+        """Use the existing authenticated Yandex search as a zero-config fallback.
+
+        Search results are candidates only. They never create an exact Yandex bind
+        and therefore deliberately use STRONG/POSSIBLE rather than EXACT confidence.
+        """
+        query = " ".join(part for part in (artist.strip(), title.strip()) if part).strip()
+        if not query:
+            return []
+        metadata_items = self._yandex.search(query, limit=max(1, min(int(limit), 12)))
+        result: list[ExternalMetadataCandidate] = []
+        for index, metadata in enumerate(metadata_items):
+            title_matches = self._same_text(metadata.title, title)
+            artist_matches = not artist or any(self._same_text(value, artist) for value in metadata.artists)
+            confidence = Confidence.STRONG if title_matches and artist_matches else Confidence.POSSIBLE
+            public = self._yandex.public_payload(metadata, cache_artwork=index < 4)
+            result.append(self._yandex_candidate(metadata, public, confidence=confidence))
+        return result
 
     @staticmethod
     def _status(source: str, state: str, message: str = "") -> dict[str, str]:
@@ -155,7 +189,10 @@ class ExternalMetadataResolver:
     def _call(self, statuses: list[dict[str, str]], source: str, fn):  # type: ignore[no-untyped-def]
         try:
             value = fn()
-            statuses.append(self._status(source, "ok"))
+            if isinstance(value, list) and not value:
+                statuses.append(self._status(source, "not_found"))
+            else:
+                statuses.append(self._status(source, "ok"))
             return value
         except SourceNotConfigured as exc:
             statuses.append(self._status(source, "not_configured", str(exc)))
@@ -277,25 +314,41 @@ class ExternalMetadataResolver:
 
         recording_mbid = self._recording_mbid(fingerprint_items)
         if recording_mbid and not self._strong_fingerprint_result(fingerprint_items):
-            # Once AcoustID has produced a Recording MBID, enrich through the
-            # ListenBrainz recording metadata cache first. This endpoint consumes
-            # an MBID and does not require musicbrainz.org text search.
             items = self._call(
                 statuses,
                 "listenbrainz_metadata",
                 lambda: self._listenbrainz.recording(recording_mbid, fallback_title=title),
             ) or []
             if not items:
-                # Direct MusicBrainz is retained as a best-effort fallback only.
                 items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.recording(recording_mbid)) or []
             items = self._with_artwork(items, statuses)
             candidates.extend(items)
             if any(item.confidence in {Confidence.EXACT, Confidence.STRONG} for item in items) and not continue_search:
                 return self._finish_resolution(resolution_key, local_file_id, candidates, statuses, early_stop=True)
 
-        # Text fallback starts with the zero-configuration source. We deliberately
-        # do not make blocked musicbrainz.org the first thing a user waits for.
+        # If acoustic identification found no usable recording, use the existing
+        # Yandex catalog search before blocked/credential-dependent external fallbacks.
+        # This is the same zero-config catalog the Metadata Editor already exposes,
+        # but results remain unbound candidates until the user explicitly applies them.
+        if title and not candidates:
+            yandex_items = self._call(
+                statuses,
+                "yandex_music_search",
+                lambda: self._yandex_search_candidates(title=title, artist=artist),
+            ) or []
+            candidates.extend(yandex_items)
+            if yandex_items and not continue_search:
+                return self._finish_resolution(
+                    resolution_key,
+                    local_file_id,
+                    candidates,
+                    statuses,
+                    early_stop=any(item.confidence is Confidence.STRONG for item in yandex_items),
+                )
+
+        audiodb_tried = False
         if title and artist and not candidates:
+            audiodb_tried = True
             audio_items = self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or []
             candidates.extend(audio_items)
 
@@ -312,7 +365,7 @@ class ExternalMetadataResolver:
 
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
-            if title and artist:
+            if title and artist and not audiodb_tried:
                 candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist, recording_mbid=recording_mbid)) or [])
 
@@ -328,7 +381,21 @@ class ExternalMetadataResolver:
             return payload
         statuses: list[dict[str, str]] = []
         candidates: list[ExternalMetadataCandidate] = []
-        if title and artist:
+
+        if title:
+            candidates.extend(self._call(
+                statuses,
+                "yandex_music_search",
+                lambda: self._yandex_search_candidates(title=title, artist=artist),
+            ) or [])
+            if candidates and not continue_search:
+                payload = self._response(local_file_id, candidates, statuses, early_stop=True)
+                self._cache.put(cache_key, "resolver", payload, ttl_seconds=3600)
+                return payload
+
+        audiodb_tried = False
+        if title and artist and not candidates:
+            audiodb_tried = True
             candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
         if continue_search or not candidates:
             mb_items = self._call(statuses, "musicbrainz", lambda: self._musicbrainz.search(title=title, artist=artist, album=album)) or []
@@ -341,6 +408,8 @@ class ExternalMetadataResolver:
             candidates.extend(self._with_artwork(mb_items, statuses))
         if continue_search or not candidates:
             candidates.extend(self._call(statuses, "discogs", lambda: self._discogs.search(title=title, artist=artist, album=album)) or [])
+            if title and artist and not audiodb_tried:
+                candidates.extend(self._call(statuses, "theaudiodb", lambda: self._audiodb.search(title=title, artist=artist)) or [])
             candidates.extend(self._call(statuses, "lastfm", lambda: self._lastfm.search(title=title, artist=artist)) or [])
         payload = self._response(local_file_id, candidates, statuses, early_stop=False)
         self._cache.put(cache_key, "resolver", payload, ttl_seconds=3600)
@@ -374,7 +443,11 @@ class ExternalMetadataResolver:
             "localFileId": int(local_file_id),
             "count": len(unique),
             "items": [self._remember_candidate(local_file_id, item) for item in unique[:30]],
-            "sources": statuses,
+            # Raw provider states are diagnostics, not end-user UI. Keep the legacy
+            # `sources` field empty so older Flutter builds stop rendering internal
+            # `not_configured`/`unavailable` enums as chips.
+            "sources": [],
+            "diagnostics": statuses,
             "earlyStop": early_stop,
             "fromCache": False,
         }

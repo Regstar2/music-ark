@@ -9,7 +9,7 @@ from musicark.external_metadata.resolver import ExternalMetadataResolver
 
 class _FakeYandexGateway:
     def search(self, query: str, *, limit: int = 20):
-        assert query == "ЯМАУГЛИ ПРИЗРАКОВ НЕ СУЩЕСТВУЕТ"
+        assert query.casefold() == "ямаугли призраков не существует"
         assert limit == 8
         return [
             YandexTrackMetadata(
@@ -47,7 +47,7 @@ class ExternalYandexFallbackV012Tests(unittest.TestCase):
         self.assertEqual(candidate.fields["album"], "ПРИЗРАКОВ НЕ СУЩЕСТВУЕТ")
         self.assertEqual(candidate.confidence, Confidence.STRONG)
 
-    def test_non_exact_yandex_search_is_only_possible(self) -> None:
+    def test_case_only_difference_remains_strong(self) -> None:
         resolver = ExternalMetadataResolver.__new__(ExternalMetadataResolver)
         resolver._yandex = _FakeYandexGateway()  # type: ignore[attr-defined]
 
@@ -56,7 +56,6 @@ class ExternalYandexFallbackV012Tests(unittest.TestCase):
             artist="Ямаугли",
         )
 
-        # Comparison is case-insensitive, so the same text remains strong.
         self.assertEqual(items[0].confidence, Confidence.STRONG)
 
 

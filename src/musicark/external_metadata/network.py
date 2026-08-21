@@ -133,6 +133,8 @@ class _RouteHealth:
 class ExternalNetworkTransport:
     """Use deterministic routes and fallback only for transport-level failures."""
 
+    _WARP_CONNECT_ONLY_HOSTS = {"musicbrainz.org", "mapper.listenbrainz.org"}
+
     def __init__(
         self,
         settings_store: NetworkSettingsStore,
@@ -160,20 +162,24 @@ class ExternalNetworkTransport:
             auth += "@"
         return f"{settings.proxy_scheme}://{auth}{settings.proxy_host}:{settings.proxy_port}"
 
-    @staticmethod
-    def _warp_routes(settings: NetworkSettings) -> list[tuple[str, str]]:
-        """Return Cloudflare-supported Local Proxy transports in preferred order.
+    @classmethod
+    def _warp_routes(cls, settings: NetworkSettings, host: str) -> list[tuple[str, str]]:
+        """Return Cloudflare Local Proxy transports in preferred order.
 
-        Modern WARP Proxy mode supports HTTP CONNECT and SOCKS5 on the same
-        local listener. Prefer CONNECT because it has proven more interoperable
-        with TLS/SNI for MetaBrainz endpoints; keep SOCKS5 as a strict-TLS
-        fallback for hosts where CONNECT is unavailable.
+        MetaBrainz hosts are deliberately HTTP-CONNECT-only. Real Windows/WARP
+        testing showed that SOCKS5 could present a hostname-mismatched TLS path
+        for those hosts while CONNECT returned the correct MusicBrainz endpoint.
+        Strict certificate verification remains enabled; we never paper over the
+        mismatch with verify=False.
         """
-        host = settings.warp_proxy_host
+        proxy_host = settings.warp_proxy_host
         port = settings.warp_proxy_port
+        connect = ("warp_http_connect", f"http://{proxy_host}:{port}")
+        if host.casefold() in cls._WARP_CONNECT_ONLY_HOSTS:
+            return [connect]
         return [
-            ("warp_http_connect", f"http://{host}:{port}"),
-            ("warp_socks5", f"socks5://{host}:{port}"),
+            connect,
+            ("warp_socks5", f"socks5://{proxy_host}:{port}"),
         ]
 
     def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
@@ -187,14 +193,12 @@ class ExternalNetworkTransport:
                 raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
             return [("custom_proxy", self._custom_proxy_url(settings))]
         if settings.mode is NetworkMode.WARP:
-            return list(self._warp_routes(settings))
+            return list(self._warp_routes(settings, host))
 
-        # AUTO is intentionally cheap: an untouched default proxy field is not a
-        # configured route and therefore does not add another failing timeout.
         routes: list[tuple[str, str | None]] = [("direct", None)]
         if settings.proxy_configured:
             routes.append(("custom_proxy", self._custom_proxy_url(settings)))
-        routes.extend(self._warp_routes(settings))
+        routes.extend(self._warp_routes(settings, host))
         with self._lock:
             healthy = self._health.get(host)
             if healthy and healthy.expires_at > time.monotonic():
@@ -223,26 +227,32 @@ class ExternalNetworkTransport:
         host = urlsplit(url).hostname or ""
         last: Exception | None = None
         for route, proxy in self._routes(host, force_direct=force_direct):
-            try:
-                with self._factory(
-                    proxy=proxy,
-                    timeout=self._timeout,
-                    trust_env=False,
-                    follow_redirects=False,
-                    http1=True,
-                    # Use HTTP/1.1 over both WARP proxy transports. This avoids
-                    # introducing HTTP/2 state into an already-tunnelled metadata
-                    # connection and keeps fallback behavior deterministic.
-                    http2=proxy is None,
-                ) as client:
-                    response = client.request(method, url, **kwargs)
-                with self._lock:
-                    self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
-                return response
-            except Exception as exc:  # noqa: BLE001 - fallback classification is explicit below.
-                last = exc
-                if not self._is_network_failure(exc):
-                    raise
+            # CONNECT to MetaBrainz occasionally fails transiently immediately
+            # after a blocked direct attempt. One bounded retry is cheaper and
+            # safer than falling through to the known-bad SOCKS TLS path.
+            attempts = 2 if route == "warp_http_connect" and host.casefold() in self._WARP_CONNECT_ONLY_HOSTS else 1
+            for attempt in range(attempts):
+                try:
+                    with self._factory(
+                        proxy=proxy,
+                        timeout=self._timeout,
+                        trust_env=False,
+                        follow_redirects=False,
+                        http1=True,
+                        http2=proxy is None,
+                    ) as client:
+                        response = client.request(method, url, **kwargs)
+                    with self._lock:
+                        self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
+                    return response
+                except Exception as exc:  # noqa: BLE001 - fallback classification is explicit below.
+                    last = exc
+                    if not self._is_network_failure(exc):
+                        raise
+                    if attempt + 1 < attempts:
+                        time.sleep(0.15)
+                        continue
+                    break
         if last is not None:
             raise last
         raise RuntimeError("No network route is configured.")

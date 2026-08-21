@@ -29,6 +29,7 @@ _COMMANDS = (
     "network_settings_get",
     "network_settings_update",
     "network_test",
+    "external_credentials_get",
     "external_credentials_update",
     "warp_status",
     "warp_install",
@@ -99,15 +100,6 @@ def _network_probe(
         }
 
 
-def _not_configured(source: str) -> dict[str, Any]:
-    return {
-        "source": source,
-        "state": "not_configured",
-        "optional": True,
-        "reachable": None,
-    }
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="musicark-external-metadata-bridge")
     parser.add_argument("--base-dir", default=None)
@@ -137,6 +129,8 @@ def main() -> int:
                 raise ValueError("Network settings payload must be an object.")
             settings.save(body)
             payload = {"settings": settings.public()}
+        elif args.command == "external_credentials_get":
+            payload = {"credentials": ExternalCredentialStore().public_status()}
         elif args.command == "external_credentials_update":
             body = _json_env("MUSICARK_EXTERNAL_PAYLOAD", {})
             if not isinstance(body, dict):
@@ -144,7 +138,10 @@ def main() -> int:
             store = ExternalCredentialStore()
             for name, value in body.items():
                 store.set(str(name), str(value or ""))
-            payload = {"updated": sorted(str(name) for name in body)}
+            payload = {
+                "updated": sorted(str(name) for name in body),
+                "credentials": store.public_status(),
+            }
         elif args.command == "warp_status":
             payload = {"warp": warp.status().as_dict()}
         elif args.command == "warp_install":
@@ -156,7 +153,6 @@ def main() -> int:
         elif args.command == "network_test":
             current_settings = settings.load()
             warp_status = warp.status()
-            credentials = ExternalCredentialStore()
             items: list[dict[str, Any]] = []
             if current_settings.mode is NetworkMode.WARP and warp_status.state is not WarpState.PROXY_READY:
                 items = [
@@ -172,10 +168,9 @@ def main() -> int:
             else:
                 transport = ExternalNetworkTransport(settings)
 
-                # MusicBrainz is the primary catalog. The ListenBrainz mapper is
-                # tested only if the primary endpoint fails; it is a fallback,
-                # not another mandatory dependency that should make a healthy
-                # configuration look broken.
+                # This card diagnoses routing, not application credentials. Test
+                # only the zero-config catalog/artwork path. Optional authenticated
+                # providers have their own source-status UI below the network card.
                 musicbrainz = _network_probe(
                     transport,
                     "musicbrainz",
@@ -196,26 +191,11 @@ def main() -> int:
                     "https://coverartarchive.org/",
                 ))
 
-                # These providers require credentials for actual lookups. Do not
-                # report their unauthenticated 403/404 landing responses as API
-                # health. A missing credential is a configuration state, not a
-                # network error.
-                credential_probes = (
-                    ("acoustid", "acoustid_key", "https://api.acoustid.org/"),
-                    ("discogs", "discogs_token", "https://api.discogs.com/"),
-                    ("theaudiodb", "theaudiodb_key", "https://www.theaudiodb.com/"),
-                    ("lastfm", "lastfm_key", "https://ws.audioscrobbler.com/2.0/"),
-                )
-                for source, credential_name, url in credential_probes:
-                    if credentials.get(credential_name):
-                        items.append(_network_probe(transport, source, url, optional=True))
-                    else:
-                        items.append(_not_configured(source))
-
             payload = {
                 "items": items,
                 "warp": warp_status.as_dict(),
                 "settings": settings.public(),
+                "credentials": ExternalCredentialStore().public_status(),
             }
         else:
             if args.local_file_id is None:

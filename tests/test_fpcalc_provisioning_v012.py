@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import io
 import json
@@ -36,7 +37,7 @@ class FpcalcProvisioningV012Tests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.db = self.root / "musicark.db"
         initialize_database(self.db)
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn:
             with conn:
                 migrate_external_metadata_v012(conn)
 

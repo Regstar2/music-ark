@@ -295,11 +295,17 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1500, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MusicArkDesktopApp(bridge: bridge));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('nav-local-library')));
-    await tester.pumpAndSettle();
+
+    final localNavigation = find.byKey(const Key('nav-local-library'));
+    expect(localNavigation, findsOneWidget);
+    await tester.tap(localNavigation);
+
+    final localEmpty = find.byKey(const Key('local-empty'));
+    for (var attempt = 0; attempt < 20 && localEmpty.evaluate().isEmpty; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     expect(find.byKey(const Key('local-library-page')), findsOneWidget);
-    expect(find.byKey(const Key('local-empty')), findsOneWidget);
+    expect(localEmpty, findsOneWidget);
   });
 
   testWidgets(

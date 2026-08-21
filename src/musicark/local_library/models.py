@@ -1,4 +1,4 @@
-"""Value objects used by the v0.4 local library scanner."""
+"""Value objects used by the local library scanner."""
 
 from __future__ import annotations
 
@@ -27,8 +27,11 @@ class LocalTrackMetadata:
     genre: str | None = None
     duration_seconds: float | None = None
     codec: str = ""
+    container: str = ""
     bitrate: int | None = None
     sample_rate: int | None = None
+    channels: int | None = None
+    bit_depth: int | None = None
     source_provider_id: str | None = None
     source_external_id: str | None = None
 

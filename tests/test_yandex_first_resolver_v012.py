@@ -12,7 +12,7 @@ class _NoCache:
 
 
 class _PolicyResolver(YandexFirstExternalMetadataResolver):
-    def __init__(self, *, yandex_items=None, acoustic_items=None, title="Track", artist="Artist") -> None:
+    def __init__(self, *, yandex_items=None, acoustic_items=None, title="Song", artist="Artist") -> None:
         self._cache = _NoCache()
         self._title = title
         self._artist = artist
@@ -62,7 +62,7 @@ def _candidate(source: str, confidence: Confidence, *, acoustic: bool = False) -
         source=source,
         source_display_name=source,
         source_track_id="id",
-        fields={"title": "Track", "artists": ["Artist"]},
+        fields={"title": "Song", "artists": ["Artist"]},
         identities=identities,
         confidence=confidence,
     )

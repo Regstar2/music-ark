@@ -1,4 +1,4 @@
-"""Incremental recursive scanner for MusicArk v0.4 local libraries."""
+"""Incremental recursive scanner for MusicArk local libraries."""
 
 from __future__ import annotations
 
@@ -9,16 +9,17 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from .metadata_reader import LocalMetadataReader
-from .models import LocalAudioRecord, LocalLibraryRoot, LocalScanResult
+from musicark.audio.formats import supported_extensions
 from musicark.storage.local_library_storage import (
     LocalLibraryStorageRepository,
     normalize_local_path,
 )
+from .metadata_reader import LocalMetadataReader
+from .models import LocalAudioRecord, LocalLibraryRoot, LocalScanResult
 
-SUPPORTED_AUDIO_EXTENSIONS = frozenset(
-    {".mp3", ".flac", ".m4a", ".mp4", ".aac", ".ogg", ".opus", ".wav"}
-)
+# Compatibility export for older callers/tests. The authoritative set lives in
+# musicark.audio.formats and is shared with metadata/upload/recovery.
+SUPPORTED_AUDIO_EXTENSIONS = supported_extensions()
 
 
 def _utc_now() -> str:

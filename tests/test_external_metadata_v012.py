@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import httpx
+import requests
 
 from musicark.external_metadata.fingerprint import FingerprintError, FingerprintService
 from musicark.external_metadata.models import Confidence, EvidenceType, ExternalMetadataCandidate, MetadataEvidence
@@ -179,7 +180,7 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertEqual(routes[0], None)
         self.assertIn("127.0.0.1:8080", routes[1])
 
-    def test_warp_prefers_http_connect_and_http1(self) -> None:
+    def test_generic_warp_prefers_httpx_connect_and_http1(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
         store.save({"networkMode": NetworkMode.WARP.value})
@@ -193,18 +194,55 @@ class ExternalMetadataV012Tests(unittest.TestCase):
             def request(self, method, url, **kwargs):
                 return httpx.Response(200, request=httpx.Request(method, url))
 
-        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://example.test/value")  # type: ignore[arg-type]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(client_options[0]["proxy"], "http://127.0.0.1:40000")
         self.assertTrue(client_options[0]["http1"])
         self.assertFalse(client_options[0]["http2"])
         self.assertEqual(response.extensions["musicark_route"], "warp_http_connect")
 
-    def test_musicbrainz_warp_falls_back_from_connect_to_socks5(self) -> None:
+    def test_musicbrainz_warp_prefers_requests_connect(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({"networkMode": NetworkMode.WARP.value})
+        calls = []
+
+        class Session:
+            trust_env = True
+            def request(self, method, url, **kwargs):
+                calls.append((method, url, kwargs))
+                response = requests.Response()
+                response.status_code = 200
+                response._content = b'{"recordings": []}'
+                response.url = url
+                return response
+            def close(self): pass
+
+        class Client:
+            def __init__(self, **kwargs):
+                raise AssertionError("HTTPX should not run after successful requests CONNECT")
+
+        response = ExternalNetworkTransport(
+            store,
+            client_factory=Client,  # type: ignore[arg-type]
+            requests_session_factory=Session,  # type: ignore[arg-type]
+        ).get("https://musicbrainz.org/ws/2/recording", params={"fmt": "json"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.extensions["musicark_route"], "warp_requests_connect")
+        self.assertEqual(calls[0][2]["proxies"]["https"], "http://127.0.0.1:40000")
+        self.assertFalse(calls[0][2]["allow_redirects"])
+
+    def test_musicbrainz_warp_falls_back_to_httpx_and_socks5(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
         store.save({"networkMode": NetworkMode.WARP.value})
         routes = []
+
+        class Session:
+            trust_env = True
+            def request(self, method, url, **kwargs):
+                raise requests.exceptions.SSLError("independent CONNECT TLS failure")
+            def close(self): pass
 
         class Client:
             def __init__(self, **kwargs):
@@ -220,7 +258,11 @@ class ExternalMetadataV012Tests(unittest.TestCase):
                     )
                 return httpx.Response(200, request=httpx.Request(method, url))
 
-        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        response = ExternalNetworkTransport(
+            store,
+            client_factory=Client,  # type: ignore[arg-type]
+            requests_session_factory=Session,  # type: ignore[arg-type]
+        ).get("https://musicbrainz.org/ws/2/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(routes, ["http://127.0.0.1:40000", "socks5://127.0.0.1:40000"])
         self.assertEqual(response.extensions["musicark_route"], "warp_socks5")

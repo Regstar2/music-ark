@@ -45,14 +45,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $python = "-$env:MUSICARK_PYTHON_VERSION"
-          $ffmpeg = (& py $python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())").Trim()
-          if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf)) { throw "Pinned imageio-ffmpeg executable was not found: $ffmpeg" }
+          $env:MUSICARK_FFMPEG_STAGED_PATH = Join-Path $env:GITHUB_WORKSPACE ".tools\ffmpeg\ffmpeg.exe"
+          $ffmpeg = (& py $python -c "import imageio_ffmpeg, os, pathlib, shutil; src=pathlib.Path(imageio_ffmpeg.get_ffmpeg_exe()); dst=pathlib.Path(os.environ['MUSICARK_FFMPEG_STAGED_PATH']); dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dst); print(dst.resolve())").Trim()
+          if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf)) { throw "Pinned imageio-ffmpeg executable was not staged correctly: $ffmpeg" }
           $resolved = (Resolve-Path -LiteralPath $ffmpeg).Path
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolved).Hash
           Write-Host "FFmpeg SHA-256: $hash"
           & $resolved -version
           if ($LASTEXITCODE -ne 0) { throw "FFmpeg -version failed." }
           "MUSICARK_FFMPEG_PATH=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Remove-Item Env:MUSICARK_FFMPEG_STAGED_PATH -ErrorAction SilentlyContinue
       - name: Run unit tests
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'

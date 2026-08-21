@@ -17,7 +17,7 @@ from musicark.storage.database import initialize_database
 from .credentials import ExternalCredentialStore
 from .editor import ExternalMetadataEditor
 from .network import ExternalNetworkTransport, NetworkMode, NetworkSettingsStore
-from .resolver import ExternalMetadataResolver
+from .yandex_first_resolver import YandexFirstExternalMetadataResolver
 from .warp import WarpService, WarpState
 
 
@@ -168,10 +168,10 @@ def main() -> int:
             else:
                 transport = ExternalNetworkTransport(settings)
 
-                # Diagnose the actual default identification path. AcoustID can
-                # return MusicBrainz recording/release metadata directly, so a
-                # blocked musicbrainz.org text-search endpoint is not a required
-                # runtime dependency after fingerprint identification.
+                # Network diagnostics exercise the acoustic rescue path rather
+                # than implying that it is the normal first lookup.  Yandex-first
+                # identification uses these services only when catalog text search
+                # cannot produce a strong candidate.
                 acoustid_key = credentials.get("acoustid_key")
                 if acoustid_key:
                     items.append(_network_probe(
@@ -201,7 +201,7 @@ def main() -> int:
         else:
             if args.local_file_id is None:
                 raise ValueError("--local-file-id is required.")
-            resolver = ExternalMetadataResolver(database_path, base_dir)
+            resolver = YandexFirstExternalMetadataResolver(database_path, base_dir)
             editor = ExternalMetadataEditor(MetadataEditorService(base_dir=base_dir, database_path=database_path), resolver)
             if args.command == "external_metadata_identify":
                 payload = resolver.identify(args.local_file_id, continue_search=args.continue_search)

@@ -33,6 +33,9 @@ abstract interface class MusicArkBridgeClient {
 }
 
 class MusicArkBridge implements MusicArkBridgeClient {
+  String? _cachedRepoRoot;
+  Future<_PythonCommand>? _pythonCommandFuture;
+
   @override
   Future<Map<String, dynamic>> bootstrap() => _runBridge('bootstrap');
   @override
@@ -117,8 +120,8 @@ class MusicArkBridge implements MusicArkBridgeClient {
       throw ArgumentError('rootId and rootIds cannot be supplied together.');
     }
 
-    final repoRoot = _resolveRepoRoot();
-    final python = await _resolvePythonCommand(repoRoot);
+    final repoRoot = _cachedRepoRoot ??= _resolveRepoRoot();
+    final python = await _cachedPythonCommand(repoRoot);
     final separator = Platform.pathSeparator;
     final srcPath = '$repoRoot${separator}src';
     final existingPythonPath = Platform.environment['PYTHONPATH'];
@@ -197,6 +200,21 @@ class MusicArkBridge implements MusicArkBridgeClient {
       );
     }
     return payload;
+  }
+
+  Future<_PythonCommand> _cachedPythonCommand(String repoRoot) async {
+    final existing = _pythonCommandFuture;
+    if (existing != null) return existing;
+    final resolving = _resolvePythonCommand(repoRoot);
+    _pythonCommandFuture = resolving;
+    try {
+      return await resolving;
+    } catch (_) {
+      if (identical(_pythonCommandFuture, resolving)) {
+        _pythonCommandFuture = null;
+      }
+      rethrow;
+    }
   }
 
   String _resolveRepoRoot() {

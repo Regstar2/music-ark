@@ -2,7 +2,39 @@
 
 All notable project changes are recorded here. Entries describe the current code history and do not imply a published GitHub Release unless a release/tag exists separately.
 
-## Unreleased — after v0.10.0
+## Unreleased — release hardening
+
+### v0.14.0 — Large Library Performance & Release Hardening
+
+#### Added
+
+- deterministic 1k/10k/50k synthetic performance harness with machine-readable JSON output and query-plan evidence;
+- focused Python regressions for page bounds, unchanged/delta scan work, partial-walk safety, artwork batching/negative caching and repeated DB initialization;
+- focused Flutter regressions for cache-first Local Library activation, 250-row first page and Yandex search debounce/lazy row behavior;
+- separate self-hosted `performance-regression` CI job uploading `musicark-performance-report`.
+
+#### Changed
+
+- Local Library navigation is cache-first and no longer starts an implicit recursive scan;
+- backend Local Library page size is hard-capped at 250;
+- scan persistence accepts an explicit missing-path delta and avoids O(N) unchanged `last_seen_at` rewrites;
+- Local Library artwork cache uses one bounded batch read for cached page entries and persists invalidatable no-cover results through the v0.13 format adapter boundary;
+- Yandex track filtering/search avoids the default full-list copy, debounces text input and bounds list-image decode dimensions;
+- Local Library, Matching, Coverage and Downloads ignore stale async reload results using local request-generation tokens;
+- application/backend version advances to `0.14.0`, Flutter to `0.14.0+1`; core SQLite remains `1.9.0`.
+
+#### Safety / boundaries
+
+- no new metadata provider, audio format, Yandex API capability, Matching/Variant truth model, database engine, persistent Python daemon or Flutter state-management framework is introduced;
+- partial scans never delete uncertain files; normal navigation does not scan roots; normal scrolling does not initiate external metadata network lookup;
+- source audio and v0.11-v0.13 upload/conversion safety boundaries remain unchanged;
+- live Yandex mutation flags/tokens are cleared in automated v0.14 performance tests.
+
+#### Verification state
+
+- deterministic performance and hardening tests are part of the branch;
+- exact final GitHub Actions run, job conclusions and measured JSON values are recorded only after they run against the final PR head;
+- no GitHub Release, tag, installer or production auto-update is created by v0.14.
 
 ### v0.10.0 — Yandex Upload Feasibility Spike
 

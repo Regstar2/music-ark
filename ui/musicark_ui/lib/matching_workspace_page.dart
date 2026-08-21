@@ -48,6 +48,7 @@ class _MatchingPageState extends State<MatchingPage> {
   String _search = '';
   String _sort = 'confidence';
   String? _error;
+  int _requestGeneration = 0;
 
   @override
   void initState() {
@@ -119,6 +120,7 @@ class _MatchingPageState extends State<MatchingPage> {
   }
 
   Future<void> _reload() async {
+    final generation = ++_requestGeneration;
     setState(() {
       _loading = true;
       _error = null;
@@ -135,7 +137,7 @@ class _MatchingPageState extends State<MatchingPage> {
       final capabilities = await widget.bridge.variantCapabilities();
       var items = _ensureVariantRows(_mapItems(results['items']));
       items = await _withContentLabels(items);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _summary = summary;
         _variantCapabilities = capabilities;
@@ -187,6 +189,7 @@ class _MatchingPageState extends State<MatchingPage> {
 
   Future<void> _loadMore() async {
     if (_loadingMore || _items.length >= _total) return;
+    final generation = _requestGeneration;
     setState(() {
       _loadingMore = true;
       _error = null;
@@ -201,7 +204,7 @@ class _MatchingPageState extends State<MatchingPage> {
       );
       var nextItems = _ensureVariantRows(_mapItems(result['items']));
       nextItems = await _withContentLabels(nextItems);
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         _items = [..._items, ...nextItems];
         _total = _asInt(result['count']);

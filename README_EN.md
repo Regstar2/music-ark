@@ -2,10 +2,22 @@
 
 [Русский](README.md) · **English**
 
-**Current code version: 0.11.1 — Bulk Upload, Recovery Sync & Explicit Scope Context.**  
+**Current code version: 0.14.0 — Large Library Performance & Release Hardening.**  
 **Current SQLite schema: 1.9.0.**
 
-MusicArk is a Windows desktop application connecting a cache-first Yandex Music library with a local music collection. Local Library, Identity Matching, Variant, Coverage, Download and Controlled Sync remain separate layers. v0.11.0 proved production upload of one MP3; v0.11.1 keeps `YandexSingleTrackUploadService` as the only one-file transfer primitive and extends it into safe bulk upload and collection recovery.
+MusicArk is a Windows desktop application for cache-first Yandex Music and local-library workflows. Local Library, Identity Matching, Variant, Coverage, Download, Metadata Editor, Controlled Sync and Yandex Upload remain separate boundaries. v0.12 added external metadata/network boundaries, v0.13 added multi-format audio and safe Yandex conversion, and v0.14 freezes feature scope while removing demonstrated redundant work on large libraries.
+
+## Large Library Performance & Release Hardening v0.14.0
+
+Local Library now opens strictly cache-first: normal navigation reads SQLite and the first page, while recursive filesystem scanning runs only after an explicit Scan action. The backend enforces a 250-row hard page cap independently of Flutter; search/sort/root scope stays in SQLite before pagination.
+
+Incremental scans no longer push tens of thousands of unchanged paths through the SQLite write path. Metadata parsing remains limited to new/changed files and persistence receives the `upserts + missing paths` delta. An incomplete filesystem walk fails closed and never removes files whose absence is uncertain.
+
+Artwork cache uses a batch lookup for the current page, caches no-cover results against size/mtime/provider identity and reuses the v0.13 format-adapter registry rather than an MP3-only shortcut. Small list artwork uses bounded decode dimensions. Yandex track search now has a 180 ms debounce, current source/query/sort memoization and lazy fixed-extent rows.
+
+`tools/performance_smoke.py` generates deterministic 1k/10k/50k SQLite datasets and a JSON report uploaded by CI as `musicark-performance-report`. Hard acceptance assertions use deterministic work metrics rather than fragile millisecond thresholds.
+
+After v0.14 the feature roadmap is limited to v0.15.0 (Installer, Auto-Update, Feedback & Packaging) and v1.0.0 (Release Freeze & Public Release). See `docs/versions/v0.14.0.md`.
 
 ## Bulk Upload & Recovery Sync v0.11.1
 

@@ -1,0 +1,52 @@
+name: v0.14 targeted patch
+
+on:
+  push:
+    branches: ["feature/v0.14.0-performance-hardening"]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'apply targeted repository patch') }}
+    runs-on: self-hosted
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/v0.14.0-performance-hardening
+          fetch-depth: 0
+      - name: Apply targeted patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = $null
+          if (Get-Command py -ErrorAction SilentlyContinue) {
+            foreach ($version in @("3.13", "3.12", "3.11", "3.10")) {
+              & py "-$version" -c "import pathlib" 2>$null
+              if ($LASTEXITCODE -eq 0) { $python = @("py", "-$version"); break }
+            }
+          }
+          if ($null -eq $python) { throw "No usable Python found." }
+          & $python[0] $python[1] .\tools\_apply_v014_patch.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Commit targeted changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          git config user.name "musicark-v014-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -- .\tools\_apply_v014_patch.py .\.github\workflows\v014-apply.yml
+          git add -- `
+            .\src\musicark\local_library\_service_v012.py `
+            .\src\musicark\storage\local_library_storage.py `
+            .\ui\musicark_ui\lib\local_library_page.dart `
+            .\ui\musicark_ui\lib\yandex_workspace.dart `
+            .\pyproject.toml `
+            .\src\musicark\__init__.py `
+            .\ui\musicark_ui\pubspec.yaml `
+            .\ui\musicark_ui\lib\app_info.dart
+          git diff --cached --check
+          git commit -m "perf(v0.14): apply targeted repository patch"
+          git push origin HEAD:feature/v0.14.0-performance-hardening

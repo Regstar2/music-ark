@@ -181,7 +181,28 @@ class ExternalMetadataV012Tests(unittest.TestCase):
         self.assertTrue(client_options[0]["http1"])
         self.assertFalse(client_options[0]["http2"])
 
-    def test_warp_falls_back_from_connect_to_socks5_on_tls_connect_failure(self) -> None:
+    def test_metabrainz_warp_retries_connect_without_known_bad_socks_path(self) -> None:
+        credentials = _MemoryCredentials()
+        store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
+        store.save({"networkMode": NetworkMode.WARP.value})
+        routes = []
+
+        class Client:
+            def __init__(self, **kwargs):
+                self.proxy = kwargs.get("proxy")
+                routes.append(self.proxy)
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def request(self, method, url, **kwargs):
+                if len(routes) == 1:
+                    raise httpx.ConnectError("transient CONNECT failure", request=httpx.Request(method, url))
+                return httpx.Response(200, request=httpx.Request(method, url))
+
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(routes, ["http://127.0.0.1:40000", "http://127.0.0.1:40000"])
+
+    def test_non_metabrainz_warp_can_fall_back_to_socks5(self) -> None:
         credentials = _MemoryCredentials()
         store = NetworkSettingsStore(self.root, credentials)  # type: ignore[arg-type]
         store.save({"networkMode": NetworkMode.WARP.value})
@@ -195,13 +216,10 @@ class ExternalMetadataV012Tests(unittest.TestCase):
             def __exit__(self, *args): return False
             def request(self, method, url, **kwargs):
                 if str(self.proxy).startswith("http://"):
-                    raise httpx.ConnectError(
-                        "certificate verify failed: hostname mismatch",
-                        request=httpx.Request(method, url),
-                    )
+                    raise httpx.ConnectError("CONNECT unavailable", request=httpx.Request(method, url))
                 return httpx.Response(200, request=httpx.Request(method, url))
 
-        response = ExternalNetworkTransport(store, client_factory=Client).get("https://musicbrainz.org/ws/2/")  # type: ignore[arg-type]
+        response = ExternalNetworkTransport(store, client_factory=Client).get("https://example.test/value")  # type: ignore[arg-type]
         self.assertEqual(response.status_code, 200)
         self.assertEqual(routes, ["http://127.0.0.1:40000", "socks5://127.0.0.1:40000"])
 

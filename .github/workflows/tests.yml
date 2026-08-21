@@ -34,18 +34,44 @@ jobs:
       - name: Install package
         shell: pwsh
         run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m pip install -e .'
-      - name: Run unit tests
-        shell: pwsh
-        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
-      - name: Run production Yandex upload and v0.11.1 recovery tests
+      - name: Disable live Yandex mutations
         shell: pwsh
         run: |
           Remove-Item Env:MUSICARK_YANDEX_UPLOAD_LIVE -ErrorAction SilentlyContinue
           Remove-Item Env:MUSICARK_YANDEX_PLAYLIST_LIVE -ErrorAction SilentlyContinue
           Remove-Item Env:YANDEX_MUSIC_TOKEN -ErrorAction SilentlyContinue
+      - name: Resolve/Provision FFmpeg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = "-$env:MUSICARK_PYTHON_VERSION"
+          $ffmpeg = (& py $python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())").Trim()
+          if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf)) { throw "Pinned imageio-ffmpeg executable was not found: $ffmpeg" }
+          $resolved = (Resolve-Path -LiteralPath $ffmpeg).Path
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolved).Hash
+          Write-Host "FFmpeg SHA-256: $hash"
+          & $resolved -version
+          if ($LASTEXITCODE -ne 0) { throw "FFmpeg -version failed." }
+          "MUSICARK_FFMPEG_PATH=$resolved" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Run unit tests
+        shell: pwsh
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*.py" -v'
+      - name: Run focused v0.13 format and conversion tests
+        shell: pwsh
+        run: '& py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_v013_multiformat_conversion -v'
+      - name: Run production Yandex upload and v0.11.1 recovery tests
+        shell: pwsh
+        run: |
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_yandex_upload_production_*.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest tests.test_v0111_recovery_upload -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run v0.12 external metadata and network regressions
+        shell: pwsh
+        run: |
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_*v012.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & py "-$env:MUSICARK_PYTHON_VERSION" -m unittest discover -s tests -p "test_v012_*.py" -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   yandex-upload-research:
@@ -129,9 +155,12 @@ jobs:
       - name: Flutter analyze
         shell: pwsh
         run: flutter analyze --no-fatal-infos
-      - name: Focused v0.11.1 UI tests
+      - name: Focused v0.11.1 and v0.13 UI tests
         shell: pwsh
         run: flutter test test/v0111_bulk_recovery_test.dart test/v0111_sync_page_test.dart test/yandex_upload_dialog_test.dart test/yandex_upload_local_library_test.dart test/local_library_page_test.dart test/sync_page_test.dart
       - name: Flutter tests
         shell: pwsh
         run: flutter test
+      - name: Flutter Windows build
+        shell: pwsh
+        run: flutter build windows

@@ -1,13 +1,13 @@
 # MusicArk Roadmap
 
-MusicArk is in feature freeze for the first public desktop release. The product scope through v1.0.0 is intentionally short and must not be expanded with new feature milestones during release hardening.
+MusicArk is in feature freeze for the first public desktop release. The product scope through v1.0.0 is intentionally closed and must not be expanded with new feature milestones during release hardening.
 
 ```text
 v0.12.0 — External Metadata & Resilient Network Access       complete
 v0.13.0 — Multi-Format Audio & Safe Yandex Conversion        complete
 v0.14.0 — Large Library Performance & Release Hardening      complete
-v0.15.0 — Installer, Auto-Update, Feedback & Packaging       implementation
-v1.0.0  — Release Freeze & Public Release                    planned
+v0.15.0 — Installer, Auto-Update, Feedback & Packaging       complete / merged
+v1.0.0  — Release Freeze & Public Release                    current
 ```
 
 ## v0.12.0 — External Metadata & Resilient Network Access
@@ -28,19 +28,32 @@ No new product capability was added in v0.14.0. See `docs/versions/v0.14.0.md`.
 
 ## v0.15.0 — Installer, Auto-Update, Feedback & Packaging
 
-Current milestone. Scope is limited to distribution infrastructure:
+Merged distribution baseline. The implementation adds:
 
 - standalone Windows packaging without a separately installed Python runtime;
 - per-user installer/uninstaller and portable package;
 - one canonical release version contract;
 - explicit fail-closed update discovery/download/apply flow with SHA-256 verification;
 - GitHub bug/feature feedback entry points with privacy-safe diagnostics;
-- package/runtime/update/feedback CI gates and release documentation.
+- package/runtime/update/feedback tests and release documentation.
 
-The future public GitHub release/update location is a deployment-time channel, not a code-completeness blocker. No release/tag/stable manifest is published by this milestone itself.
+Merge alone is not treated as release acceptance. The v1.0.0 release freeze must rerun current-source regression tests and complete the real Windows install/upgrade/uninstall acceptance matrix.
 
-See `docs/versions/v0.15.0.md`.
+See `docs/versions/v0.15.0.md` and `docs/testing/release-regression-matrix.md`.
 
 ## v1.0.0 — Release Freeze & Public Release
 
-Final release review, documentation/license/privacy checks, clean-install/upgrade validation, release artifacts and public GitHub release. Only release blockers are fixed here; feature development resumes after 1.0 on a separate roadmap.
+Current milestone. No new product features are allowed.
+
+Required work is limited to:
+
+- apply the trusted Issue/Project/PR/CI/release workflow;
+- run the v0.12–v0.15 release regression matrix on current source;
+- fix confirmed release blockers only;
+- validate clean install, portable launch, reinstall, upgrade and uninstall on Windows;
+- verify README RU/EN, license/notices, privacy/security and repository cleanliness;
+- configure the intended public feedback/update/release channel;
+- record the actual signing state;
+- build final artifacts from an immutable v1.0.0 tag and publish them through the release workflow.
+
+Tracked release-freeze Issues begin with #32–#35. Feature development resumes only after the first public release on a separate roadmap.

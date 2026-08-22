@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish MusicArk release
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2'
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 180
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and checkout exact release tag
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Release tag is empty.' }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') { throw "Invalid release tag: $tag" }
+
+          git fetch --tags --force
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch --tags failed.' }
+
+          git rev-parse "refs/tags/$tag^{commit}" *> $null
+          if ($LASTEXITCODE -ne 0) { throw "Tag '$tag' does not exist." }
+
+          git checkout --detach "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to checkout tag '$tag'." }
+
+      - name: Run release-source CI
+        shell: pwsh
+        run: .\scripts\ci.ps1 -SkipPackageSmoke
+
+      - name: Prepare release output
+        shell: pwsh
+        run: |
+          if (Test-Path '.\dist') { Remove-Item '.\dist' -Recurse -Force }
+          New-Item -ItemType Directory -Path '.\dist' | Out-Null
+
+      - name: Build final release artifacts
+        shell: pwsh
+        run: .\scripts\release.ps1 -Version $env:RELEASE_TAG
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem '.\dist' -File)
+          if ($files.Count -eq 0) { throw 'Release produced no files in dist/.' }
+          $requiredPatterns = @('MusicArk-*-win-x64.zip', 'MusicArk-Setup-*-x64.exe', 'SHA256SUMS.txt', 'update-manifest.json')
+          foreach ($pattern in $requiredPatterns) {
+            if (-not (Get-ChildItem '.\dist' -Filter $pattern -File -ErrorAction SilentlyContinue)) {
+              throw "Required release artifact is missing: $pattern"
+            }
+          }
+          $files | Select-Object Name, Length, LastWriteTime
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) { throw "GitHub Release '$env:RELEASE_TAG' already exists." }
+
+          $files = @(Get-ChildItem '.\dist' -File | Select-Object -ExpandProperty FullName)
+          $arguments = @('release', 'create', $env:RELEASE_TAG)
+          $arguments += $files
+          $arguments += @('--title', "MusicArk $env:RELEASE_TAG", '--generate-notes')
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create GitHub Release '$env:RELEASE_TAG'." }

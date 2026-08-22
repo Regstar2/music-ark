@@ -2,10 +2,18 @@
 
 **Русский** · [English](README_EN.md)
 
-**Текущая версия кода: 0.14.0 — Large Library Performance & Release Hardening.**  
+**Текущая версия кода: 0.15.0 — Installer, Auto-Update, Feedback & Packaging.**  
 **Текущая схема SQLite: 1.9.0.**
 
 MusicArk — Windows desktop-приложение для cache-first работы с библиотекой Яндекс Музыки и локальной музыкальной коллекцией. Проект сохраняет отдельные границы Local Library, Identity Matching, Variant, Coverage, Download, Metadata Editor, Controlled Sync и Yandex Upload. v0.12 добавила внешние metadata/network boundaries, v0.13 — multi-format audio и безопасную конвертацию для Yandex, а v0.14 замораживает feature scope и убирает доказанную лишнюю работу на больших библиотеках.
+
+## Distribution, Updates & Feedback v0.15.0
+
+v0.15.0 переводит MusicArk из developer-checkout в распространяемое Windows-приложение: release package включает Flutter desktop и замороженный backend runtime, поэтому пользователю не нужен отдельно установленный Python или `.venv`. Добавлены per-user Inno Setup installer, portable ZIP и SHA-256 manifests; пользовательские данные хранятся вне каталога программы и не удаляются обычным uninstall.
+
+Проверка обновлений использует строгий HTTPS manifest: `check` только читает данные, `prepare` скачивает и проверяет точный размер + SHA-256, а `apply` запускает уже проверенный установщик только после явного подтверждения. В release-сборке проверка может запускаться автоматически; debug/tests остаются без фонового update-запроса. Публичный GitHub release/update channel подключается при публикации и не является требованием для сборки v0.15.
+
+В Settings добавлены Bug report / Feature request. Автоматические diagnostics ограничены версией MusicArk, ОС и архитектурой и не включают токены, cookies, signed URLs, proxy secrets, пути к музыке или содержимое библиотеки. Подробнее: `docs/versions/v0.15.0.md`.
 
 ## Large Library Performance & Release Hardening v0.14.0
 

@@ -9,7 +9,7 @@ This file records factual Windows distribution evidence for the first public Mus
 | Field | Value |
 |---|---|
 | Branch | `release/v1.0-windows-acceptance` |
-| Source SHA | `09e91c01208d9a5f80750ee738511df5587296ec` |
+| Source SHA | `097926cb2ef4a11a6b900e3eaeef75f874656703` plus the local release-blocker fixes committed with this evidence update |
 | Baseline | v0.15.0 merged; v1.0.0 feature freeze |
 | Final v1.0.0 tag/release | NOT CREATED |
 
@@ -33,21 +33,21 @@ Command:
 
 | Check | Result | Evidence | Notes |
 |---|---|---|---|
-| Commit SHA | NOT VERIFIED | Not run yet | Must be recorded after CI execution. |
-| Selected Python version | NOT VERIFIED | Not run yet | Must come from `scripts/resolve-python.ps1`. |
-| Version consistency | NOT VERIFIED | Not run yet |  |
-| Python tests | NOT VERIFIED | Not run yet |  |
-| v0.11.x upload/recovery compatibility | NOT VERIFIED | Not run yet | Covered by full Python/Flutter suites. |
-| v0.12 regressions | NOT VERIFIED | Not run yet |  |
-| v0.13 regressions | NOT VERIFIED | Not run yet |  |
-| v0.14 regressions | NOT VERIFIED | Not run yet |  |
-| v0.15 regressions | NOT VERIFIED | Not run yet |  |
-| Flutter analyze | NOT VERIFIED | Not run yet |  |
-| Flutter tests | NOT VERIFIED | Not run yet |  |
-| Flutter Windows build | NOT VERIFIED | Not run yet |  |
-| Performance report | NOT VERIFIED | Not run yet | Expected at `.musicark/performance/release-regression.json`. |
-| SQLite query audit | NOT VERIFIED | Not run yet | Expected at `.musicark/performance/sqlite-query-audit.json`. |
-| Portable package smoke | NOT VERIFIED | Not run yet | Expected under `artifacts/v0.15.0/`. |
+| Commit SHA | PASS | Local gate executed on `097926cb2ef4a11a6b900e3eaeef75f874656703` plus the release-blocker working-tree fixes | Final pushed PR head SHA must be read from GitHub after push. |
+| Selected Python version | PASS | `scripts/resolve-python.ps1` selected `3.13`; runtime `3.13.14` | `py -3.13` reported `3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]`. |
+| Version consistency | PASS | `MusicArk version declarations are consistent: 0.15.0` |  |
+| Python tests | PASS | `Ran 617 tests in 30.483s` / `OK` | Full `unittest discover -s tests -p 'test_*.py' -v`. |
+| v0.11.x upload/recovery compatibility | PASS | Covered by full Python/Flutter suites in `.\scripts\ci.ps1` | Live Yandex mutations intentionally removed from normal CI environment. |
+| v0.12 regressions | PASS | Covered by full Python/Flutter suites in `.\scripts\ci.ps1` | Includes external metadata / WARP UI regression coverage. |
+| v0.13 regressions | PASS | Covered by full Python suite in `.\scripts\ci.ps1` |  |
+| v0.14 regressions | PASS | Performance smoke + full suites passed |  |
+| v0.15 regressions | PASS | Packaging smoke + full suites passed |  |
+| Flutter analyze | PASS | `flutter analyze --no-fatal-infos` exit code 0 | Analyzer still reports 36 non-fatal info diagnostics. |
+| Flutter tests | PASS | `flutter test` ended `+155: All tests passed!` | Full suite, not focused-only. |
+| Flutter Windows build | PASS | `flutter build windows` built `build\windows\x64\runner\Release\musicark_ui.exe` |  |
+| Performance report | PASS | `.musicark/performance/release-regression.json` generated | 1k/10k/50k deterministic evidence generated. |
+| SQLite query audit | PASS | `.musicark/performance/sqlite-query-audit.json` generated |  |
+| Portable package smoke | PASS | `tools/package_windows.ps1 -SkipInstaller -PythonVersion 3.13` and full `.\scripts\ci.ps1` passed | Packaging pip installs use `--no-cache-dir` to avoid dirty user-cache permission failures. |
 | Live Yandex mutation in normal CI | N/A | `scripts/ci.ps1` removes live mutation env vars | Live mutation is intentionally outside ordinary CI. |
 
 ## Release Candidate Artifacts
@@ -56,7 +56,7 @@ These are release-candidate evidence artifacts only. They are not final v1.0.0 a
 
 | Filename | Size | SHA-256 | Source SHA | Build environment |
 |---|---:|---|---|---|
-| NOT VERIFIED |  |  |  | RC artifacts not built yet. |
+| `MusicArk-0.15.0-win-x64.zip` | 87540082 | `641cd698045f63deaf6cb0ae242a1d1c0368646800f4a0d804822d3a31333069` | local release-fix working tree based on `097926cb2ef4a11a6b900e3eaeef75f874656703` | Windows 11, Python 3.13.14, Flutter Windows release build |
 
 ## Manual Windows Acceptance Matrix
 
@@ -85,7 +85,8 @@ These are release-candidate evidence artifacts only. They are not final v1.0.0 a
 ## Release Blockers
 
 - Project #2 linkage is `NOT VERIFIED` because the available GitHub token lacks project scopes.
-- All automated, artifact, manual and security checks remain `NOT VERIFIED` until executed and recorded.
+- Manual Windows acceptance remains `NOT VERIFIED`; do not close Issue #34 or mark Windows acceptance PASS from automated CI alone.
+- Security / privacy audit remains `NOT VERIFIED` until the owner performs or records the dedicated audit steps.
 
 ## Owner Actions Required
 

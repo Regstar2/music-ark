@@ -37,6 +37,12 @@ class _EnglishSettings implements AppSettingsStorage {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   testWidgets('new Yandex controls use English locale', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1500, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -47,7 +53,7 @@ void main() {
         settingsStorage: _EnglishSettings(),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     expect(find.text('Tracks'), findsWidgets);
     expect(find.text('Playlists'), findsWidgets);

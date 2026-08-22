@@ -8,7 +8,13 @@ import 'package:musicark_ui/local_library_page.dart';
 import 'package:musicark_ui/main.dart';
 
 void main() {
-  testWidgets('Local Library scans configured roots on every tab activation', (
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
+  testWidgets('Local Library reloads configured roots without implicit scan', (
     tester,
   ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
@@ -16,17 +22,20 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1500, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MusicArkDesktopApp(bridge: bridge));
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     await tester.tap(find.byKey(const Key('nav-local-library')));
-    await tester.pumpAndSettle();
-    expect(bridge.localScanCalls, 1);
+    await pumpShellReady(tester);
+    expect(find.byKey(const Key('local-library-page')), findsOneWidget);
+    expect(bridge.localScanCalls, 0);
 
     await tester.tap(find.byIcon(Icons.cloud_outlined));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const Key('nav-local-library')));
-    await tester.pumpAndSettle();
-    expect(bridge.localScanCalls, 2);
+    await pumpShellReady(tester);
+    expect(find.byKey(const Key('local-library-page')), findsOneWidget);
+    expect(bridge.localScanCalls, 0);
   });
 
   testWidgets('local track ORIGINAL/CENSORED label is visible and editable', (

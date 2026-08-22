@@ -236,6 +236,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
               session: widget.accountSession,
               onOpenYandex: () => _selectSection(0),
               onLogout: _logout,
+              menuOffset: const Offset(220, -220),
             ),
           ],
         ),

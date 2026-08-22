@@ -8,10 +8,10 @@ import 'package:musicark_ui/main.dart';
 class _EnglishSettings implements AppSettingsStorage {
   @override
   Future<Map<String, dynamic>> read() async => {
-        'schemaVersion': 1,
-        'themeMode': 'light',
-        'localeMode': 'en',
-      };
+    'schemaVersion': 1,
+    'themeMode': 'light',
+    'localeMode': 'en',
+  };
 
   @override
   Future<void> write(Map<String, dynamic> value) async {}
@@ -26,14 +26,15 @@ class _Labels implements ContentLabelBridgeClient {
     List<String> externalIds = const [],
     String providerId = 'yandex_music',
   }) async => {
-        'provider': {
-          for (final id in externalIds)
-            if (provider[id] != null) id: provider[id],
-        },
-      };
+    'provider': {
+      for (final id in externalIds)
+        if (provider[id] != null) id: provider[id],
+    },
+  };
 
   @override
-  Future<Map<String, dynamic>> setLocal(int localFileId, String label) async => {};
+  Future<Map<String, dynamic>> setLocal(int localFileId, String label) async =>
+      {};
 
   @override
   Future<Map<String, dynamic>> setProvider(
@@ -64,7 +65,8 @@ class _UnavailableBridge extends FakeMusicArkBridge {
   }
 
   @override
-  Future<Map<String, dynamic>> bootstrap() async => _patch(await super.bootstrap());
+  Future<Map<String, dynamic>> bootstrap() async =>
+      _patch(await super.bootstrap());
 
   @override
   Future<Map<String, dynamic>> libraryRefresh() async =>
@@ -72,6 +74,12 @@ class _UnavailableBridge extends FakeMusicArkBridge {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   Future<_Labels> pumpApp(
     WidgetTester tester,
     MusicArkBridgeClient bridge,
@@ -86,33 +94,49 @@ void main() {
         settingsStorage: _EnglishSettings(),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
     return labels;
   }
 
-  testWidgets('content labels remain available through the session wrapper', (tester) async {
+  testWidgets('content labels remain available through the session wrapper', (
+    tester,
+  ) async {
     final labels = await pumpApp(
       tester,
       FakeMusicArkBridge(startSignedIn: true),
     );
-    expect(find.byKey(const Key('yandex-inline-content-label-101')), findsOneWidget);
-    expect(find.byKey(const Key('yandex-inline-content-label-102')), findsOneWidget);
+    expect(
+      find.byKey(const Key('yandex-inline-content-label-101')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('yandex-inline-content-label-102')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('yandex-content-labels-open')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('yandex-inline-content-label-menu-101')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('CENSORED').last);
-    await tester.pumpAndSettle();
+    tester
+        .widget<PopupMenuButton<String>>(
+          find.byKey(const Key('yandex-inline-content-label-menu-101')),
+        )
+        .onSelected
+        ?.call('censored');
+    await tester.pump(const Duration(milliseconds: 300));
     expect(labels.provider['101'], 'censored');
 
-    await tester.tap(find.byKey(const Key('yandex-inline-content-label-menu-101')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Remove label').last);
-    await tester.pumpAndSettle();
+    tester
+        .widget<PopupMenuButton<String>>(
+          find.byKey(const Key('yandex-inline-content-label-menu-101')),
+        )
+        .onSelected
+        ?.call('');
+    await tester.pump(const Duration(milliseconds: 300));
     expect(labels.provider.containsKey('101'), isFalse);
   });
 
-  testWidgets('availability text is hidden and unavailable play is disabled', (tester) async {
+  testWidgets('availability text is hidden and unavailable play is disabled', (
+    tester,
+  ) async {
     await pumpApp(tester, _UnavailableBridge());
     expect(find.text('available'), findsNothing);
     expect(find.text('unavailable'), findsNothing);

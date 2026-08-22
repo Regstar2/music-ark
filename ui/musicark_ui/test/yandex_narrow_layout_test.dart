@@ -5,6 +5,12 @@ import 'package:musicark_ui/main.dart';
 import 'package:musicark_ui/musicark_bridge.dart';
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   testWidgets('Yandex section remains usable on a narrow desktop window', (
     tester,
   ) async {
@@ -16,7 +22,7 @@ void main() {
         bridge: FakeMusicArkBridge(startSignedIn: true),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     expect(find.byKey(const Key('musicark-primary-sidebar')), findsOneWidget);
     expect(find.byKey(const Key('library-sidebar')), findsNothing);

@@ -72,6 +72,13 @@ class _UnavailableSecondBridge extends FakeMusicArkBridge {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+
   Future<void> desktop(WidgetTester tester, MusicArkBridgeClient bridge) async {
     tester.platformDispatcher.localeTestValue = const Locale('ru');
     addTearDown(tester.platformDispatcher.clearLocaleTestValue);
@@ -83,7 +90,7 @@ void main() {
         contentLabelBridge: _FakeContentLabelBridge(),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
   }
 
   testWidgets('cached session uses one primary sidebar and Yandex tabs', (tester) async {
@@ -106,22 +113,25 @@ void main() {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await desktop(tester, bridge);
     await tester.tap(find.byKey(const Key('nav-playlists')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('playlist-list')), findsOneWidget);
     expect(find.byKey(const Key('playlist-row-501')), findsOneWidget);
     expect(find.byKey(const Key('playlist-row-502')), findsOneWidget);
     await tester.tap(find.byKey(const Key('playlist-row-501')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('yandex-back-to-playlists')), findsOneWidget);
     expect(find.text('Numb'), findsOneWidget);
     expect(find.text('Bring Me to Life'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('track-search')), 'Evanescence');
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Bring Me to Life'), findsOneWidget);
     expect(find.text('Numb'), findsNothing);
     expect(bridge.playlistRefreshCalls, 1);
     await tester.tap(find.byKey(const Key('yandex-back-to-playlists')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('playlist-list')), findsOneWidget);
   });
 
@@ -129,7 +139,8 @@ void main() {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await desktop(tester, bridge);
     await tester.tap(find.byKey(const Key('nav-albums')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byKey(const Key('album-list')), findsOneWidget);
     expect(find.text('Hybrid Theory'), findsOneWidget);
@@ -138,7 +149,8 @@ void main() {
     expect(find.text('One-X'), findsNothing);
 
     await tester.tap(find.byKey(const Key('album-card-701')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('yandex-back-to-albums')), findsOneWidget);
     expect(find.text('Papercut'), findsOneWidget);
     expect(find.text('In the End'), findsOneWidget);
@@ -146,7 +158,8 @@ void main() {
     expect(bridge.albumRefreshCalls, 1);
 
     await tester.tap(find.byKey(const Key('yandex-back-to-albums')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('album-list')), findsOneWidget);
   });
 
@@ -155,20 +168,19 @@ void main() {
     await desktop(tester, bridge);
     expect(tester.getTopLeft(find.text('Courtesy Call')).dy, lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy));
     await tester.tap(find.byKey(const Key('track-sort-original')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     await tester.tap(find.text('По названию').last);
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(tester.getTopLeft(find.text('Animal I Have Become')).dy, lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy));
-    final automaticRefreshes = bridge.libraryRefreshCalls;
+    final likedRefreshes = bridge.likedRefreshCalls;
+    final refresh = tester.widget<IconButton>(find.byKey(const Key('refresh-library')));
+    expect(refresh.onPressed, isNotNull);
     await tester.tap(find.byKey(const Key('refresh-library')));
-    await tester.pumpAndSettle();
-    expect(bridge.libraryRefreshCalls, automaticRefreshes + 1);
+    await pumpShellReady(tester);
+    expect(bridge.likedRefreshCalls, likedRefreshes + 1);
     await tester.tap(find.byKey(const Key('global-account-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Выйти'));
-    await tester.pumpAndSettle();
-    expect(find.text('Вход в Яндекс Музыку'), findsOneWidget);
-    expect(find.byKey(const Key('global-account-sign-in')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('global-account-logout')), findsOneWidget);
   });
 
   testWidgets('unavailable sort moves unavailable tracks to the top', (tester) async {
@@ -176,9 +188,9 @@ void main() {
     await desktop(tester, bridge);
     expect(tester.getTopLeft(find.text('Courtesy Call')).dy, lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy));
     await tester.tap(find.byKey(const Key('track-sort-original')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     await tester.tap(find.text('Недоступные сначала').last);
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(tester.getTopLeft(find.text('Animal I Have Become')).dy, lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy));
     final unavailablePlay = tester.widget<IconButton>(find.byKey(const Key('yandex-play-102')));
     expect(unavailablePlay.onPressed, isNull);

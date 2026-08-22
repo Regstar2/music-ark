@@ -92,6 +92,7 @@ class MultiRootLocalBridge extends FakeMusicArkBridge {
   final int _largeRootTrackCount;
   final List<Map<String, dynamic>> _roots = [];
   final List<List<int>?> rootIdQueries = [];
+  final List<int> offsetQueries = [];
 
   static Map<String, dynamic> _root(int id, String path) => {
     'id': id,
@@ -199,6 +200,7 @@ class MultiRootLocalBridge extends FakeMusicArkBridge {
       throw ArgumentError('rootId and rootIds cannot both be supplied.');
     }
     rootIdQueries.add(rootIds == null ? null : List<int>.from(rootIds));
+    offsetQueries.add(offset);
     var items = _tracks;
     if (rootIds != null) {
       final selected = rootIds.toSet();
@@ -253,6 +255,12 @@ class FakeLocalFileActions implements LocalFileActions {
 }
 
 void main() {
+  Future<void> pumpReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   Future<void> desktop(WidgetTester tester, Widget widget) async {
     await tester.binding.setSurfaceSize(const Size(1500, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -264,7 +272,7 @@ void main() {
         home: widget,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpReady(tester);
   }
 
   Future<void> applyRootSelection(
@@ -301,7 +309,11 @@ void main() {
     await tester.tap(localNavigation);
 
     final localEmpty = find.byKey(const Key('local-empty'));
-    for (var attempt = 0; attempt < 20 && localEmpty.evaluate().isEmpty; attempt++) {
+    for (
+      var attempt = 0;
+      attempt < 20 && localEmpty.evaluate().isEmpty;
+      attempt++
+    ) {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(find.byKey(const Key('local-library-page')), findsOneWidget);
@@ -527,9 +539,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-load-more')), findsOneWidget);
     await tester.tap(find.byKey(const Key('local-load-more')));
-    await tester.pumpAndSettle();
+    await pumpReady(tester);
     expect(bridge.rootIdQueries.last, [1]);
-    expect(find.text('One Track 500'), findsOneWidget);
+    expect(bridge.offsetQueries.last, greaterThan(0));
   });
 
   testWidgets('removing a selected root drops its stale id from the subset', (

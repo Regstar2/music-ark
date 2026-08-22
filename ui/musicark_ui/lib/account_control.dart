@@ -9,11 +9,13 @@ class AccountControl extends StatelessWidget {
     required this.session,
     required this.onOpenYandex,
     required this.onLogout,
+    this.menuOffset = Offset.zero,
   });
 
   final AccountSessionController session;
   final VoidCallback onOpenYandex;
   final Future<void> Function() onLogout;
+  final Offset menuOffset;
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +50,7 @@ class AccountControl extends StatelessWidget {
         return PopupMenuButton<_AccountAction>(
           key: const Key('global-account-menu'),
           tooltip: context.l10n.accountMenuTitle,
+          offset: menuOffset,
           onSelected: (value) async {
             switch (value) {
               case _AccountAction.openYandex:

@@ -109,32 +109,35 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, textAlign: TextAlign.center),
-              if (subtitle != null) ...[
-                const SizedBox(height: 8),
-                Text(subtitle!, textAlign: TextAlign.center),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title, textAlign: TextAlign.center),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 8),
+                  Text(subtitle!, textAlign: TextAlign.center),
+                ],
+                if (actionLabel != null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    key: const Key('coverage-run-matching'),
+                    onPressed: onAction,
+                    child: Text(actionLabel!),
+                  ),
+                ],
+                if (secondaryAction != null) ...[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: secondaryAction,
+                    child: Text(context.l10n.coverageOpenMatching),
+                  ),
+                ],
               ],
-              if (actionLabel != null) ...[
-                const SizedBox(height: 12),
-                FilledButton(
-                  key: const Key('coverage-run-matching'),
-                  onPressed: onAction,
-                  child: Text(actionLabel!),
-                ),
-              ],
-              if (secondaryAction != null) ...[
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: secondaryAction,
-                  child: Text(context.l10n.coverageOpenMatching),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       );

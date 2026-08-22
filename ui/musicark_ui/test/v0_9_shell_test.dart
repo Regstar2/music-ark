@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:musicark_ui/app_info.dart';
 import 'package:musicark_ui/app_settings.dart';
 import 'package:musicark_ui/audio_player.dart';
 import 'package:musicark_ui/main.dart';
@@ -19,6 +20,19 @@ class _MemorySettingsStorage implements AppSettingsStorage {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+
+  Future<void> reveal(WidgetTester tester, Finder finder) async {
+    await tester.ensureVisible(finder);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+
   Future<_MemorySettingsStorage> pumpDesktop(
     WidgetTester tester, {
     Locale locale = const Locale('ru'),
@@ -35,52 +49,63 @@ void main() {
         settingsStorage: storage,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
     return storage;
   }
 
-  testWidgets('unsupported system locale deterministically falls back to Russian', (tester) async {
-    await pumpDesktop(tester, locale: const Locale('de'));
+  testWidgets(
+    'unsupported system locale deterministically falls back to Russian',
+    (tester) async {
+      await pumpDesktop(tester, locale: const Locale('de'));
 
-    expect(find.text('Яндекс Музыка'), findsWidgets);
-    expect(find.text('Настройки'), findsOneWidget);
-  });
+      expect(find.text('Яндекс Музыка'), findsWidgets);
+      expect(find.text('Настройки'), findsOneWidget);
+    },
+  );
 
-  testWidgets('theme and locale switch without restart and persist', (tester) async {
+  testWidgets('theme and locale switch without restart and persist', (
+    tester,
+  ) async {
     final storage = await pumpDesktop(tester);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     await tester.tap(find.text('English'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Settings'), findsWidgets);
     expect(find.text('Yandex Music'), findsWidgets);
 
-    await tester.tap(find.text('Dark'));
-    await tester.pumpAndSettle();
-    final settingsElement = tester.element(find.byKey(const Key('settings-page')));
+    await tester.tap(find.byIcon(Icons.dark_mode_outlined).hitTestable().last);
+    await pumpShellReady(tester);
+    final settingsElement = tester.element(
+      find.byKey(const Key('settings-page')),
+    );
     expect(Theme.of(settingsElement).brightness, Brightness.dark);
     expect(storage.value['localeMode'], 'en');
     expect(storage.value['themeMode'], 'dark');
   });
 
-  testWidgets('Help and About stay inside shell with Now Playing bar', (tester) async {
+  testWidgets('Help and About stay inside shell with Now Playing bar', (
+    tester,
+  ) async {
     await pumpDesktop(tester);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
+    await reveal(tester, find.byKey(const Key('settings-help')));
     await tester.tap(find.byKey(const Key('settings-help')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byKey(const Key('help-page')), findsOneWidget);
     expect(find.byType(MusicArkNowPlayingBar), findsOneWidget);
     expect(find.text('Синхронизация'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await reveal(tester, find.byKey(const Key('settings-about')));
     await tester.tap(find.byKey(const Key('settings-about')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byKey(const Key('about-page')), findsOneWidget);
-    expect(find.text('0.9.7'), findsWidgets);
+    expect(find.text(AppInfo.version), findsWidgets);
     expect(find.byType(MusicArkNowPlayingBar), findsOneWidget);
   });
 }

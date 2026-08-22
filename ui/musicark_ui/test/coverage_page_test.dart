@@ -11,6 +11,12 @@ import 'package:musicark_ui/matching_bridge.dart';
 import 'package:musicark_ui/musicark_bridge.dart';
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   Future<void> page(
     WidgetTester tester, {
     FakeCoverageBridge? coverage,
@@ -59,10 +65,11 @@ void main() {
         coverageBridge: coverage,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     await tester.tap(find.byKey(const Key('nav-coverage')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byKey(const Key('coverage-page')), findsOneWidget);
     expect(find.text('Недостающие треки'), findsOneWidget);
@@ -118,7 +125,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('coverage-row-201')), findsOneWidget);
     expect(find.text('Другая версия'), findsOneWidget);
-    expect(find.text('Отсутствует'), findsNothing);
+    expect(find.byKey(const ValueKey('coverage-row-203')), findsNothing);
   });
 
   testWidgets('collection selector scopes page and exposes playlist order sort', (

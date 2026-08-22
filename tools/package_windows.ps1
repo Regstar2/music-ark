@@ -36,9 +36,9 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython -PathType L
     throw "Could not create the packaging virtual environment."
 }
 
-& $venvPython -m pip install --disable-pip-version-check --upgrade pip
+& $venvPython -m pip install --disable-pip-version-check --no-cache-dir --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw "Could not update pip in the packaging environment." }
-& $venvPython -m pip install --disable-pip-version-check -e . -r requirements-yandex.txt "pyinstaller==6.16.0"
+& $venvPython -m pip install --disable-pip-version-check --no-cache-dir -e . -r requirements-yandex.txt "pyinstaller==6.16.0"
 if ($LASTEXITCODE -ne 0) { throw "Could not install MusicArk packaging dependencies." }
 
 & $venvPython tools/check_version_consistency.py

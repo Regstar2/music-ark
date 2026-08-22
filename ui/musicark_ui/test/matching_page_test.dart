@@ -12,14 +12,14 @@ import 'package:musicark_ui/variant_acceptance_bridge.dart';
 class EmptyMatchingBridge extends FakeMatchingBridge {
   @override
   Future<Map<String, dynamic>> matchingSummary() async => {
-        'providerId': 'yandex_music',
-        'yandexTracks': 0,
-        'localTracks': 0,
-        'processed': 0,
-        'matched': 0,
-        'conflicts': 0,
-        'unmatched': 0,
-      };
+    'providerId': 'yandex_music',
+    'yandexTracks': 0,
+    'localTracks': 0,
+    'processed': 0,
+    'matched': 0,
+    'conflicts': 0,
+    'unmatched': 0,
+  };
 
   @override
   Future<Map<String, dynamic>> matchingResults({
@@ -29,11 +29,11 @@ class EmptyMatchingBridge extends FakeMatchingBridge {
     String search = '',
     String sort = 'confidence',
   }) async => {
-        'count': 0,
-        'limit': limit,
-        'offset': offset,
-        'items': <Map<String, dynamic>>[],
-      };
+    'count': 0,
+    'limit': limit,
+    'offset': offset,
+    'items': <Map<String, dynamic>>[],
+  };
 }
 
 class RecordingMatchingBridge extends FakeMatchingBridge {
@@ -109,6 +109,12 @@ class PagingMatchingBridge extends FakeMatchingBridge {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   Future<void> desktop(
     WidgetTester tester,
     Widget widget, {
@@ -121,13 +127,14 @@ void main() {
     final safeWidget = widget is MatchingPage
         ? MatchingPage(
             bridge: widget.bridge,
-            contentLabelBridge: widget.contentLabelBridge is FakeContentLabelBridge
+            contentLabelBridge:
+                widget.contentLabelBridge is FakeContentLabelBridge
                 ? widget.contentLabelBridge
                 : FakeContentLabelBridge(),
             variantAcceptanceBridge:
                 widget.variantAcceptanceBridge is FakeVariantAcceptanceBridge
-                    ? widget.variantAcceptanceBridge
-                    : FakeVariantAcceptanceBridge(),
+                ? widget.variantAcceptanceBridge
+                : FakeVariantAcceptanceBridge(),
           )
         : widget;
     await tester.pumpWidget(
@@ -156,14 +163,17 @@ void main() {
     await tester.pumpWidget(
       MusicArkDesktopApp(bridge: yandex, matchingBridge: matching),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
     await tester.tap(find.byKey(const Key('nav-matching')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('matching-page')), findsOneWidget);
     expect(find.byKey(const Key('matching-summary')), findsOneWidget);
   });
 
-  testWidgets('summary metrics and counted filters are visible', (tester) async {
+  testWidgets('summary metrics and counted filters are visible', (
+    tester,
+  ) async {
     await desktop(tester, MatchingPage(bridge: FakeMatchingBridge()));
     expect(find.byKey(const Key('matching-summary-yandex')), findsOneWidget);
     expect(find.byKey(const Key('matching-summary-local')), findsOneWidget);
@@ -248,14 +258,18 @@ void main() {
     expect(find.byKey(const Key('variant-badge-201')), findsOneWidget);
   });
 
-  testWidgets('unmatched row exposes missing-local state without success meter', (
-    tester,
-  ) async {
-    await desktop(tester, MatchingPage(bridge: FakeMatchingBridge()));
-    expect(find.text('Локальный файл не найден'), findsOneWidget);
-    expect(find.byKey(const Key('matching-confidence-unmatched')), findsOneWidget);
-    expect(find.text('Не найдено'), findsWidgets);
-  });
+  testWidgets(
+    'unmatched row exposes missing-local state without success meter',
+    (tester) async {
+      await desktop(tester, MatchingPage(bridge: FakeMatchingBridge()));
+      expect(find.text('Локальный файл не найден'), findsOneWidget);
+      expect(
+        find.byKey(const Key('matching-confidence-unmatched')),
+        findsOneWidget,
+      );
+      expect(find.text('Не найдено'), findsWidgets);
+    },
+  );
 
   testWidgets('pagination appends the next result page and updates counter', (
     tester,
@@ -298,7 +312,9 @@ void main() {
     expect(labels.providerLabels['201'], 'original');
   });
 
-  testWidgets('conflict detail preserves manual accept workflow', (tester) async {
+  testWidgets('conflict detail preserves manual accept workflow', (
+    tester,
+  ) async {
     final bridge = FakeMatchingBridge();
     await desktop(tester, MatchingPage(bridge: bridge));
     await tester.tap(find.byKey(const Key('matching-row-202')));

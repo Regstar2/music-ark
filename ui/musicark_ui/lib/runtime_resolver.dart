@@ -1,15 +1,15 @@
 import 'dart:io';
 
-/// One resolved Python process environment for every MusicArk desktop bridge.
+/// One resolved backend process environment for every MusicArk desktop bridge.
 ///
 /// Resolution order is deliberately stable:
-/// 1. explicit development/test override;
-/// 2. bundled runtime beside the installed Flutter executable;
+/// 1. explicit development/test Python override;
+/// 2. bundled frozen MusicArk runtime beside the installed Flutter executable;
 /// 3. repository .venv;
 /// 4. system Python for development only.
 ///
-/// Installed builds never need a repository checkout and store mutable state
-/// outside the installation directory.
+/// Installed builds never need Python, a repository checkout, or a .venv and
+/// store mutable state outside the installation directory.
 class MusicArkRuntime {
   const MusicArkRuntime({
     required this.pythonExecutable,
@@ -43,7 +43,7 @@ class MusicArkRuntime {
           ? src
           : '$src${Platform.isWindows ? ';' : ':'}$existing';
     } else {
-      // A packaged runtime imports MusicArk from Lib/site-packages. Do not let a
+      // A packaged runtime is frozen with the MusicArk backend. Do not let a
       // developer/user PYTHONPATH redirect an installed application to another
       // checkout.
       result.remove('PYTHONPATH');
@@ -88,14 +88,13 @@ class MusicArkRuntimeResolver {
     }
 
     final executableDir = File(Platform.resolvedExecutable).parent.absolute.path;
-    final packagedPython = _joinAll([
+    final packagedRuntime = _joinAll([
       executableDir,
       'runtime',
-      'python',
-      Platform.isWindows ? 'python.exe' : 'python',
+      Platform.isWindows ? 'musicark-runtime.exe' : 'musicark-runtime',
     ]);
-    if (File(packagedPython).existsSync()) {
-      final command = _PythonCommand(packagedPython);
+    if (File(packagedRuntime).existsSync()) {
+      final command = _PythonCommand(packagedRuntime);
       if (!await _works(command)) {
         throw const MusicArkRuntimeException(
           'packaged_runtime_invalid',
@@ -103,7 +102,7 @@ class MusicArkRuntimeResolver {
         );
       }
       return MusicArkRuntime(
-        pythonExecutable: packagedPython,
+        pythonExecutable: packagedRuntime,
         pythonPrefixArgs: const [],
         workingDirectory: executableDir,
         dataBaseDir: _resolveDataBaseDir(),

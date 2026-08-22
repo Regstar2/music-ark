@@ -11,7 +11,7 @@ class DistributionSettingsCard extends StatefulWidget {
     super.key,
     this.updateBridge,
     this.feedbackBridge,
-    this.autoCheck = true,
+    this.autoCheck = const bool.fromEnvironment('dart.vm.product'),
   });
 
   final UpdateBridgeClient? updateBridge;

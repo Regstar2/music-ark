@@ -4,12 +4,14 @@ import 'dart:io';
 ///
 /// Resolution order is deliberately stable:
 /// 1. explicit development/test Python override;
-/// 2. bundled frozen MusicArk runtime beside the installed Flutter executable;
+/// 2. bundled frozen MusicArk runtime in the packaged compatibility layout;
 /// 3. repository .venv;
 /// 4. system Python for development only.
 ///
-/// Installed builds never need Python, a repository checkout, or a .venv and
-/// store mutable state outside the installation directory.
+/// Installed builds never need Python or a repository checkout. The packaged
+/// executable is named `.venv/Scripts/python.exe` only to preserve compatibility
+/// with older bridge discovery code; it is a restricted frozen MusicArk runtime,
+/// not a general-purpose Python interpreter.
 class MusicArkRuntime {
   const MusicArkRuntime({
     required this.pythonExecutable,
@@ -43,9 +45,6 @@ class MusicArkRuntime {
           ? src
           : '$src${Platform.isWindows ? ';' : ':'}$existing';
     } else {
-      // A packaged runtime is frozen with the MusicArk backend. Do not let a
-      // developer/user PYTHONPATH redirect an installed application to another
-      // checkout.
       result.remove('PYTHONPATH');
     }
     return result;
@@ -88,11 +87,9 @@ class MusicArkRuntimeResolver {
     }
 
     final executableDir = File(Platform.resolvedExecutable).parent.absolute.path;
-    final packagedRuntime = _joinAll([
-      executableDir,
-      'runtime',
-      Platform.isWindows ? 'musicark-runtime.exe' : 'musicark-runtime',
-    ]);
+    final packagedRuntime = Platform.isWindows
+        ? _joinAll([executableDir, '.venv', 'Scripts', 'python.exe'])
+        : _joinAll([executableDir, '.venv', 'bin', 'python']);
     if (File(packagedRuntime).existsSync()) {
       final command = _PythonCommand(packagedRuntime);
       if (!await _works(command)) {

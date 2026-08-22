@@ -4,6 +4,39 @@ All notable project changes are recorded here. Entries describe the current code
 
 ## Unreleased — release hardening
 
+### v0.15.0 — Installer, Auto-Update, Feedback & Packaging
+
+#### Added
+
+- canonical `VERSION` contract with automated consistency checks across Python and Flutter release metadata;
+- standalone frozen MusicArk backend runtime and deterministic Windows packaging pipeline;
+- per-user Inno Setup installer definition, portable ZIP, SHA-256 output and update-manifest generator;
+- strict update manifest parsing, HTTPS/GitHub host validation, bounded redirects, exact size/SHA-256 verification and explicit Check → Prepare → Apply flow;
+- Settings update/feedback card with release-only automatic checking, explicit installer confirmation and RU/EN presentation;
+- privacy-aware GitHub Bug/Feature Issue Forms and safe diagnostic links;
+- focused backend/Flutter distribution tests plus self-hosted `v0.15 Distribution` CI packaging evidence.
+
+#### Changed
+
+- application/backend version advances to `0.15.0`, Flutter to `0.15.0+1`; core SQLite remains `1.9.0`;
+- packaged mutable state is redirected outside the installation directory to the per-user MusicArk data root;
+- old Flutter process bridges remain compatible with the packaged runtime without requiring a developer checkout or system Python;
+- v0.14 is complete and feature scope remains frozen through the v1.0 release gate.
+
+#### Safety / boundaries
+
+- update checking never installs; download preparation never launches; installer launch requires explicit confirmation and re-verification;
+- failed/untrusted/hash-mismatched update downloads fail closed and are never promoted as prepared installers;
+- uninstall does not silently delete MusicArk user data or external software such as Cloudflare WARP;
+- feedback diagnostics exclude credentials, protected URLs, account identifiers, local music paths and library contents;
+- no Matching/Variant/Coverage/Download/Sync/Metadata/Yandex mutation semantics are expanded by v0.15.
+
+#### Publication state
+
+- no tag, GitHub Release, stable update manifest, public installer or repository visibility change is created by this PR;
+- public update/feedback endpoints are deployment-time configuration and may remain unavailable while the repository is private;
+- signing and clean-machine installer acceptance are reported only from actual release validation; unsigned/unverified artifacts are never described as signed.
+
 ### v0.14.0 — Large Library Performance & Release Hardening
 
 #### Added

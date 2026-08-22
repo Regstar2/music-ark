@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/account_session.dart';
+import 'package:musicark_ui/app_info.dart';
 import 'package:musicark_ui/app_settings.dart';
 import 'package:musicark_ui/l10n/app_localizations.dart';
 import 'package:musicark_ui/main.dart';
@@ -153,8 +154,8 @@ void main() {
 
     expect(find.byKey(const Key('about-page')), findsOneWidget);
     expect(find.byKey(const Key('about-product-card')), findsOneWidget);
-    expect(find.text('0.9.7'), findsWidgets);
-    expect(find.text('1.8.4'), findsOneWidget);
+    expect(find.text(AppInfo.version), findsWidgets);
+    expect(find.text(AppInfo.databaseSchemaVersion), findsOneWidget);
     expect(find.byKey(const Key('copy-diagnostics')), findsOneWidget);
     expect(find.byKey(const Key('open-source-licenses')), findsOneWidget);
     expect(find.byKey(const Key('copy-repository')), findsOneWidget);

@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/l10n/app_localizations.dart';
 import 'package:musicark_ui/local_library_page.dart';
-import 'package:musicark_ui/main.dart' show FakeMusicArkBridge;
 import 'package:musicark_ui/musicark_bridge.dart';
 import 'package:musicark_ui/yandex_workspace.dart' as yandex;
 

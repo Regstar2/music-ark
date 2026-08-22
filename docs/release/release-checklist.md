@@ -1,157 +1,140 @@
-# Release Checklist — v0.9.1 Main Screen UI Polish
+# Release Checklist — v0.15.0 Distribution Candidate
 
-This checklist is the acceptance gate for the v0.9.1 Draft candidate. It does not imply a published release, installer, package, tag or GitHub Release.
+This checklist is the acceptance gate for the v0.15.0 Draft PR. It does **not** imply a tag, GitHub Release, published stable manifest, public installer, repository visibility change, or v1.0.0 release.
 
 ## Version / schema / Git
 
-- [ ] Python package version is `0.9.1`.
-- [ ] Flutter version is `0.9.1+1`.
-- [ ] SQLite schema target remains `1.8.4`; v0.9.1 adds no music DB migration.
-- [ ] branch is based on current accepted `main`.
-- [ ] Draft PR targets `main` from `agent/v0.9.1-main-ui-polish`.
-- [ ] final diff contains no secrets, user data, build output or unrelated mass formatting.
-- [ ] README.md, README_EN.md, CHANGELOG and version docs describe the same version/scope.
+- [ ] `VERSION` contains `0.15.0`.
+- [ ] Python package/backend versions are `0.15.0`.
+- [ ] Flutter version is `0.15.0+1` and `AppInfo.version/backendVersion` are `0.15.0`.
+- [ ] `tools/check_version_consistency.py` passes.
+- [ ] core SQLite schema remains `1.9.0`.
+- [ ] branch is based on merged v0.14.0 `main`.
+- [ ] Draft PR targets `main` and is not auto-merged.
+- [ ] final diff contains no credentials, user library data, packaged binaries or unrelated mass formatting.
 
-## Single navigation architecture
+## Standalone Windows runtime
 
-- [ ] global MusicArk sidebar is the only permanent application sidebar.
-- [ ] old permanent Yandex nested sidebar is absent.
-- [ ] Yandex Tracks, Playlists and Albums remain reachable via top-level workspace navigation.
-- [ ] playlist detail has explicit back navigation.
-- [ ] album detail has explicit back navigation.
-- [ ] Settings and Account remain in the global utility area.
-- [ ] theme-aware MusicArk mark/title render in Light and Dark modes without overflow.
-- [ ] Settings ListTile does not trigger the Flutter background/ink assertion.
+- [ ] release app starts without a system Python installation.
+- [ ] release app starts without a source checkout or development `.venv`.
+- [ ] frozen runtime accepts only approved MusicArk bridge modules.
+- [ ] packaged compatibility sentinels contain no user/project source data used as runtime truth.
+- [ ] packaged backend redirects mutable `--base-dir` state to the per-user data root.
+- [ ] installed program directory remains free of user database/configuration writes during normal use.
+- [ ] FFmpeg/Yandex/keyring/runtime dependencies needed by production bridges are present in the frozen package.
 
-## Yandex workspace
+## Packaging
 
-- [ ] collection header shows title, count, human-readable update time and source.
-- [ ] refresh remains available.
-- [ ] track search works for title/artist/album.
-- [ ] Yandex/title/artist sorting preserves previous semantics.
-- [ ] `Unavailable first / Недоступные сначала` places unavailable tracks before available tracks without changing provider state.
-- [ ] playlist search and sort remain available.
-- [ ] Albums shows the authenticated user's explicit Yandex Music album likes, not albums inferred from liked-track metadata.
-- [ ] album index is cache-first and album contents are fetched lazily when a specific album is opened.
-- [ ] album detail contains the full provider album track list, not only tracks from `Liked / Мне нравится`.
-- [ ] unliking an album in Yandex and refreshing removes it from the active liked-album index without deleting unrelated cached collections.
-- [ ] album read paths do not like/unlike or otherwise mutate Yandex Music.
-- [ ] artwork loading and fallback remain available in track and album presentation.
-- [ ] normal `available` text is not shown on every track.
-- [ ] unavailable track playback is disabled and explained through tooltip/presentation.
+- [ ] `tools/package_windows.ps1 -SkipInstaller` creates a standalone portable ZIP.
+- [ ] packaged runtime `--version` smoke succeeds.
+- [ ] packaged feedback bridge smoke succeeds.
+- [ ] `SHA256SUMS.txt` is generated from actual output files.
+- [ ] Inno Setup installer compiles from `packaging/windows/MusicArk.iss` on a machine with Inno Setup 6.
+- [ ] installer uses stable AppId for in-place upgrade.
+- [ ] installer is per-user and does not require elevation for normal installation.
+- [ ] install → launch works on a clean Windows user profile.
+- [ ] reinstall/upgrade over the same version does not destroy MusicArk data.
+- [ ] upgrade from the previous accepted build preserves MusicArk data and credentials.
+- [ ] uninstall removes program files but preserves `%LOCALAPPDATA%\MusicArk` user data.
+- [ ] uninstall does not silently remove Cloudflare WARP or other external software.
+- [ ] portable ZIP starts independently of the development checkout.
 
-## ORIGINAL / CENSORED regression
+## Auto-update safety
 
-- [ ] `ContentLabelBridgeClient` remains an explicit feature dependency.
-- [ ] session-aware bridge wrapping cannot disable label controls.
-- [ ] inline ORIGINAL chip renders.
-- [ ] inline CENSORED chip renders.
-- [ ] inline label menu changes a label.
-- [ ] label can be removed.
-- [ ] general `Version labels / Пометки версий` manager remains available from the toolbar.
-- [ ] standalone label/control tests have deterministic localization setup.
-- [ ] labels still do not mutate Yandex metadata, audio tags, identity or confidence.
+- [ ] manifest schema/version/channel validation is strict.
+- [ ] version comparison uses strict `MAJOR.MINOR.PATCH` values.
+- [ ] manifest and redirect URLs require approved HTTPS GitHub/GitHubusercontent hosts.
+- [ ] redirect count is bounded and every target is revalidated.
+- [ ] installer file name is a plain `.exe` name.
+- [ ] installer byte size is checked exactly.
+- [ ] installer SHA-256 is checked exactly before promotion/use.
+- [ ] failed/hash-mismatched downloads never become prepared installers.
+- [ ] `check` is read-only.
+- [ ] `prepare` downloads/verifies but does not launch.
+- [ ] `apply` requires explicit user confirmation and re-verifies the prepared installer.
+- [ ] update/network failure does not prevent the app or Settings from opening.
+- [ ] no token/cookie/provider credential is sent to the update channel.
+- [ ] `tools/generate_update_manifest.py` produces hash/size from a real installer.
+- [ ] no stable manifest is published by this PR.
 
-## Responsive desktop
+## Feedback / privacy
 
-Check at least:
+- [ ] Bug and Feature actions are available from Settings.
+- [ ] GitHub Issue Forms exist for both actions.
+- [ ] feedback target can be switched at deployment time without changing product logic.
+- [ ] automatic bug diagnostics contain only MusicArk version, OS and architecture.
+- [ ] diagnostics do not contain Yandex tokens/cookies, signed URLs, account identifiers, proxy secrets, filesystem music paths or library contents.
+- [ ] user is told to review report contents before submission.
+- [ ] browser-open failure has a usable copied-link fallback.
 
-```text
-1920×1080
-1600×900
-1366×768
-~900 px narrow desktop application window
-```
+## WARP ownership boundary
 
-- [ ] no `RenderFlex overflow`.
-- [ ] no ListTile background/ink assertion.
-- [ ] no ListTile/trailing width assertion in About.
-- [ ] toolbar reflows instead of requiring old ~920 px forced horizontal workspace.
-- [ ] title and album use ellipsis where needed.
-- [ ] labeled compact rows remain usable.
-- [ ] row actions remain reachable.
-- [ ] playlist and album navigation remain usable.
-- [ ] global sidebar brand/account/settings remain usable.
+- [ ] existing v0.12 ownership state remains readable.
+- [ ] MusicArk uninstall does not silently uninstall WARP.
+- [ ] WARP management remains explicit in Settings.
+- [ ] no update/installer path disables TLS verification or bypasses existing proxy/network policy.
 
-## Localization / injected-test isolation
+## Regression safety
 
-- [ ] RU and EN resources describe explicitly liked albums accurately.
-- [ ] Yandex tabs including Albums, back navigation, search/sort/unavailable-first, version-label/table/empty-state/availability UI change language without restart.
-- [ ] unsupported system locale uses deterministic Russian fallback.
-- [ ] injected fake-bridge tests do not read the developer machine's persisted UI settings unless a settings storage is explicitly supplied.
-- [ ] injected fake-bridge tests do not start the production content-label subprocess unless a content-label bridge is explicitly supplied.
-
-## Account / session regression
-
-- [ ] cached signed-in account remains cache-first.
-- [ ] failed network refresh does not visually log a cached session out.
-- [ ] login/logout continue through existing Yandex credential/session boundaries.
-- [ ] no second account implementation or credential store is introduced.
-- [ ] account control remains global, not duplicated inside Yandex workspace.
-
-## Now Playing
-
-- [ ] player remains application-wide and survives ordinary page navigation.
-- [ ] Play/Pause, progress/seek, elapsed/duration and stop/close remain available.
-- [ ] compact player layout does not overflow at narrow desktop width.
-- [ ] no queue/next/previous/shuffle/repeat semantics are introduced in v0.9.1.
-
-## v0.8.2/v0.9.0 safety regression
-
-In ordinary Scan/Matching/Coverage/Sync scenarios:
+Ordinary v0.15 distribution work must preserve:
 
 ```text
-modified existing user audio files = 0
-Yandex provider mutations = 0
+new Matching semantics = 0
+new Variant semantics = 0
+new Coverage semantics = 0
+new Download semantics = 0
+new Sync semantics = 0
+new Metadata write semantics = 0
+new Yandex mutation semantics = 0
+existing user audio silently modified/deleted = 0
 ```
 
-- [ ] Metadata Editor remains the explicit ordinary write boundary.
-- [ ] Apply Metadata and Apply + Bind retain separate semantics.
-- [ ] Matching semantics are unchanged.
-- [ ] Variant semantics are unchanged.
-- [ ] Coverage/Missing semantics are unchanged.
-- [ ] Download semantics are unchanged.
-- [ ] Controlled Sync semantics are unchanged.
-- [ ] no Yandex Upload or reverse Sync is introduced.
+- [ ] v0.12 external-network routing remains separate from Yandex upload semantics.
+- [ ] v0.13 source-safe conversion remains unchanged.
+- [ ] v0.14 cache-first/performance behavior remains unchanged.
 
 ## Automated checks
 
 From repository root:
 
-- [ ] `python -m unittest discover -s tests -p "test_*.py" -v`.
+- [ ] full `python -m unittest discover -s tests -p "test_*.py" -v`.
+- [ ] `python tools/check_version_consistency.py`.
+- [ ] `python -m unittest tests.test_v015_distribution -v`.
+- [ ] existing v0.12/v0.13/v0.14 and upload/recovery regressions remain green.
 
 From `ui/musicark_ui`:
 
 - [ ] `flutter pub get`.
-- [ ] `flutter analyze`.
-- [ ] `flutter test test/widget_test.dart`.
-- [ ] `flutter test test/feature_bridge_wiring_test.dart`.
-- [ ] `flutter test test/v0_9_shell_test.dart`.
-- [ ] `flutter test test/v0_9_1_content_labels_test.dart`.
-- [ ] `flutter test test/v0_9_1_responsive_test.dart`.
-- [ ] `flutter test test/v0_9_1_localization_test.dart`.
-- [ ] `flutter test test/yandex_content_label_test.dart`.
-- [ ] `flutter test test/yandex_track_controls_test.dart`.
-- [ ] `flutter test test/yandex_narrow_layout_test.dart`.
+- [ ] `flutter analyze --no-fatal-infos`.
+- [ ] `flutter test test/v015_distribution_test.dart`.
 - [ ] full `flutter test`.
+- [ ] `flutter build windows`.
 
-## Windows visual/manual acceptance
+CI:
 
-- [ ] `flutter run -d windows` starts the development application.
-- [ ] 1920×1080 / 1600×900 / 1366×768 / narrow desktop resize are checked.
-- [ ] Light and Dark are manually inspected.
-- [ ] Russian and English are manually inspected.
-- [ ] Tracks / Playlists / liked Albums / detail / search / sort / unavailable-first / refresh / artwork / playback / labels are checked.
-- [ ] global account login/logout and Now Playing lifetime are checked.
-- [ ] Local / Matching / Missing / Downloads / Sync / Metadata Editor still open and behave as before.
+- [ ] `Tests` workflow result recorded from final PR head.
+- [ ] `v0.15 Distribution / distribution-contract` recorded from final PR head.
+- [ ] `v0.15 Distribution / distribution-ui` recorded from final PR head.
+- [ ] `v0.15 Distribution / standalone-package-smoke` recorded from final PR head.
+- [ ] produced CI package artifact inspected for expected files.
 
-Release build, installer, MSIX, portable ZIP, signing and clean-machine packaging are **not** required by v0.9.1.
+## Manual Windows acceptance
 
-If Windows/toolchain validation is unavailable, record the relevant gates as **NOT VERIFIED**, never as passed.
+- [ ] development run still works.
+- [ ] standalone packaged build starts.
+- [ ] Settings opens while update endpoint is unavailable.
+- [ ] current/latest/check UI works in RU and EN.
+- [ ] prepared installer cannot launch without confirmation.
+- [ ] Bug/Feature actions open the expected GitHub forms or copy the fallback link.
+- [ ] Light/Dark/System and normal/narrow desktop layouts remain usable.
+- [ ] Yandex / Local / Matching / Missing / Downloads / Sync / Metadata Editor still open and preserve prior behavior.
 
-## CI / PR
+## Signing / publication
 
-- [ ] GitHub Actions result is recorded factually as PASS / FAIL / BLOCKED / NOT RUN / NOT VERIFIED.
-- [ ] PR verification table contains only real command/manual results.
-- [ ] PR remains Draft until owner visual acceptance.
-- [ ] PR is not merged automatically.
+- [ ] signing state is stated factually: signed with verified certificate or **UNSIGNED**.
+- [ ] if signed, signature is verified on the exact installer/EXE artifacts.
+- [ ] if unsigned, release notes do not imply trusted code signing.
+- [ ] public update/feedback channel is configured before v1.0 public release.
+- [ ] final v1.0 artifacts/manifest are published only after clean-install/upgrade validation.
+
+If a tool or environment is unavailable, mark the gate **NOT VERIFIED** rather than passed. Keep the PR Draft until owner acceptance. Do not merge automatically.

@@ -23,8 +23,8 @@ class DistributionSettingsCard extends StatefulWidget {
 }
 
 class _DistributionSettingsCardState extends State<DistributionSettingsCard> {
-  late final UpdateBridgeClient _updates = widget.updateBridge ?? UpdateBridge();
-  late final FeedbackBridgeClient _feedback = widget.feedbackBridge ?? FeedbackBridge();
+  late final UpdateBridgeClient _updates;
+  late final FeedbackBridgeClient _feedback;
 
   bool _checking = false;
   bool _preparing = false;
@@ -38,6 +38,8 @@ class _DistributionSettingsCardState extends State<DistributionSettingsCard> {
   @override
   void initState() {
     super.initState();
+    _updates = widget.updateBridge ?? UpdateBridge();
+    _feedback = widget.feedbackBridge ?? FeedbackBridge();
     if (widget.autoCheck) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _check(silentFailure: true));
     }

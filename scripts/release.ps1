@@ -21,16 +21,15 @@ if ($sourceVersion -ne $plainVersion) {
     throw "Tag/source version mismatch: tag=$plainVersion VERSION=$sourceVersion"
 }
 
-if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-    throw "Windows Python launcher 'py' is required."
+$pythonVersion = (& (Join-Path $PSScriptRoot 'resolve-python.ps1')).Trim()
+if (-not $pythonVersion) {
+    throw 'Python resolver returned an empty version.'
 }
-& py -3.12 --version
-if ($LASTEXITCODE -ne 0) {
-    throw 'Python 3.12 is required for the release packaging runtime.'
-}
+$pythonArg = "-$pythonVersion"
+Write-Host "Release packaging Python: $pythonVersion"
 
 Write-Host "Building MusicArk $Version final Windows artifacts..."
-& .\tools\package_windows.ps1 -PythonVersion '3.12'
+& .\tools\package_windows.ps1 -PythonVersion $pythonVersion
 if ($LASTEXITCODE -ne 0) {
     throw 'MusicArk packaging failed.'
 }
@@ -60,7 +59,7 @@ $assetBase = "https://github.com/Regstar2/music-ark/releases/download/$Version"
 $notesUrl = "https://github.com/Regstar2/music-ark/releases/tag/$Version"
 $manifest = Join-Path $dist 'update-manifest.json'
 
-& py -3.12 .\tools\generate_update_manifest.py `
+& py $pythonArg .\tools\generate_update_manifest.py `
     $installer `
     --version $plainVersion `
     --channel stable `

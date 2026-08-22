@@ -1,0 +1,60 @@
+name: Trusted CI
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-ci:
+    name: Trusted Windows CI
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login == 'Regstar2' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout trusted ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
+          persist-credentials: false
+
+      - name: Run MusicArk release-regression CI
+        shell: pwsh
+        run: .\scripts\ci.ps1
+
+      - name: Upload release-regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musicark-release-regression-evidence
+          path: |
+            .musicark/performance/*.json
+            artifacts/v*/SHA256SUMS.txt
+            artifacts/v*/MusicArk-*-win-x64.zip
+          if-no-files-found: ignore
+          retention-days: 14

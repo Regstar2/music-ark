@@ -8,6 +8,8 @@ general-purpose Python shell.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import sys
 from collections.abc import Callable
 
@@ -40,6 +42,42 @@ _ENTRY_POINTS: dict[str, Callable[[], int]] = {
 }
 
 
+def _packaged_data_root() -> Path:
+    override = str(os.getenv("MUSICARK_DATA_ROOT", "") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve(strict=False)
+    if os.name == "nt":
+        local_app_data = str(os.getenv("LOCALAPPDATA", "") or "").strip()
+        if local_app_data:
+            return Path(local_app_data) / "MusicArk"
+    home = Path.home()
+    return home / ".musicark-data"
+
+
+def _rewrite_packaged_arguments(args: list[str]) -> list[str]:
+    """Keep mutable application state outside the installation directory.
+
+    Older Flutter bridges still pass the packaged compatibility root as
+    ``--base-dir``. A frozen runtime rewrites only that argument to the stable
+    per-user data root before delegating to the existing backend entry point.
+    """
+    if not bool(getattr(sys, "frozen", False)):
+        return args
+    data_root = _packaged_data_root()
+    data_root.mkdir(parents=True, exist_ok=True)
+    os.environ["MUSICARK_DATA_ROOT"] = str(data_root)
+    os.environ.pop("PYTHONPATH", None)
+    result = list(args)
+    try:
+        index = result.index("--base-dir")
+    except ValueError:
+        return result
+    if index + 1 >= len(result):
+        return result
+    result[index + 1] = str(data_root)
+    return result
+
+
 def main() -> int:
     args = sys.argv[1:]
     if args == ["--version"]:
@@ -53,9 +91,10 @@ def main() -> int:
     if entry is None:
         print(f"Unsupported MusicArk runtime module: {module}", file=sys.stderr)
         return 2
+    delegated = _rewrite_packaged_arguments(args[2:])
     # Make the delegated argparse parser see the same argv shape it would see
     # under ``python -m module ...``.
-    sys.argv = [module, *args[2:]]
+    sys.argv = [module, *delegated]
     return int(entry())
 
 

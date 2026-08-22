@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a post-v1.0 MusicArk improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        v0.15.0 and v1.0.0 are release-hardening milestones. New product scope is evaluated for a later roadmap.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What user problem should MusicArk solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional existing workflows or workarounds you considered.

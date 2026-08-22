@@ -128,7 +128,7 @@ class FakeUpdateBridge implements UpdateBridgeClient {
       'available': available,
       'version': latestVersion,
       'fileName': 'MusicArk-Setup-$latestVersion.exe',
-      'sha256': '0' * 64,
+      'sha256': '0000000000000000000000000000000000000000000000000000000000000000',
       'sizeBytes': 1024,
       'cached': false,
     };

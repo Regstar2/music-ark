@@ -19,15 +19,15 @@ function Assert-LastExitCode {
 Write-Host '=== MusicArk trusted CI ==='
 Write-Host "Root: $root"
 
-if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-    throw "Windows Python launcher 'py' is required."
+$pythonVersion = (& (Join-Path $PSScriptRoot 'resolve-python.ps1')).Trim()
+if (-not $pythonVersion) {
+    throw 'Python resolver returned an empty version.'
 }
-
-& py -3.12 -c "import ctypes, pip; print('Python 3.12 OK')"
-Assert-LastExitCode 'Python 3.12 validation'
+$pythonArg = "-$pythonVersion"
+Write-Host "Trusted CI Python: $pythonVersion"
 
 Write-Host 'Installing MusicArk test dependencies...'
-& py -3.12 -m pip install --disable-pip-version-check -e . -r requirements-yandex.txt
+& py $pythonArg -m pip install --disable-pip-version-check -e . -r requirements-yandex.txt
 Assert-LastExitCode 'Python dependency installation'
 
 # CI is always offline/fail-closed for provider mutations. A real-account/live
@@ -43,7 +43,7 @@ foreach ($name in @(
 Write-Host 'Staging the pinned imageio-ffmpeg executable used by conversion tests...'
 $ffmpegStage = Join-Path $root '.tools\ffmpeg\ffmpeg.exe'
 $env:MUSICARK_FFMPEG_STAGED_PATH = $ffmpegStage
-$ffmpeg = (& py -3.12 -c "import imageio_ffmpeg, os, pathlib, shutil; src=pathlib.Path(imageio_ffmpeg.get_ffmpeg_exe()); dst=pathlib.Path(os.environ['MUSICARK_FFMPEG_STAGED_PATH']); dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dst); print(dst.resolve())").Trim()
+$ffmpeg = (& py $pythonArg -c "import imageio_ffmpeg, os, pathlib, shutil; src=pathlib.Path(imageio_ffmpeg.get_ffmpeg_exe()); dst=pathlib.Path(os.environ['MUSICARK_FFMPEG_STAGED_PATH']); dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dst); print(dst.resolve())").Trim()
 Assert-LastExitCode 'FFmpeg staging'
 if (-not (Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
     throw "FFmpeg was not staged correctly: $ffmpeg"
@@ -54,19 +54,19 @@ Remove-Item Env:MUSICARK_FFMPEG_STAGED_PATH -ErrorAction SilentlyContinue
 Assert-LastExitCode 'FFmpeg smoke'
 
 Write-Host 'Checking version consistency...'
-& py -3.12 tools/check_version_consistency.py
+& py $pythonArg tools/check_version_consistency.py
 Assert-LastExitCode 'Version consistency'
 
 Write-Host 'Running the complete Python regression suite...'
-& py -3.12 -m unittest discover -s tests -p 'test_*.py' -v
+& py $pythonArg -m unittest discover -s tests -p 'test_*.py' -v
 Assert-LastExitCode 'Python regression suite'
 
 Write-Host 'Generating deterministic v0.14 performance evidence...'
 $performanceDir = Join-Path $root '.musicark\performance'
 New-Item -ItemType Directory -Path $performanceDir -Force | Out-Null
-& py -3.12 .\tools\performance_smoke.py --output .\.musicark\performance\release-regression.json
+& py $pythonArg .\tools\performance_smoke.py --output .\.musicark\performance\release-regression.json
 Assert-LastExitCode 'Performance smoke'
-& py -3.12 .\tools\sqlite_query_audit.py --output .\.musicark\performance\sqlite-query-audit.json
+& py $pythonArg .\tools\sqlite_query_audit.py --output .\.musicark\performance\sqlite-query-audit.json
 Assert-LastExitCode 'SQLite query audit'
 
 if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
@@ -96,8 +96,8 @@ finally {
 }
 
 if (-not $SkipPackageSmoke) {
-    Write-Host 'Building the portable v0.15+ standalone package smoke...'
-    & .\tools\package_windows.ps1 -SkipInstaller -PythonVersion '3.12'
+    Write-Host "Building the portable v0.15+ standalone package smoke with Python $pythonVersion..."
+    & .\tools\package_windows.ps1 -SkipInstaller -PythonVersion $pythonVersion
     Assert-LastExitCode 'Portable package smoke'
 }
 else {

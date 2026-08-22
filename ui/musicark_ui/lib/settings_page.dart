@@ -4,6 +4,7 @@ import 'account_session.dart';
 import 'app_localizations_ext.dart';
 import 'app_settings.dart';
 import 'app_ui_tokens.dart';
+import 'distribution_settings_card.dart';
 import 'external_metadata_bridge.dart';
 import 'v012_strings.dart';
 
@@ -85,6 +86,8 @@ class SettingsPage extends StatelessWidget {
                   _ExternalSourcesCard(bridge: externalBridge),
                   const SizedBox(height: AppUiTokens.sectionGap),
                   _ProviderAccountCard(session: session, onOpenYandex: onOpenYandex),
+                  const SizedBox(height: AppUiTokens.sectionGap),
+                  const DistributionSettingsCard(),
                   const SizedBox(height: AppUiTokens.sectionGap * 1.5),
                   Text(l10n.settingsSupportSection, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: AppUiTokens.compactGap),

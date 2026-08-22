@@ -20,15 +20,8 @@ $venv = Join-Path $buildRoot "build-venv"
 $venvPython = Join-Path $venv "Scripts\python.exe"
 
 Remove-Item -LiteralPath $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $buildRoot, $artifactDir, $stage -Force | Out-Null
-
-function Invoke-Checked {
-    param([scriptblock]$Command, [string]$Description)
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Description failed with exit code $LASTEXITCODE."
-    }
-}
 
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
     throw "Windows Python launcher 'py' is required to build the frozen backend runtime."
@@ -128,7 +121,6 @@ if (-not $feedbackJson.url -or $feedbackJson.kind -ne "bug") {
 }
 
 $portable = Join-Path $artifactDir "MusicArk-$version-win-x64.zip"
-Remove-Item -LiteralPath $portable -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $portable -CompressionLevel Optimal
 
 if (-not $SkipInstaller) {

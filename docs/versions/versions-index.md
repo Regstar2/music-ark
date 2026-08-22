@@ -19,30 +19,30 @@
 | v0.11.1 | Bulk Upload, Recovery Sync & Scope Context | complete |
 | v0.12.0 | External Metadata & Resilient Network Access | complete |
 | v0.13.0 | Multi-Format Audio & Safe Yandex Conversion | complete |
-| v0.14.0 | Large Library Performance & Release Hardening | implementation |
-| v0.15.0 | Installer, Auto-Update, Feedback & Packaging | planned |
+| v0.14.0 | Large Library Performance & Release Hardening | complete |
+| v0.15.0 | Installer, Auto-Update, Feedback & Packaging | implementation |
 | v1.0.0 | Release Freeze & Public Release | planned |
 
 ## Version notes
 
-Historical version notes are stored under `docs/versions/`. The release-hardening line uses:
+Historical version notes are stored under `docs/versions/`. The current release-hardening line uses:
 
 - `docs/versions/v0.11.1.md`;
 - `docs/versions/v0.12.0.md`;
-- `docs/versions/v0.14.0.md`.
+- `docs/versions/v0.14.0.md`;
+- `docs/versions/v0.15.0.md`.
 
-A standalone `docs/versions/v0.13.0.md` was not present in the repository when v0.14 work began; v0.14 does not fabricate historical validation results for that merged version. The current source and regression suites remain authoritative for its multi-format/conversion behavior.
+A standalone `docs/versions/v0.13.0.md` was not present in the repository when v0.14 work began; v0.15 does not fabricate historical validation results for that merged version. The current source and regression suites remain authoritative for its multi-format/conversion behavior.
 
-Current application/backend version target is `0.14.0`, Flutter is `0.14.0+1`, and the core SQLite schema target remains `1.9.0` because v0.14 introduces no schema migration.
+Current application/backend version target is `0.15.0`, Flutter is `0.15.0+1`, and the core SQLite schema target remains `1.9.0` because v0.15 introduces no music-database schema migration.
 
 ## Release line
 
 The remaining pre-1.0 roadmap is intentionally frozen:
 
 ```text
-v0.14.0 — Large Library Performance & Release Hardening
 v0.15.0 — Installer, Auto-Update, Feedback & Packaging
 v1.0.0  — Release Freeze & Public Release
 ```
 
-No version note or status in this index by itself implies that a GitHub Release or tag has been published.
+v0.15 introduces distribution code and packaging evidence only. No status in this index by itself implies that a tag, GitHub Release, public installer or stable update manifest has been published.

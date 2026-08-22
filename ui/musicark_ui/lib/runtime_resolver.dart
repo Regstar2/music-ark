@@ -75,7 +75,9 @@ class MusicArkRuntimeResolver {
           'MUSICARK_PYTHON does not point to a working Python executable.',
         );
       }
-      final repo = explicitRepo == null ? _findRepositoryRoot() : _validRepo(explicitRepo);
+      final repo = explicitRepo == null
+          ? _findRepositoryRoot()
+          : _validRepo(explicitRepo);
       if (repo == null) {
         throw const MusicArkRuntimeException(
           'repo_root_not_found',
@@ -92,7 +94,7 @@ class MusicArkRuntimeResolver {
       'python',
       Platform.isWindows ? 'python.exe' : 'python',
     ]);
-    if (File(packagedPython).isFileSync()) {
+    if (File(packagedPython).existsSync()) {
       final command = _PythonCommand(packagedPython);
       if (!await _works(command)) {
         throw const MusicArkRuntimeException(
@@ -109,12 +111,14 @@ class MusicArkRuntimeResolver {
       );
     }
 
-    final repo = explicitRepo == null ? _findRepositoryRoot() : _validRepo(explicitRepo);
+    final repo = explicitRepo == null
+        ? _findRepositoryRoot()
+        : _validRepo(explicitRepo);
     if (repo != null) {
       final venv = Platform.isWindows
           ? _joinAll([repo, '.venv', 'Scripts', 'python.exe'])
           : _joinAll([repo, '.venv', 'bin', 'python']);
-      if (File(venv).isFileSync()) {
+      if (File(venv).existsSync()) {
         final command = _PythonCommand(venv);
         if (await _works(command)) return _developmentRuntime(command, repo);
       }
@@ -182,8 +186,10 @@ class MusicArkRuntimeResolver {
   }
 
   bool _looksLikeRepository(Directory directory) {
-    return File(_joinAll([directory.path, 'pyproject.toml'])).isFileSync() &&
-        File(_joinAll([directory.path, 'src', 'musicark', '__init__.py'])).isFileSync();
+    return File(_joinAll([directory.path, 'pyproject.toml'])).existsSync() &&
+        File(
+          _joinAll([directory.path, 'src', 'musicark', '__init__.py']),
+        ).existsSync();
   }
 
   Future<bool> _works(_PythonCommand command) async {

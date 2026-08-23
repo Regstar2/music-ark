@@ -244,8 +244,9 @@ class _MusicArkShellState extends State<MusicArkShell> {
   Widget _buildMatchingProgress() {
     final bridge = widget.matchingBridge;
     if (bridge is! MatchingProgressSource) return const SizedBox.shrink();
+    final progressSource = bridge as MatchingProgressSource;
     return ValueListenableBuilder<MatchingRunProgress>(
-      valueListenable: bridge.matchingProgress,
+      valueListenable: progressSource.matchingProgress,
       builder: (context, progress, _) {
         if (!progress.running) return const SizedBox.shrink();
         final hasTotal = progress.total > 0;

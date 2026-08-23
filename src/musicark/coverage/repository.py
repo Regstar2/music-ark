@@ -171,7 +171,7 @@ class CoverageRepository:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        page_limit = max(1, min(int(limit), 500))
+        page_limit = max(1, min(int(limit), 2000))
         page_offset = max(0, int(offset))
         where: list[str] = ["1=1"]
         params = self._context_params(provider_id, collection_id)

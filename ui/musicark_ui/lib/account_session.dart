@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import 'musicark_bridge.dart';
@@ -112,15 +114,19 @@ class SessionAwareMusicArkBridge implements MusicArkBridgeClient {
     final identity = externalId.trim();
     final cached = _preparedPlayback[identity];
     if (cached != null) {
-      final result = Map<String, dynamic>.from(cached);
-      result['cached'] = true;
-      result['preparationState'] = 'memory_cache_hit';
-      final timings = result['timingsMs'] is Map
-          ? Map<String, dynamic>.from(result['timingsMs'] as Map)
-          : <String, dynamic>{};
-      timings['bridgeRoundTrip'] = 0.0;
-      result['timingsMs'] = timings;
-      return result;
+      final path = '${cached['path'] ?? ''}'.trim();
+      if (path.isNotEmpty && await File(path).exists()) {
+        final result = Map<String, dynamic>.from(cached);
+        result['cached'] = true;
+        result['preparationState'] = 'memory_cache_hit';
+        final timings = result['timingsMs'] is Map
+            ? Map<String, dynamic>.from(result['timingsMs'] as Map)
+            : <String, dynamic>{};
+        timings['bridgeRoundTrip'] = 0.0;
+        result['timingsMs'] = timings;
+        return result;
+      }
+      _preparedPlayback.remove(identity);
     }
 
     final stopwatch = Stopwatch()..start();

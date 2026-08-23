@@ -178,7 +178,7 @@ MusicArk-<version>-win-x64.zip
 SHA256SUMS.txt
 ```
 
-and the packaged runtime must pass `--version` plus feedback-bridge smoke.
+and the staged Flutter executable must be named `Music Ark.exe`. The packaged runtime must pass `--version` plus feedback-bridge smoke.
 
 ### Final release build
 

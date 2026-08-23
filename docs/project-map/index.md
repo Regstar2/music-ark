@@ -146,6 +146,8 @@ The album cache, Local Library root filter and v0.9.3–v0.9.7 presentation mile
 
 The v0.9.x shell observes existing Yandex `session` payloads; it does not create another credential store or authentication API. Theme/locale preferences remain UI-only.
 
+The Yandex sign-in view may show a help link for obtaining an OAuth token, but the credential boundary remains unchanged: the user supplies the token explicitly, Flutter passes it only through the login bridge environment, and successful login stores it through the existing protected Windows credential store.
+
 Controlled Sync does not implement another matcher, Coverage engine, downloader or Local indexer. It reads current state from those layers and delegates acquisition to Downloads. v0.9.6 keeps the existing confirmation and enqueue-only Apply boundaries.
 
 Yandex playback is a user-initiated preview path. It creates/reuses a private file under `.musicark/playback/yandex`; that file is not inserted into Local Library, Matching or Coverage. Flutter receives the local playback path, never protected provider media URLs or credentials.
@@ -153,6 +155,8 @@ Yandex playback is a user-initiated preview path. It creates/reuses a private fi
 Metadata Editor remains the explicit ordinary write boundary. Local Scan, root selection, Matching, Coverage, Sync, content labels and variant acceptance never rewrite user audio files. ORIGINAL/CENSORED marks never mutate Yandex provider data or alter Matching identity.
 
 v0.9.7 Help documents these boundaries but does not create new domain behavior. About diagnostics remain limited to app/backend/schema version, OS, theme and locale.
+
+v0.15 Windows packaging produces the release-facing executable `Music Ark.exe`. The internal Flutter/CMake target name can stay technical, but installer shortcuts, package validation and Windows resource metadata must use the display name.
 
 ## Documentation entry points
 

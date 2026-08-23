@@ -44,7 +44,7 @@ Command:
 | v0.15 regressions | PASS | Packaging smoke + full suites passed |  |
 | Flutter analyze | PASS | `flutter analyze --no-fatal-infos` exit code 0 | Analyzer still reports 36 non-fatal info diagnostics. |
 | Flutter tests | PASS | `flutter test` ended `+155: All tests passed!` | Full suite, not focused-only. |
-| Flutter Windows build | PASS | `flutter build windows` built `build\windows\x64\runner\Release\musicark_ui.exe` |  |
+| Flutter Windows build | PASS | Historical evidence built `build\windows\x64\runner\Release\musicark_ui.exe`; current packaging contract expects `build\windows\x64\runner\Release\Music Ark.exe` and must be revalidated before release. |  |
 | Performance report | PASS | `.musicark/performance/release-regression.json` generated | 1k/10k/50k deterministic evidence generated. |
 | SQLite query audit | PASS | `.musicark/performance/sqlite-query-audit.json` generated |  |
 | Portable package smoke | PASS | `tools/package_windows.ps1 -SkipInstaller -PythonVersion 3.13` and full `.\scripts\ci.ps1` passed | Packaging pip installs use `--no-cache-dir` to avoid dirty user-cache permission failures. |

@@ -13,15 +13,16 @@ class _FakeContentLabelBridge implements ContentLabelBridgeClient {
     List<String> externalIds = const [],
     String providerId = 'yandex_music',
   }) async => {
-        'local': <String, String>{},
-        'provider': {
-          for (final id in externalIds)
-            if (provider[id] != null) id: provider[id],
-        },
-      };
+    'local': <String, String>{},
+    'provider': {
+      for (final id in externalIds)
+        if (provider[id] != null) id: provider[id],
+    },
+  };
 
   @override
-  Future<Map<String, dynamic>> setLocal(int localFileId, String label) async => {};
+  Future<Map<String, dynamic>> setLocal(int localFileId, String label) async =>
+      {};
 
   @override
   Future<Map<String, dynamic>> setProvider(
@@ -38,7 +39,8 @@ class _StatefulSessionFake extends FakeMusicArkBridge {
   _StatefulSessionFake() : super(startSignedIn: true);
   bool _loggedOut = false;
   @override
-  Future<Map<String, dynamic>> bootstrap() => _loggedOut ? super.logout() : super.bootstrap();
+  Future<Map<String, dynamic>> bootstrap() =>
+      _loggedOut ? super.logout() : super.bootstrap();
   @override
   Future<Map<String, dynamic>> logout() async {
     _loggedOut = true;
@@ -64,11 +66,14 @@ class _UnavailableSecondBridge extends FakeMusicArkBridge {
   }
 
   @override
-  Future<Map<String, dynamic>> bootstrap() async => _patch(await super.bootstrap());
+  Future<Map<String, dynamic>> bootstrap() async =>
+      _patch(await super.bootstrap());
   @override
-  Future<Map<String, dynamic>> likedRefresh() async => _patch(await super.likedRefresh());
+  Future<Map<String, dynamic>> likedRefresh() async =>
+      _patch(await super.likedRefresh());
   @override
-  Future<Map<String, dynamic>> libraryRefresh() async => _patch(await super.libraryRefresh());
+  Future<Map<String, dynamic>> libraryRefresh() async =>
+      _patch(await super.libraryRefresh());
 }
 
 void main() {
@@ -93,7 +98,23 @@ void main() {
     await pumpShellReady(tester);
   }
 
-  testWidgets('cached session uses one primary sidebar and Yandex tabs', (tester) async {
+  testWidgets('login screen exposes OAuth token information link', (
+    tester,
+  ) async {
+    final bridge = FakeMusicArkBridge(startSignedIn: false);
+    await desktop(tester, bridge);
+
+    expect(find.text('Вход в Яндекс Музыку'), findsOneWidget);
+    expect(find.byKey(const Key('oauth-token-help-link')), findsOneWidget);
+    expect(
+      find.text('Как получить OAuth-токен: ym.marshal.dev/token'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('cached session uses one primary sidebar and Yandex tabs', (
+    tester,
+  ) async {
     final bridge = FakeMusicArkBridge(startSignedIn: true);
     await desktop(tester, bridge);
     expect(find.byKey(const Key('musicark-primary-sidebar')), findsOneWidget);
@@ -109,71 +130,90 @@ void main() {
     expect(find.text('Вход в Яндекс Музыку'), findsNothing);
   });
 
-  testWidgets('playlist index opens detail, search works and back returns to index', (tester) async {
-    final bridge = FakeMusicArkBridge(startSignedIn: true);
-    await desktop(tester, bridge);
-    await tester.tap(find.byKey(const Key('nav-playlists')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byKey(const Key('playlist-list')), findsOneWidget);
-    expect(find.byKey(const Key('playlist-row-501')), findsOneWidget);
-    expect(find.byKey(const Key('playlist-row-502')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('playlist-row-501')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byKey(const Key('yandex-back-to-playlists')), findsOneWidget);
-    expect(find.text('Numb'), findsOneWidget);
-    expect(find.text('Bring Me to Life'), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('track-search')), 'Evanescence');
-    await tester.pump(const Duration(milliseconds: 250));
-    expect(find.text('Bring Me to Life'), findsOneWidget);
-    expect(find.text('Numb'), findsNothing);
-    expect(bridge.playlistRefreshCalls, 1);
-    await tester.tap(find.byKey(const Key('yandex-back-to-playlists')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byKey(const Key('playlist-list')), findsOneWidget);
-  });
+  testWidgets(
+    'playlist index opens detail, search works and back returns to index',
+    (tester) async {
+      final bridge = FakeMusicArkBridge(startSignedIn: true);
+      await desktop(tester, bridge);
+      await tester.tap(find.byKey(const Key('nav-playlists')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('playlist-list')), findsOneWidget);
+      expect(find.byKey(const Key('playlist-row-501')), findsOneWidget);
+      expect(find.byKey(const Key('playlist-row-502')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('playlist-row-501')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('yandex-back-to-playlists')), findsOneWidget);
+      expect(find.text('Numb'), findsOneWidget);
+      expect(find.text('Bring Me to Life'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('track-search')),
+        'Evanescence',
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('Bring Me to Life'), findsOneWidget);
+      expect(find.text('Numb'), findsNothing);
+      expect(bridge.playlistRefreshCalls, 1);
+      await tester.tap(find.byKey(const Key('yandex-back-to-playlists')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('playlist-list')), findsOneWidget);
+    },
+  );
 
-  testWidgets('liked albums come from the provider collection and open full album detail', (tester) async {
-    final bridge = FakeMusicArkBridge(startSignedIn: true);
-    await desktop(tester, bridge);
-    await tester.tap(find.byKey(const Key('nav-albums')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+  testWidgets(
+    'liked albums come from the provider collection and open full album detail',
+    (tester) async {
+      final bridge = FakeMusicArkBridge(startSignedIn: true);
+      await desktop(tester, bridge);
+      await tester.tap(find.byKey(const Key('nav-albums')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byKey(const Key('album-list')), findsOneWidget);
-    expect(find.text('Hybrid Theory'), findsOneWidget);
-    expect(find.text('The Open Door'), findsOneWidget);
-    expect(find.text('The End Is Where We Begin'), findsNothing);
-    expect(find.text('One-X'), findsNothing);
+      expect(find.byKey(const Key('album-list')), findsOneWidget);
+      expect(find.text('Hybrid Theory'), findsOneWidget);
+      expect(find.text('The Open Door'), findsOneWidget);
+      expect(find.text('The End Is Where We Begin'), findsNothing);
+      expect(find.text('One-X'), findsNothing);
 
-    await tester.tap(find.byKey(const Key('album-card-701')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byKey(const Key('yandex-back-to-albums')), findsOneWidget);
-    expect(find.text('Papercut'), findsOneWidget);
-    expect(find.text('In the End'), findsOneWidget);
-    expect(find.text('Courtesy Call'), findsNothing);
-    expect(bridge.albumRefreshCalls, 1);
+      await tester.tap(find.byKey(const Key('album-card-701')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('yandex-back-to-albums')), findsOneWidget);
+      expect(find.text('Papercut'), findsOneWidget);
+      expect(find.text('In the End'), findsOneWidget);
+      expect(find.text('Courtesy Call'), findsNothing);
+      expect(bridge.albumRefreshCalls, 1);
 
-    await tester.tap(find.byKey(const Key('yandex-back-to-albums')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byKey(const Key('album-list')), findsOneWidget);
-  });
+      await tester.tap(find.byKey(const Key('yandex-back-to-albums')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const Key('album-list')), findsOneWidget);
+    },
+  );
 
-  testWidgets('track sorting, refresh and global logout remain available', (tester) async {
+  testWidgets('track sorting, refresh and global logout remain available', (
+    tester,
+  ) async {
     final bridge = _StatefulSessionFake();
     await desktop(tester, bridge);
-    expect(tester.getTopLeft(find.text('Courtesy Call')).dy, lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy));
+    expect(
+      tester.getTopLeft(find.text('Courtesy Call')).dy,
+      lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy),
+    );
     await tester.tap(find.byKey(const Key('track-sort-original')));
     await tester.pump();
     await tester.tap(find.text('По названию').last);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(tester.getTopLeft(find.text('Animal I Have Become')).dy, lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy));
+    expect(
+      tester.getTopLeft(find.text('Animal I Have Become')).dy,
+      lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy),
+    );
     final likedRefreshes = bridge.likedRefreshCalls;
-    final refresh = tester.widget<IconButton>(find.byKey(const Key('refresh-library')));
+    final refresh = tester.widget<IconButton>(
+      find.byKey(const Key('refresh-library')),
+    );
     expect(refresh.onPressed, isNotNull);
     await tester.tap(find.byKey(const Key('refresh-library')));
     await pumpShellReady(tester);
@@ -183,24 +223,44 @@ void main() {
     expect(find.byKey(const Key('global-account-logout')), findsOneWidget);
   });
 
-  testWidgets('unavailable sort moves unavailable tracks to the top', (tester) async {
+  testWidgets('unavailable sort moves unavailable tracks to the top', (
+    tester,
+  ) async {
     final bridge = _UnavailableSecondBridge();
     await desktop(tester, bridge);
-    expect(tester.getTopLeft(find.text('Courtesy Call')).dy, lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy));
+    expect(
+      tester.getTopLeft(find.text('Courtesy Call')).dy,
+      lessThan(tester.getTopLeft(find.text('Animal I Have Become')).dy),
+    );
     await tester.tap(find.byKey(const Key('track-sort-original')));
     await tester.pump();
     await tester.tap(find.text('Недоступные сначала').last);
     await tester.pump();
-    expect(tester.getTopLeft(find.text('Animal I Have Become')).dy, lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy));
-    final unavailablePlay = tester.widget<IconButton>(find.byKey(const Key('yandex-play-102')));
+    expect(
+      tester.getTopLeft(find.text('Animal I Have Become')).dy,
+      lessThan(tester.getTopLeft(find.text('Courtesy Call')).dy),
+    );
+    final unavailablePlay = tester.widget<IconButton>(
+      find.byKey(const Key('yandex-play-102')),
+    );
     expect(unavailablePlay.onPressed, isNull);
   });
 
-  testWidgets('network refresh error keeps cached library visible', (tester) async {
-    final bridge = FakeMusicArkBridge(startSignedIn: true, failLibraryRefresh: true);
+  testWidgets('network refresh error keeps cached library visible', (
+    tester,
+  ) async {
+    final bridge = FakeMusicArkBridge(
+      startSignedIn: true,
+      failLibraryRefresh: true,
+    );
     await desktop(tester, bridge);
     expect(find.text('Courtesy Call'), findsOneWidget);
     expect(find.byKey(const Key('error-panel')), findsOneWidget);
-    expect(find.text('Не удалось обновить данные из Яндекс Музыки. Показана сохранённая версия.'), findsOneWidget);
+    expect(
+      find.text(
+        'Не удалось обновить данные из Яндекс Музыки. Показана сохранённая версия.',
+      ),
+      findsOneWidget,
+    );
   });
 }

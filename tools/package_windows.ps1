@@ -16,6 +16,7 @@ if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
 $buildRoot = Join-Path $root ".build\v015"
 $artifactDir = Join-Path $root "artifacts\v$version"
 $stage = Join-Path $buildRoot "MusicArk"
+$appExeName = "Music Ark.exe"
 $venv = Join-Path $buildRoot "build-venv"
 $venvPython = Join-Path $venv "Scripts\python.exe"
 
@@ -55,8 +56,12 @@ try {
 }
 
 $flutterOutput = Join-Path $root "ui\musicark_ui\build\windows\x64\runner\Release"
-if (-not (Test-Path -LiteralPath (Join-Path $flutterOutput "musicark_ui.exe") -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath (Join-Path $flutterOutput $appExeName) -PathType Leaf)) {
     throw "Flutter release output was not found at $flutterOutput."
+}
+$legacyAppExe = Join-Path $flutterOutput "musicark_ui.exe"
+if (Test-Path -LiteralPath $legacyAppExe -PathType Leaf) {
+    Remove-Item -LiteralPath $legacyAppExe -Force
 }
 Copy-Item -Path (Join-Path $flutterOutput "*") -Destination $stage -Recurse -Force
 

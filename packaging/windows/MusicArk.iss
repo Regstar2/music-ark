@@ -58,8 +58,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,Music Ark}"; 
 function InitializeUninstall(): Boolean;
 begin
   { User data lives outside the application directory. The uninstaller intentionally leaves the }
-  { MusicArk database/cache/configuration and external programs such as WARP }
-  { untouched. External dependency removal requires a separate explicit user }
-  { action so an uninstall cannot silently remove software used elsewhere. }
+  { MusicArk database/cache/configuration untouched. MusicArk does not bundle, install, manage, }
+  { or remove VPN/tunnel software; custom HTTP/SOCKS5 proxy configuration is user-managed. }
   Result := True;
 end;

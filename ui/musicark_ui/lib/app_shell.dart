@@ -298,7 +298,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                       _buildYandexSection(),
                       _localLibraryOpened
                           ? LocalLibraryPage(
-                              key: const ValueKey('local-library-page'),
+                              key: const ValueKey('local-library-page-state'),
                               bridge: widget.bridge,
                               metadataBridge: widget.metadataBridge,
                               contentLabelBridge: widget.contentLabelBridge,

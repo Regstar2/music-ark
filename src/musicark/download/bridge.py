@@ -26,6 +26,7 @@ from .service import DownloadService, DownloadServiceError
 _USER_TASK_TYPE = "provider_download"
 _USER_SOURCE_PROVIDER = "yandex_music"
 _TERMINAL_HISTORY_LIMIT = 100
+_MAX_USER_TASKS = 20_000
 _ACTIVE_STATUSES = {"queued", "running", "failed", "needs_review"}
 
 
@@ -99,9 +100,9 @@ def _user_items(
     service: DownloadService,
     *,
     status: str = "",
-    limit: int = 5000,
+    limit: int = _MAX_USER_TASKS,
 ) -> list[dict[str, Any]]:
-    payload = service.tasks(status=status, limit=max(1, min(int(limit), 5000)))
+    payload = service.tasks(status=status, limit=max(1, min(int(limit), _MAX_USER_TASKS)))
     raw = payload.get("items")
     if not isinstance(raw, list):
         return []
@@ -181,8 +182,29 @@ def _prune_user_completed_history(
 
 def _user_summary(service: DownloadService) -> dict[str, Any]:
     _prune_user_completed_history(service)
-    items = _user_items(service, limit=5000)
-    return {"counts": _summary_counts(items), "settings": service.settings()}
+    try:
+        with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
+            rows = conn.execute(
+                "SELECT status, COUNT(*) FROM download_tasks WHERE task_type=? GROUP BY status",
+                (_USER_TASK_TYPE,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise DownloadServiceError(
+            "Failed to summarize user downloads.", code="storage_error"
+        ) from exc
+    counts = {str(status): int(count) for status, count in rows}
+    return {
+        "counts": {
+            "queued": counts.get("queued", 0),
+            "running": counts.get("running", 0),
+            "completed": counts.get("completed", 0),
+            "failed": counts.get("failed", 0) + counts.get("needs_review", 0),
+            "cancelled": counts.get("cancelled", 0),
+            "skipped": counts.get("skipped", 0),
+            "total": sum(counts.values()),
+        },
+        "settings": service.settings(),
+    }
 
 
 def _user_tasks(
@@ -194,7 +216,7 @@ def _user_tasks(
     clean_status = str(status or "").strip().casefold()
     if clean_status == "completed":
         _prune_user_completed_history(service)
-    items = _user_items(service, status=clean_status, limit=5000)
+    items = _user_items(service, status=clean_status, limit=_MAX_USER_TASKS)
     # The default Downloads page is operational state, not an unbounded archive.
     # Completed/cancelled/skipped rows are available only through explicit history filters.
     if not clean_status:
@@ -203,7 +225,7 @@ def _user_tasks(
             for item in items
             if str(item.get("status") or "") in _ACTIVE_STATUSES
         ]
-    items = items[: max(1, min(int(limit), 5000))]
+    items = items[: max(1, min(int(limit), _MAX_USER_TASKS))]
     return {"count": len(items), "items": items}
 
 
@@ -275,7 +297,7 @@ def _user_run(service: DownloadService) -> dict[str, Any]:
     if _user_items(service, status="running", limit=1):
         raise DownloadServiceError("A download worker is already running.", code="worker_busy")
     queued = sorted(
-        _user_items(service, status="queued", limit=5000),
+        _user_items(service, status="queued", limit=_MAX_USER_TASKS),
         key=lambda item: str(item.get("createdAt") or ""),
     )
     results: list[dict[str, Any]] = []
@@ -307,7 +329,7 @@ def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
 
 def _user_recover(service: DownloadService) -> dict[str, Any]:
     recovered = 0
-    for task in service._downloads.list_tasks(status="running", limit=5000):  # noqa: SLF001
+    for task in service._downloads.list_tasks(status="running", limit=_MAX_USER_TASKS):  # noqa: SLF001
         if task.task_type != _USER_TASK_TYPE:
             continue
         service._downloads._cleanup_partial(task)  # noqa: SLF001

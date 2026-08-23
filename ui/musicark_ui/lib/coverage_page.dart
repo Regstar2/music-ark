@@ -34,7 +34,8 @@ class CoveragePage extends StatefulWidget {
 
 class _CoveragePageState extends State<CoveragePage> {
   static const _pageSize = 100;
-  static const _bulkPageSize = 500;
+  static const _bulkPageSize = 2000;
+  static const _bulkActionChunkSize = 1000;
 
   final _searchController = TextEditingController();
   Timer? _searchTimer;
@@ -237,7 +238,11 @@ class _CoveragePageState extends State<CoveragePage> {
     if (_selected.isEmpty) return;
     final ids = _selected.toList(growable: false);
     try {
-      await widget.bridge.coverageSetActions(ids, action);
+      for (var start = 0; start < ids.length; start += _bulkActionChunkSize) {
+        final proposedEnd = start + _bulkActionChunkSize;
+        final end = proposedEnd < ids.length ? proposedEnd : ids.length;
+        await widget.bridge.coverageSetActions(ids.sublist(start, end), action);
+      }
       await _reloadTracks(clearSelection: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());

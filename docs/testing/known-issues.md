@@ -1,6 +1,6 @@
 # Known issues — v1.0 stabilization
 
-Этот файл фиксирует release-blocking дефекты, найденные во время Windows acceptance, и состояние их исправлений. Финальная consolidated review выполняется в PR #44 (`fix/v1.0-release-blockers`). Статус `candidate fixed` означает, что изменение реализовано, но финальная ручная Windows-приёмка ещё не заменена автоматическими тестами.
+Этот файл фиксирует release-blocking дефекты, найденные во время Windows acceptance, и состояние их исправлений. Текущий consolidated review выполняется в ветке `fix/v1.0-acceptance-round2`. Статус `candidate fixed` означает, что изменение реализовано, но финальная ручная Windows-приёмка не заменена автоматическими тестами.
 
 ## #39 — Responsiveness / Matching / large Coverage
 
@@ -33,4 +33,48 @@
 - Cause: cache short-circuit находился слишком глубоко, а session-level prepared path не переиспользовался.
 - Fix: disk cache проверяется до token/provider startup; cold/cache result различается; `cacheCheck/providerPrepare/total/bridgeRoundTrip` timing evidence; session-level prepared path reuse; spinner regression for pending preparation.
 - Check: automated regressions добавлены; cold/cached Windows timing pass — `NOT VERIFIED`.
+- Status: `candidate fixed`.
+
+## #45 — Matching batch persistence lock
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: запустить Matching на большой библиотеке; процесс останавливается с `Failed to persist matching batch.`.
+- Expected: bounded matching batches сохраняются на протяжении всего run без SQLite writer contention.
+- Actual before fix: optimized run держал SQLite connection для preloaded/candidate reads, но каждые 250 решений `persist_batch()` открывал отдельное write connection.
+- Cause: второй writer path внутри long-lived optimized run.
+- Fix: bounded batch persistence выполняется на том же SQLite connection, который обслуживает optimized run.
+- Check: regression запрещает вызов repository `persist_batch()` из optimized hot loop; Windows 5k+ run — `NOT VERIFIED`.
+- Status: `candidate fixed`.
+
+## #46 — Missing select-all / bulk Wanted feedback
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: ~5k+ Missing -> `Выбрать все` -> массово `Нужен`.
+- Expected: пользователь сразу видит, что операция началась, и processed/total растёт до завершения; UI продолжает обрабатывать события.
+- Actual before fix: операции были bounded, но во время нескольких bridge calls интерфейс почти не давал обратной связи и выглядел зависшим.
+- Cause: bulk state переиспользовал общий loading flag либо вообще не имел пользовательского progress state.
+- Fix: отдельные select-all и bulk-action busy/progress states, 2000-row reads, 1000-ID writes, yield между chunks, incremental visible-row update.
+- Check: widget regression блокирует bridge call и проверяет видимый progress; Windows 5k+ pass — `NOT VERIFIED`.
+- Status: `candidate fixed`.
+
+## #47 — stale Wanted/queue state in Downloads
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: отметить тысячи Missing как Wanted и сразу открыть Downloads; после enqueue не покидать страницу.
+- Expected: Wanted counter и persisted task queue обновляются без открытия специальной вкладки или page re-entry.
+- Actual before fix: initial Downloads load читал только task state; Wanted загружался позже при открытии таба, а post-enqueue task list обновлялся только после долгого worker call.
+- Cause: persistent page freshness была scoped только к активному sub-tab и mutation completion.
+- Fix: initial/reactivation/manual refresh обновляет task + Wanted state; enqueue refresh выполняется до запуска worker.
+- Check: widget regressions проверяют initial Wanted count и reactivation; Windows pass — `NOT VERIFIED`.
+- Status: `candidate fixed`.
+
+## #48 — Download All queue execution visibility
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: Downloads -> Wanted -> `Скачать все` на нескольких тысячах Wanted tracks.
+- Expected: enqueue виден сразу, queue появляется до первого download, затем отображаются worker processed/total и per-track progress; downloads start automatically.
+- Actual before fix: UI awaited one monolithic `run_tasks` process for the whole batch; controls gray-out, queue refresh and task progress appeared only after return/page re-entry. Task discovery was also limited to 5000 IDs per read.
+- Cause: queue creation and long execution were combined into one awaited UI operation; polling was absent; 5000-task read boundary truncated large queue visibility.
+- Fix: enqueue -> immediate full refresh -> asynchronous bounded one-task worker; lightweight 800ms running/summary poll; queue drain refetches later batches; summary counts persisted user tasks directly and is not truncated at 5000.
+- Check: Python regression covers 5247 persisted queue count; widget regression blocks first worker task and verifies visible operation progress after enqueue; Windows bulk download pass — `NOT VERIFIED`.
 - Status: `candidate fixed`.

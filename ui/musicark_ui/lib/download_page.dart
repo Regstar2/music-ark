@@ -66,6 +66,9 @@ class _DownloadPageState extends State<DownloadPage> {
       _stopWorker = true;
       _pollTimer?.cancel();
       _pollTimer = null;
+    } else if (!oldWidget.active && widget.active) {
+      _stopWorker = false;
+      unawaited(_refreshCurrent());
     }
   }
 

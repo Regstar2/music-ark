@@ -78,3 +78,14 @@
 - Fix: enqueue -> immediate full refresh -> asynchronous bounded one-task worker; lightweight 800ms running/summary poll; queue drain refetches later batches; summary counts persisted user tasks directly and is not truncated at 5000.
 - Check: Python regression covers 5247 persisted queue count; widget regression blocks first worker task and verifies visible operation progress after enqueue; Windows bulk download pass — `NOT VERIFIED`.
 - Status: `candidate fixed`.
+
+## #50 — Portable ZIP creation / temporary Windows file lock
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: Windows packaging reaches archive creation; a staged PyInstaller/keyring file is temporarily held by another process; `Compress-Archive` emits `IOException`, then packaging still prints success while no ZIP/SHA256 exists.
+- Expected: transient sharing violations are retried; persistent archive errors terminate packaging; success is printed only after a non-empty ZIP and checksum file exist.
+- Actual before fix: PowerShell Archive module emitted a non-terminating error that bypassed the script's intended fail-fast behavior.
+- Cause: archive creation had no explicit verified postcondition and relied on `Compress-Archive` error semantics.
+- Fix: use `System.IO.Compression.ZipFile.CreateFromDirectory` with four bounded retry attempts/backoff; delete partial archives between attempts; require non-empty ZIP and `SHA256SUMS.txt` before success output.
+- Check: fresh Windows portable packaging pass — `NOT VERIFIED`.
+- Status: `candidate fixed`.

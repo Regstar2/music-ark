@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 from musicark.matching.responsive_candidates import ResponsiveCandidateGenerator
 from musicark.matching.responsive_service import ResponsiveMatchingService
@@ -44,6 +45,33 @@ class MatchingResponsivenessV100Tests(unittest.TestCase):
             self.assertEqual(updates[-1], (60, 60))
             self.assertEqual([item[0] for item in updates], sorted(item[0] for item in updates))
             self.assertTrue(all(item[1] == 60 for item in updates))
+
+    def test_optimized_run_does_not_open_repository_batch_writer_inside_hot_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "musicark.db"
+            initialize_database(db)
+            providers = ProviderStorageRepository(db)
+            for index in range(12):
+                providers.upsert_provider_track(
+                    ProviderTrack(
+                        "yandex_music",
+                        str(index + 1),
+                        f"Unmatched {index}",
+                        ("Artist",),
+                        duration_seconds=180,
+                    )
+                )
+
+            service = ResponsiveMatchingService(database_path=db)
+            with mock.patch.object(
+                service._repository,  # noqa: SLF001 - regression guards the connection boundary.
+                "persist_batch",
+                side_effect=AssertionError("optimized run opened a second batch writer"),
+            ):
+                result = service.run()
+
+            self.assertEqual(result["total"], 12)
+            self.assertEqual(result["unmatched"], 12)
 
     def test_exact_yandex_filename_index_is_built_once_per_generator(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

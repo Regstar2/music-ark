@@ -19,6 +19,7 @@ from musicark import mvp_bridge, platform_bridge
 from musicark.content_labels import bridge as content_labels_bridge
 from musicark.download import bridge as download_bridge
 from musicark.external_metadata import bridge as external_metadata_bridge
+from musicark.matching import progress_bridge as matching_progress_bridge
 from musicark.metadata import bridge as metadata_bridge
 from musicark.recovery import bridge as recovery_bridge
 from musicark.sync import bridge as sync_bridge
@@ -33,6 +34,7 @@ _ENTRY_POINTS: dict[str, Callable[[], int]] = {
     "musicark.content_labels.bridge": content_labels_bridge.main,
     "musicark.download.bridge": download_bridge.main,
     "musicark.external_metadata.bridge": external_metadata_bridge.main,
+    "musicark.matching.progress_bridge": matching_progress_bridge.main,
     "musicark.metadata.bridge": metadata_bridge.main,
     "musicark.recovery.bridge": recovery_bridge.main,
     "musicark.sync.bridge": sync_bridge.main,
@@ -105,7 +107,10 @@ def main() -> int:
         print(f"MusicArk runtime {__version__}")
         return 0
     if len(args) < 2 or args[0] != "-m":
-        print("MusicArk packaged runtime accepts only --version or -m <approved-module>.", file=sys.stderr)
+        print(
+            "MusicArk packaged runtime accepts only --version or -m <approved-module>.",
+            file=sys.stderr,
+        )
         return 2
     module = args[1]
     entry = _ENTRY_POINTS.get(module)

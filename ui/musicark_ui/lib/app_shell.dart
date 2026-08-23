@@ -16,6 +16,7 @@ import 'help_page.dart';
 import 'local_library_page.dart';
 import 'matching_bridge.dart';
 import 'matching_page.dart';
+import 'matching_progress_bridge.dart';
 import 'metadata_bridge.dart';
 import 'musicark_mark.dart';
 import 'settings_page.dart';
@@ -72,10 +73,6 @@ class _MusicArkShellState extends State<MusicArkShell> {
   bool _downloadsOpened = false;
   bool _syncOpened = false;
 
-  // Data pages re-read authoritative state when they are activated. The Yandex
-  // page remains alive continuously so playlist scope survives theme/locale changes.
-  final List<int> _activationRevision = List<int>.filled(6, 0);
-
   @override
   void initState() {
     super.initState();
@@ -95,9 +92,9 @@ class _MusicArkShellState extends State<MusicArkShell> {
   void _selectSection(int index) {
     setState(() {
       _index = index;
-      if (index > 0 && index < _activationRevision.length) {
-        _activationRevision[index]++;
-      }
+      // Open data pages lazily, then keep the same State objects alive. Re-keying
+      // them on every navigation used to restart bridge work and destroyed an
+      // in-flight MatchingPage when the user changed tabs.
       if (index == 1) _localLibraryOpened = true;
       if (index == 2) _matchingOpened = true;
       if (index == 3) _coverageOpened = true;
@@ -244,6 +241,44 @@ class _MusicArkShellState extends State<MusicArkShell> {
     );
   }
 
+  Widget _buildMatchingProgress() {
+    final bridge = widget.matchingBridge;
+    if (bridge is! MatchingProgressSource) return const SizedBox.shrink();
+    return ValueListenableBuilder<MatchingRunProgress>(
+      valueListenable: bridge.matchingProgress,
+      builder: (context, progress, _) {
+        if (!progress.running) return const SizedBox.shrink();
+        final hasTotal = progress.total > 0;
+        return Material(
+          key: const Key('matching-global-progress'),
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: LinearProgressIndicator(value: progress.fraction),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 104,
+                  child: Text(
+                    hasTotal
+                        ? '${progress.processed} / ${progress.total}'
+                        : '${progress.processed}',
+                    key: const Key('matching-global-progress-count'),
+                    textAlign: TextAlign.end,
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -254,6 +289,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
           Expanded(
             child: Column(
               children: [
+                _buildMatchingProgress(),
                 Expanded(
                   child: IndexedStack(
                     index: _index,
@@ -261,7 +297,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                       _buildYandexSection(),
                       _localLibraryOpened
                           ? LocalLibraryPage(
-                              key: ValueKey('local-${_activationRevision[1]}'),
+                              key: const ValueKey('local-library-page'),
                               bridge: widget.bridge,
                               metadataBridge: widget.metadataBridge,
                               contentLabelBridge: widget.contentLabelBridge,
@@ -272,17 +308,13 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           : const SizedBox.shrink(),
                       _matchingOpened
                           ? MatchingPage(
-                              key: ValueKey(
-                                'matching-${_activationRevision[2]}',
-                              ),
+                              key: const ValueKey('matching-page-state'),
                               bridge: widget.matchingBridge,
                             )
                           : const SizedBox.shrink(),
                       _coverageOpened
                           ? CoveragePage(
-                              key: ValueKey(
-                                'coverage-${_activationRevision[3]}',
-                              ),
+                              key: const ValueKey('coverage-page-state'),
                               bridge: widget.coverageBridge,
                               matchingBridge: widget.matchingBridge,
                               downloadBridge: widget.downloadBridge,
@@ -292,9 +324,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           : const SizedBox.shrink(),
                       _downloadsOpened
                           ? DownloadPage(
-                              key: ValueKey(
-                                'downloads-${_activationRevision[4]}',
-                              ),
+                              key: const ValueKey('downloads-page-state'),
                               bridge: widget.downloadBridge,
                               coverageBridge: widget.coverageBridge,
                               active: _index == 4,
@@ -302,7 +332,7 @@ class _MusicArkShellState extends State<MusicArkShell> {
                           : const SizedBox.shrink(),
                       _syncOpened
                           ? SyncPage(
-                              key: ValueKey('sync-${_activationRevision[5]}'),
+                              key: const ValueKey('sync-page-state'),
                               bridge: widget.syncBridge,
                               managedPlaylistBridge:
                                   widget.yandexBatchUploadBridge,

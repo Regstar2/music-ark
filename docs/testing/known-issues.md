@@ -1,6 +1,6 @@
 # Known issues — v1.0 stabilization
 
-Этот файл фиксирует release-blocking дефекты, найденные во время Windows acceptance, и состояние их исправлений. Статус `candidate fixed` означает, что изменение реализовано, но финальная ручная Windows-приёмка ещё не заменена автоматическими тестами.
+Этот файл фиксирует release-blocking дефекты, найденные во время Windows acceptance, и состояние их исправлений. Финальная consolidated review выполняется в PR #44 (`fix/v1.0-release-blockers`). Статус `candidate fixed` означает, что изменение реализовано, но финальная ручная Windows-приёмка ещё не заменена автоматическими тестами.
 
 ## #39 — Responsiveness / Matching / large Coverage
 

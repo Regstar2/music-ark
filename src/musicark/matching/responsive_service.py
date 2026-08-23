@@ -8,6 +8,7 @@ import sqlite3
 import time
 from typing import Any
 
+from musicark.core.errors import StorageError
 from musicark.storage.audit_log import AuditEvent
 
 from .fingerprints import provider_fingerprint
@@ -98,7 +99,7 @@ class ResponsiveMatchingService(MatchingService):
                             )
                         )
                         if len(batch) >= 250:
-                            self._repository.persist_batch(batch)
+                            self._persist_run_batch(conn, batch)
                             batch.clear()
                     finally:
                         if progress is not None and (
@@ -106,10 +107,8 @@ class ResponsiveMatchingService(MatchingService):
                         ):
                             progress(index, provider_identity_count)
 
-                self._repository.persist_batch(batch)
+                self._persist_run_batch(conn, batch)
         except sqlite3.Error as exc:
-            from musicark.core.errors import StorageError
-
             raise StorageError("Failed to prepare optimized matching run state.") from exc
 
         summary = self._scope.summary(
@@ -149,6 +148,21 @@ class ResponsiveMatchingService(MatchingService):
             )
         )
         return result
+
+    def _persist_run_batch(self, conn: sqlite3.Connection, decisions: list[Any]) -> None:
+        """Persist a bounded batch on the same connection used by the run hot path.
+
+        Keeping reads and writes on one connection avoids the second-writer lock
+        path that was observed during Windows acceptance on large libraries.
+        """
+        if not decisions:
+            return
+        try:
+            with conn:
+                for decision in decisions:
+                    self._repository._persist_decision(conn, decision)  # noqa: SLF001
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to persist matching batch.") from exc
 
     def _preload_run_state(
         self,

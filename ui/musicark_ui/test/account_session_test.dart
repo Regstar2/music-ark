@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/account_session.dart';
+import 'package:musicark_ui/musicark_bridge.dart';
 
 void main() {
   test('account mapping exposes initials without credentials', () {
@@ -68,5 +69,25 @@ void main() {
     expect(session.isSignedIn, isFalse);
     expect(session.displayName, isEmpty);
     expect(session.logoutRevision, 1);
+  });
+
+  test('session bridge reuses prepared Yandex playback without a second bridge call', () async {
+    final session = AccountSessionController();
+    final delegate = FakeMusicArkBridge(startSignedIn: true);
+    final bridge = SessionAwareMusicArkBridge(delegate, session);
+
+    final first = await bridge.yandexPlaybackPrepare('101');
+    final second = await bridge.yandexPlaybackPrepare('101');
+
+    expect(delegate.yandexPlaybackPrepareCalls, 1);
+    expect(first['timingsMs'], isA<Map>());
+    expect((first['timingsMs'] as Map)['bridgeRoundTrip'], isA<num>());
+    expect(second['cached'], isTrue);
+    expect(second['preparationState'], 'memory_cache_hit');
+    expect((second['timingsMs'] as Map)['bridgeRoundTrip'], 0.0);
+
+    await bridge.logout();
+    await bridge.yandexPlaybackPrepare('101');
+    expect(delegate.yandexPlaybackPrepareCalls, 2);
   });
 }

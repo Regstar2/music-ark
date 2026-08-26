@@ -20,6 +20,7 @@ from musicark.providers.yandex_music_provider import (
     YandexTokenMissingError,
 )
 
+from .resilient_yandex import ResilientYandexMusicDownloadProvider
 from .service import DownloadService, DownloadServiceError
 
 
@@ -28,6 +29,19 @@ _USER_SOURCE_PROVIDER = "yandex_music"
 _TERMINAL_HISTORY_LIMIT = 100
 _MAX_USER_TASKS = 20_000
 _ACTIVE_STATUSES = {"queued", "running", "failed", "needs_review"}
+_WORKER_BATCH_SIZE = 500
+_WORKER_RESULT_LIMIT = 100
+_WORKER_STOP_SETTING = "user_worker_stop_requested"
+_SYSTEMIC_FAILURE_LIMIT = 3
+_SYSTEMIC_ERROR_CODES = {
+    "network_error",
+    "provider_network",
+    "provider_timeout",
+    "provider_request",
+    "provider_unavailable",
+    "rate_limited",
+    "http_error",
+}
 
 
 class _DirectCoverageProxy:
@@ -67,6 +81,7 @@ def _parser() -> argparse.ArgumentParser:
             "enqueue_wanted",
             "run",
             "run_task",
+            "stop_worker",
             "retry",
             "cancel",
             "clear_completed",
@@ -280,6 +295,71 @@ def _retry_user_task(service: DownloadService, task_id: str) -> dict[str, Any]:
         service._coverage = original  # noqa: SLF001
 
 
+def _configure_user_download_provider(service: DownloadService) -> None:
+    """Register one resilient Yandex provider instance per bridge process."""
+    if bool(getattr(service, "_user_resilient_provider_configured", False)):
+        return
+    token = service._credentials.get_token()  # noqa: SLF001
+    if not token:
+        raise YandexTokenMissingError("Saved Yandex Music token is missing.")
+    service._registry.register(  # noqa: SLF001
+        ResilientYandexMusicDownloadProvider(base_dir=service._base_dir, token=token)  # noqa: SLF001
+    )
+    setattr(service, "_user_resilient_provider_configured", True)
+
+
+def _set_worker_stop(service: DownloadService, requested: bool) -> None:
+    service._downloads._set_setting(  # noqa: SLF001
+        _WORKER_STOP_SETTING,
+        "1" if requested else "0",
+    )
+
+
+def _worker_stop_requested(service: DownloadService) -> bool:
+    return service._downloads._get_setting(_WORKER_STOP_SETTING) == "1"  # noqa: SLF001
+
+
+def _queued_user_task_ids(
+    service: DownloadService,
+    *,
+    limit: int = _WORKER_BATCH_SIZE,
+) -> list[str]:
+    """Read oldest queued user tasks without the repository's legacy 5000 cap."""
+    try:
+        with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
+            rows = conn.execute(
+                """
+                SELECT id
+                FROM download_tasks
+                WHERE task_type=? AND status='queued'
+                ORDER BY created_at ASC, id ASC
+                LIMIT ?
+                """,
+                (_USER_TASK_TYPE, max(1, int(limit))),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise DownloadServiceError(
+            "Failed to read the persisted download queue.",
+            code="storage_error",
+        ) from exc
+    return [str(row[0]) for row in rows if row and str(row[0]).strip()]
+
+
+def _queued_user_task_count(service: DownloadService) -> int:
+    try:
+        with closing(sqlite3.connect(service._database_path)) as conn:  # noqa: SLF001
+            row = conn.execute(
+                "SELECT COUNT(*) FROM download_tasks WHERE task_type=? AND status='queued'",
+                (_USER_TASK_TYPE,),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise DownloadServiceError(
+            "Failed to count the persisted download queue.",
+            code="storage_error",
+        ) from exc
+    return int(row[0]) if row else 0
+
+
 def _user_run_one(service: DownloadService, task_id: str) -> dict[str, Any]:
     """Run exactly one selected user task; never drain unrelated queued work."""
     running = _user_items(service, status="running", limit=2)
@@ -288,27 +368,109 @@ def _user_run_one(service: DownloadService, task_id: str) -> dict[str, Any]:
             "A download worker is already running.",
             code="worker_busy",
         )
+    _configure_user_download_provider(service)
     task = _run_user_task(service, task_id)
     pruned = _prune_user_completed_history(service)
     return {"task": service._task_payload(task), "historyPruned": pruned}  # noqa: SLF001
 
 
 def _user_run(service: DownloadService) -> dict[str, Any]:
+    """Drain the persisted queue in one long-lived sequential worker process."""
     if _user_items(service, status="running", limit=1):
         raise DownloadServiceError("A download worker is already running.", code="worker_busy")
-    queued = sorted(
-        _user_items(service, status="queued", limit=_MAX_USER_TASKS),
-        key=lambda item: str(item.get("createdAt") or ""),
-    )
-    results: list[dict[str, Any]] = []
-    for item in queued:
-        task_id = str(item.get("id") or "").strip()
-        if not task_id:
-            continue
-        task = _run_user_task(service, task_id)
-        results.append(service._task_payload(task))  # noqa: SLF001
+
+    initial_queued = _queued_user_task_count(service)
+    if initial_queued == 0:
+        _set_worker_stop(service, False)
+        return {
+            "processed": 0,
+            "items": [],
+            "resultItemsTruncated": False,
+            "historyPruned": _prune_user_completed_history(service),
+            "paused": False,
+            "pauseReason": None,
+            "pauseCode": None,
+            "remainingQueued": 0,
+            "systemicFailureStreak": 0,
+        }
+
+    # Do not clear the stop marker here: a UI stop request can race process startup.
+    # Stale markers are cleared by recovery and by every worker finally block.
+    _configure_user_download_provider(service)
+    processed = 0
+    recent_results: list[dict[str, Any]] = []
+    consecutive_systemic_failures = 0
+    paused = False
+    pause_reason: str | None = None
+    pause_code: str | None = None
+
+    try:
+        while True:
+            if _worker_stop_requested(service):
+                paused = True
+                pause_reason = "user_stop"
+                break
+            batch = _queued_user_task_ids(service)
+            if not batch:
+                break
+
+            for task_id in batch:
+                if _worker_stop_requested(service):
+                    paused = True
+                    pause_reason = "user_stop"
+                    break
+
+                task = _run_user_task(service, task_id)
+                processed += 1
+                payload = service._task_payload(task)  # noqa: SLF001
+                recent_results.append(payload)
+                if len(recent_results) > _WORKER_RESULT_LIMIT:
+                    del recent_results[: len(recent_results) - _WORKER_RESULT_LIMIT]
+
+                error_code = str(task.error_code or "")
+                if task.status in {DownloadStatus.FAILED, DownloadStatus.NEEDS_REVIEW}:
+                    if error_code == "authentication":
+                        paused = True
+                        pause_reason = "authentication"
+                        pause_code = error_code
+                        break
+                    if error_code in _SYSTEMIC_ERROR_CODES:
+                        consecutive_systemic_failures += 1
+                        if consecutive_systemic_failures >= _SYSTEMIC_FAILURE_LIMIT:
+                            paused = True
+                            pause_reason = "systemic_provider_failure"
+                            pause_code = error_code
+                            break
+                    else:
+                        # A permanent per-track failure proves that the worker reached
+                        # the provider and must not contribute to a systemic outage.
+                        consecutive_systemic_failures = 0
+                else:
+                    consecutive_systemic_failures = 0
+
+            if paused:
+                break
+    finally:
+        _set_worker_stop(service, False)
+
     pruned = _prune_user_completed_history(service)
-    return {"processed": len(results), "items": results, "historyPruned": pruned}
+    remaining = _queued_user_task_count(service)
+    return {
+        "processed": processed,
+        "items": recent_results,
+        "resultItemsTruncated": processed > len(recent_results),
+        "historyPruned": pruned,
+        "paused": paused,
+        "pauseReason": pause_reason,
+        "pauseCode": pause_code,
+        "remainingQueued": remaining,
+        "systemicFailureStreak": consecutive_systemic_failures,
+    }
+
+
+def _user_stop_worker(service: DownloadService) -> dict[str, Any]:
+    _set_worker_stop(service, True)
+    return {"stopRequested": True}
 
 
 def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
@@ -328,6 +490,7 @@ def _user_clear_completed(service: DownloadService) -> dict[str, Any]:
 
 
 def _user_recover(service: DownloadService) -> dict[str, Any]:
+    _set_worker_stop(service, False)
     recovered = 0
     for task in service._downloads.list_tasks(status="running", limit=_MAX_USER_TASKS):  # noqa: SLF001
         if task.task_type != _USER_TASK_TYPE:
@@ -356,6 +519,8 @@ def _dispatch(args: argparse.Namespace, service: DownloadService) -> dict[str, A
         return _user_run(service)
     if args.command == "run_task":
         return _user_run_one(service, _require_user_task_id(service, args.task_id))
+    if args.command == "stop_worker":
+        return _user_stop_worker(service)
     if args.command == "retry":
         return _retry_user_task(service, _require_user_task_id(service, args.task_id))
     if args.command == "cancel":

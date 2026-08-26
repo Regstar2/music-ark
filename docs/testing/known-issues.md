@@ -87,5 +87,16 @@
 - Actual before fix: PowerShell Archive module emitted a non-terminating error that bypassed the script's intended fail-fast behavior.
 - Cause: archive creation had no explicit verified postcondition and relied on `Compress-Archive` error semantics.
 - Fix: use `System.IO.Compression.ZipFile.CreateFromDirectory` with four bounded retry attempts/backoff; delete partial archives between attempts; require non-empty ZIP and `SHA256SUMS.txt` before success output.
-- Check: fresh Windows portable packaging pass — `NOT VERIFIED`.
+- Check: fresh Windows portable packaging pass — `VERIFIED 2026-08-26` on old pre-#51 HEAD `0b2c12d`; repeat on #51 candidate still required.
+- Status: `candidate fixed`.
+
+## #51 — 5k Yandex download worker / session churn
+
+- Version: v1.0 acceptance round 2.
+- Reproduction: ~5k Missing/Wanted -> Downloads -> `Скачать все`; observe mixed `provider_request`, apparent `authentication`, unavailable and UGC UUID failures.
+- Expected: one sequential worker/session handles the queue; transient provider/network failures retry with bounded backoff; a true auth/systemic outage pauses instead of marking the remaining thousands failed; permanent per-track failures do not stop unrelated tracks.
+- Actual before fix: Flutter called `runTask` once per row and every call used `Process.run`, rebuilding Python, `DownloadService` and `Client(token).init()` thousands of times. Broad exception mapping could mislabel provider/network initialization failures as authentication, and the UI continued after each persisted failed task.
+- Fix: `DownloadBridge.runTask` now uses one persistent JSON-lines `musicark.download.worker_bridge`; one `DownloadService` registers one `ResilientYandexMusicDownloadProvider` and reuses its initialized Yandex client. Transient network/timeout/429/5xx classes use bounded exponential backoff; auth is distinct; three consecutive systemic failures trip a circuit breaker. The pausing response terminates the worker so explicit Continue starts a fresh session. `track_unavailable`, `no_download_info` and `ugc_unsupported` remain per-track failures. >5000 persisted rows are drained in bounded batches and frozen runtime whitelists worker/batch bridges.
+- Tests: client reuse, retry/backoff, permanent rejection, UGC UUID classification, immediate auth circuit, three-failure systemic circuit, permanent-error reset, JSON protocol safety, 5247-row bounded queue continuation, Flutter bridge source contract and frozen-runtime entry points.
+- Check: automated suite and fresh Windows ~5k real-account acceptance on the new commit — `NOT VERIFIED`.
 - Status: `candidate fixed`.

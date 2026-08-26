@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,6 +23,12 @@ abstract interface class DownloadBridgeClient {
 }
 
 class DownloadBridge implements DownloadBridgeClient {
+  Process? _taskWorker;
+  StreamIterator<String>? _taskWorkerOutput;
+  StreamSubscription<String>? _taskWorkerStderrSubscription;
+  StringBuffer _taskWorkerStderr = StringBuffer();
+  Future<void>? _taskWorkerStarting;
+
   @override
   Future<Map<String, dynamic>> summary() => _run('summary');
 
@@ -44,8 +51,7 @@ class DownloadBridge implements DownloadBridgeClient {
   Future<Map<String, dynamic>> runQueue() => _run('run');
 
   @override
-  Future<Map<String, dynamic>> runTask(String taskId) =>
-      _run('run_task', taskId: taskId);
+  Future<Map<String, dynamic>> runTask(String taskId) => _runPersistentTask(taskId);
 
   @override
   Future<Map<String, dynamic>> runTasks(List<String> taskIds) =>
@@ -82,16 +88,151 @@ class DownloadBridge implements DownloadBridgeClient {
   @override
   Future<Map<String, dynamic>> recover() => _run('recover');
 
-  Future<Map<String, dynamic>> _run(
-    String command, {
-    String? externalId,
-    String? taskId,
-    String? status,
-    int? limit,
-    String? targetPath,
-  }) async {
+  Future<Map<String, dynamic>> _runPersistentTask(String taskId) async {
+    final cleanTaskId = taskId.trim();
+    if (cleanTaskId.isEmpty) {
+      throw const DownloadBridgeException('invalid_request', 'Download task id is required.');
+    }
+    await _ensureTaskWorker();
+    final process = _taskWorker;
+    final output = _taskWorkerOutput;
+    if (process == null || output == null) {
+      throw const DownloadBridgeException(
+        'worker_start_failed',
+        'Download worker process is not available.',
+      );
+    }
+
+    try {
+      process.stdin.writeln(jsonEncode({'taskId': cleanTaskId}));
+      await process.stdin.flush();
+      final hasLine = await output.moveNext();
+      if (!hasLine) {
+        final stderrText = _taskWorkerStderr.toString().trim();
+        await _shutdownTaskWorker();
+        throw DownloadBridgeException(
+          'worker_exited',
+          stderrText.isNotEmpty ? stderrText : 'Download worker exited before returning a task result.',
+        );
+      }
+
+      final text = output.current.trim();
+      Map<String, dynamic>? payload;
+      if (text.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(text);
+          if (decoded is Map) payload = Map<String, dynamic>.from(decoded);
+        } on FormatException {
+          payload = null;
+        }
+      }
+      if (payload == null) {
+        await _shutdownTaskWorker();
+        throw const DownloadBridgeException(
+          'worker_protocol_error',
+          'Download worker returned invalid JSON.',
+        );
+      }
+
+      final rawError = payload['error'];
+      if (rawError is Map) {
+        final error = Map<String, dynamic>.from(rawError);
+        final code = (error['code'] ?? 'unexpected_error').toString();
+        final message = (error['message'] ?? '').toString();
+        // A circuit-breaker/auth failure intentionally ends the worker so the
+        // next explicit Continue gets a fresh Python process and Yandex client.
+        await _shutdownTaskWorker();
+        throw DownloadBridgeException(code, message);
+      }
+      return payload;
+    } on DownloadBridgeException {
+      rethrow;
+    } on IOException catch (error) {
+      await _shutdownTaskWorker();
+      throw DownloadBridgeException('worker_io_error', error.toString());
+    }
+  }
+
+  Future<void> _ensureTaskWorker() async {
+    if (_taskWorker != null && _taskWorkerOutput != null) return;
+    final existing = _taskWorkerStarting;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    final start = _startTaskWorker();
+    _taskWorkerStarting = start;
+    try {
+      await start;
+    } finally {
+      if (identical(_taskWorkerStarting, start)) {
+        _taskWorkerStarting = null;
+      }
+    }
+  }
+
+  Future<void> _startTaskWorker() async {
     final repoRoot = _resolveRepoRoot();
     final python = await _resolvePythonCommand(repoRoot);
+    final environment = _environmentFor(repoRoot);
+    final args = <String>[
+      ...python.prefixArgs,
+      '-m',
+      'musicark.download.worker_bridge',
+      '--base-dir',
+      repoRoot,
+    ];
+    final process = await Process.start(
+      python.executable,
+      args,
+      runInShell: false,
+      workingDirectory: repoRoot,
+      environment: environment,
+    );
+    _taskWorker = process;
+    _taskWorkerOutput = StreamIterator<String>(
+      process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+    );
+    _taskWorkerStderr = StringBuffer();
+    _taskWorkerStderrSubscription = process.stderr.transform(utf8.decoder).listen((chunk) {
+      if (_taskWorkerStderr.length < 8192) {
+        final remaining = 8192 - _taskWorkerStderr.length;
+        _taskWorkerStderr.write(chunk.length <= remaining ? chunk : chunk.substring(0, remaining));
+      }
+    });
+    unawaited(process.exitCode.then((_) async {
+      if (identical(_taskWorker, process)) {
+        _taskWorker = null;
+        _taskWorkerOutput = null;
+        final subscription = _taskWorkerStderrSubscription;
+        _taskWorkerStderrSubscription = null;
+        await subscription?.cancel();
+      }
+    }));
+  }
+
+  Future<void> _shutdownTaskWorker() async {
+    final process = _taskWorker;
+    _taskWorker = null;
+    final output = _taskWorkerOutput;
+    _taskWorkerOutput = null;
+    final subscription = _taskWorkerStderrSubscription;
+    _taskWorkerStderrSubscription = null;
+    try {
+      await output?.cancel();
+    } catch (_) {
+      // Best-effort cleanup after a completed/failed worker request.
+    }
+    try {
+      await process?.stdin.close();
+    } catch (_) {
+      // The worker may already have exited after a circuit-breaker response.
+    }
+    process?.kill();
+    await subscription?.cancel();
+  }
+
+  Map<String, String> _environmentFor(String repoRoot, {String? targetPath}) {
     final separator = Platform.pathSeparator;
     final srcPath = '$repoRoot${separator}src';
     final existingPythonPath = Platform.environment['PYTHONPATH'];
@@ -109,6 +250,20 @@ class DownloadBridge implements DownloadBridgeClient {
     } else {
       environment.remove('MUSICARK_DOWNLOAD_TARGET');
     }
+    return environment;
+  }
+
+  Future<Map<String, dynamic>> _run(
+    String command, {
+    String? externalId,
+    String? taskId,
+    String? status,
+    int? limit,
+    String? targetPath,
+  }) async {
+    final repoRoot = _resolveRepoRoot();
+    final python = await _resolvePythonCommand(repoRoot);
+    final environment = _environmentFor(repoRoot, targetPath: targetPath);
 
     final args = <String>[
       ...python.prefixArgs,
@@ -139,17 +294,7 @@ class DownloadBridge implements DownloadBridgeClient {
     final repoRoot = _resolveRepoRoot();
     final python = await _resolvePythonCommand(repoRoot);
     final separator = Platform.pathSeparator;
-    final srcPath = '$repoRoot${separator}src';
-    final existingPythonPath = Platform.environment['PYTHONPATH'];
-    final environment = <String, String>{
-      ...Platform.environment,
-      'PYTHONPATH': existingPythonPath == null || existingPythonPath.isEmpty
-          ? srcPath
-          : '$srcPath${Platform.isWindows ? ';' : ':'}$existingPythonPath',
-      'PYTHONIOENCODING': 'utf-8',
-      'PYTHONUTF8': '1',
-    };
-    environment.remove('YANDEX_MUSIC_TOKEN');
+    final environment = _environmentFor(repoRoot);
 
     final cleanTaskIds = taskIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
     final cleanExternalIds =

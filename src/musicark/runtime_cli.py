@@ -17,7 +17,9 @@ from typing import TextIO
 from musicark import __version__
 from musicark import mvp_bridge, platform_bridge
 from musicark.content_labels import bridge as content_labels_bridge
+from musicark.download import actions_bridge as download_actions_bridge
 from musicark.download import bridge as download_bridge
+from musicark.download import worker_bridge as download_worker_bridge
 from musicark.external_metadata import bridge as external_metadata_bridge
 from musicark.matching import progress_bridge as matching_progress_bridge
 from musicark.metadata import bridge as metadata_bridge
@@ -32,7 +34,9 @@ _ENTRY_POINTS: dict[str, Callable[[], int]] = {
     "musicark.mvp_bridge": mvp_bridge.main,
     "musicark.platform_bridge": platform_bridge.main,
     "musicark.content_labels.bridge": content_labels_bridge.main,
+    "musicark.download.actions_bridge": download_actions_bridge.main,
     "musicark.download.bridge": download_bridge.main,
+    "musicark.download.worker_bridge": download_worker_bridge.main,
     "musicark.external_metadata.bridge": external_metadata_bridge.main,
     "musicark.matching.progress_bridge": matching_progress_bridge.main,
     "musicark.metadata.bridge": metadata_bridge.main,

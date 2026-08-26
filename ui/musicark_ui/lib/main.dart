@@ -12,6 +12,7 @@ import 'coverage_bridge.dart';
 import 'download_bridge.dart';
 import 'l10n/app_localizations.dart';
 import 'matching_bridge.dart';
+import 'matching_progress_bridge.dart';
 import 'metadata_bridge.dart';
 import 'musicark_bridge.dart';
 import 'sync_bridge.dart';
@@ -92,7 +93,7 @@ class _MusicArkDesktopAppState extends State<MusicArkDesktopApp> {
       widget.bridge ?? MusicArkBridge(),
       _accountSession,
     );
-    _matchingBridge = widget.matchingBridge ?? MatchingBridge();
+    _matchingBridge = widget.matchingBridge ?? ResponsiveMatchingBridge();
     _coverageBridge = widget.coverageBridge ?? CoverageBridge();
     _downloadBridge = widget.downloadBridge ?? DownloadBridge();
     _syncBridge = widget.syncBridge ?? SyncBridge();

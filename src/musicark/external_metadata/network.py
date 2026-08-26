@@ -1,39 +1,56 @@
-"""Resilient provider HTTP transport with direct/proxy/WARP routing."""
+"""External provider HTTP transport with explicit System/Direct/Custom routing."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 import json
 from pathlib import Path
-import threading
-import time
 from typing import Any, Callable
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import httpx
-import requests
 
 from .credentials import ExternalCredentialStore
 
 
 class NetworkMode(StrEnum):
-    AUTO = "auto"
+    SYSTEM = "system"
     DIRECT = "direct"
-    WARP = "warp"
     CUSTOM_PROXY = "custom_proxy"
+
+
+class ProxyScheme(StrEnum):
+    SOCKS5 = "socks5"
+    HTTP = "http"
+    HTTPS = "https"
+
+
+def _network_mode(value: Any) -> NetworkMode:
+    """Resolve current and legacy persisted mode values safely.
+
+    v0.12 exposed `auto` and application-managed `warp`. v1.0 removes both
+    release modes, so those saved values migrate to System. Custom never falls
+    back to Direct during migration or request execution.
+    """
+    raw = str(value or "").strip().casefold()
+    if raw in {"", "system", "auto", "warp"}:
+        return NetworkMode.SYSTEM
+    if raw == NetworkMode.DIRECT.value:
+        return NetworkMode.DIRECT
+    if raw == NetworkMode.CUSTOM_PROXY.value:
+        return NetworkMode.CUSTOM_PROXY
+    return NetworkMode.SYSTEM
 
 
 @dataclass(slots=True)
 class NetworkSettings:
-    mode: NetworkMode = NetworkMode.AUTO
+    mode: NetworkMode = NetworkMode.SYSTEM
     proxy_configured: bool = False
-    proxy_scheme: str = "socks5"
+    proxy_scheme: str = ProxyScheme.SOCKS5.value
     proxy_host: str = "127.0.0.1"
     proxy_port: int = 1080
     proxy_username: str = ""
-    warp_proxy_host: str = "127.0.0.1"
-    warp_proxy_port: int = 40000
 
     def public_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -44,7 +61,11 @@ class NetworkSettings:
 
 
 class NetworkSettingsStore:
-    def __init__(self, base_dir: Path | None = None, credentials: ExternalCredentialStore | None = None) -> None:
+    def __init__(
+        self,
+        base_dir: Path | None = None,
+        credentials: ExternalCredentialStore | None = None,
+    ) -> None:
         root = base_dir if base_dir is not None else Path.home()
         self.path = root / ".musicark" / "network_settings.json"
         self.credentials = credentials or ExternalCredentialStore()
@@ -56,26 +77,20 @@ class NetworkSettingsStore:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return NetworkSettings()
-        try:
-            mode = NetworkMode(str(raw.get("networkMode", "auto")))
-        except ValueError:
-            mode = NetworkMode.AUTO
         return NetworkSettings(
-            mode=mode,
+            mode=_network_mode(raw.get("networkMode", "system")),
             proxy_configured=bool(raw.get("proxyConfigured", False)),
-            proxy_scheme=str(raw.get("proxyScheme", "socks5")),
+            proxy_scheme=str(raw.get("proxyScheme", "socks5")).casefold(),
             proxy_host=str(raw.get("proxyHost", "127.0.0.1")),
             proxy_port=int(raw.get("proxyPort", 1080)),
             proxy_username=str(raw.get("proxyUsername", "")),
-            warp_proxy_host=str(raw.get("warpProxyHost", "127.0.0.1")),
-            warp_proxy_port=int(raw.get("warpProxyPort", 40000)),
         )
 
     def save(self, payload: dict[str, Any]) -> NetworkSettings:
         current = self.load()
-        mode = NetworkMode(str(payload.get("networkMode", current.mode.value)))
+        mode = _network_mode(payload.get("networkMode", current.mode.value))
         scheme = str(payload.get("proxyScheme", current.proxy_scheme)).casefold()
-        if scheme not in {"http", "https", "socks5"}:
+        if scheme not in {item.value for item in ProxyScheme}:
             raise ValueError("Proxy scheme must be http, https or socks5.")
         host = str(payload.get("proxyHost", current.proxy_host)).strip()
         port = int(payload.get("proxyPort", current.proxy_port))
@@ -83,16 +98,16 @@ class NetworkSettingsStore:
             raise ValueError("Proxy host/port is invalid.")
         username = str(payload.get("proxyUsername", current.proxy_username)).strip()
         if "proxyPassword" in payload:
-            self.credentials.set("proxy_password", str(payload.get("proxyPassword") or ""))
+            self.credentials.set(
+                "proxy_password",
+                str(payload.get("proxyPassword") or ""),
+            )
 
-        # The Flutter form always carries the visible default host/port fields.
-        # Merely saving Auto/Direct must therefore not turn 127.0.0.1:1080 into
-        # a configured fallback proxy. A proxy becomes configured only when the
-        # user explicitly selects Custom Proxy, an existing configuration is
-        # already present, or an explicit proxyConfigured value is supplied.
         explicit_proxy_flag = payload.get("proxyConfigured")
         if explicit_proxy_flag is None:
-            proxy_configured = current.proxy_configured or mode is NetworkMode.CUSTOM_PROXY
+            proxy_configured = (
+                current.proxy_configured or mode is NetworkMode.CUSTOM_PROXY
+            )
         else:
             proxy_configured = bool(explicit_proxy_flag)
 
@@ -103,24 +118,22 @@ class NetworkSettingsStore:
             proxy_host=host,
             proxy_port=port,
             proxy_username=username,
-            warp_proxy_host=str(payload.get("warpProxyHost", current.warp_proxy_host)).strip() or "127.0.0.1",
-            warp_proxy_port=int(payload.get("warpProxyPort", current.warp_proxy_port)),
         )
-        if not 1 <= settings.warp_proxy_port <= 65535:
-            raise ValueError("WARP proxy port is invalid.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
-            json.dumps({
-                "schemaVersion": 1,
-                "networkMode": settings.mode.value,
-                "proxyConfigured": settings.proxy_configured,
-                "proxyScheme": settings.proxy_scheme,
-                "proxyHost": settings.proxy_host,
-                "proxyPort": settings.proxy_port,
-                "proxyUsername": settings.proxy_username,
-                "warpProxyHost": settings.warp_proxy_host,
-                "warpProxyPort": settings.warp_proxy_port,
-            }, ensure_ascii=False, indent=2),
+            json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "networkMode": settings.mode.value,
+                    "proxyConfigured": settings.proxy_configured,
+                    "proxyScheme": settings.proxy_scheme,
+                    "proxyHost": settings.proxy_host,
+                    "proxyPort": settings.proxy_port,
+                    "proxyUsername": settings.proxy_username,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         return settings
@@ -128,29 +141,14 @@ class NetworkSettingsStore:
     def public(self) -> dict[str, Any]:
         settings = self.load()
         result = settings.public_dict()
-        result["proxyPasswordConfigured"] = self.credentials.get("proxy_password") is not None
+        result["proxyPasswordConfigured"] = (
+            self.credentials.get("proxy_password") is not None
+        )
         return result
 
 
-@dataclass(slots=True)
-class _RouteHealth:
-    route: str
-    expires_at: float
-
-
 class ExternalNetworkTransport:
-    """Use deterministic routes and fallback only for transport-level failures."""
-
-    # The WARP local proxy itself is healthy on the user's Windows machine, but
-    # HTTPX has intermittently received hostname-mismatched certificates from
-    # MetaBrainz hosts through it. requests/urllib3 uses an independent TLS stack
-    # and therefore provides a safe, strictly verified CONNECT path before the
-    # generic HTTPX/SOCKS fallbacks. No certificate verification is disabled.
-    _REQUESTS_CONNECT_HOSTS = {
-        "musicbrainz.org",
-        "mapper.listenbrainz.org",
-        "api.listenbrainz.org",
-    }
+    """Apply exactly one selected outbound route for each request."""
 
     def __init__(
         self,
@@ -159,17 +157,17 @@ class ExternalNetworkTransport:
         timeout_seconds: float = 6.0,
         route_ttl_seconds: float = 600.0,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
-        requests_session_factory: Callable[[], requests.Session] = requests.Session,
+        **_legacy_options: Any,
     ) -> None:
         self._settings_store = settings_store
         self._credentials = settings_store.credentials
-        self._timeout_seconds = timeout_seconds
-        self._timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 3.0))
-        self._ttl = route_ttl_seconds
+        self._timeout = httpx.Timeout(
+            timeout_seconds,
+            connect=min(timeout_seconds, 3.0),
+        )
         self._factory = client_factory
-        self._requests_session_factory = requests_session_factory
-        self._health: dict[str, _RouteHealth] = {}
-        self._lock = threading.Lock()
+        # Kept in the signature for source compatibility with older tests/callers.
+        _ = route_ttl_seconds
 
     def _custom_proxy_url(self, settings: NetworkSettings) -> str:
         user = quote(settings.proxy_username, safe="") if settings.proxy_username else ""
@@ -180,133 +178,51 @@ class ExternalNetworkTransport:
             if password:
                 auth += ":" + quote(password, safe="")
             auth += "@"
-        return f"{settings.proxy_scheme}://{auth}{settings.proxy_host}:{settings.proxy_port}"
+        return (
+            f"{settings.proxy_scheme}://{auth}"
+            f"{settings.proxy_host}:{settings.proxy_port}"
+        )
 
-    @classmethod
-    def _warp_routes(cls, settings: NetworkSettings, host: str) -> list[tuple[str, str]]:
-        """Return WARP Local Proxy transports in deterministic order.
-
-        MetaBrainz gets an additional requests/urllib3 HTTP CONNECT route first.
-        Other hosts keep the generic HTTPX CONNECT -> SOCKS5 path. All routes use
-        normal CA and hostname verification.
-        """
-        proxy_host = settings.warp_proxy_host
-        port = settings.warp_proxy_port
-        connect_url = f"http://{proxy_host}:{port}"
-        routes: list[tuple[str, str]] = []
-        if host.casefold() in cls._REQUESTS_CONNECT_HOSTS:
-            routes.append(("warp_requests_connect", connect_url))
-        routes.extend([
-            ("warp_http_connect", connect_url),
-            ("warp_socks5", f"socks5://{proxy_host}:{port}"),
-        ])
-        return routes
-
-    def _routes(self, host: str, *, force_direct: bool = False) -> list[tuple[str, str | None]]:
+    def _route(
+        self,
+        *,
+        force_direct: bool = False,
+    ) -> tuple[str, str | None, bool]:
         settings = self._settings_store.load()
-        if force_direct:
-            return [("direct", None)]
-        if settings.mode is NetworkMode.DIRECT:
-            return [("direct", None)]
+        if force_direct or settings.mode is NetworkMode.DIRECT:
+            return "direct", None, False
+        if settings.mode is NetworkMode.SYSTEM:
+            # HTTPX's trust_env path inherits the process/runtime proxy settings.
+            # Platform-specific proxy discovery beyond that is not claimed here.
+            return "system", None, True
         if settings.mode is NetworkMode.CUSTOM_PROXY:
             if not settings.proxy_configured:
-                raise RuntimeError("Custom proxy mode is selected but no proxy has been configured.")
-            return [("custom_proxy", self._custom_proxy_url(settings))]
-        if settings.mode is NetworkMode.WARP:
-            return list(self._warp_routes(settings, host))
-
-        routes: list[tuple[str, str | None]] = [("direct", None)]
-        if settings.proxy_configured:
-            routes.append(("custom_proxy", self._custom_proxy_url(settings)))
-        routes.extend(self._warp_routes(settings, host))
-        with self._lock:
-            healthy = self._health.get(host)
-            if healthy and healthy.expires_at > time.monotonic():
-                routes.sort(key=lambda item: item[0] != healthy.route)
-        return routes
-
-    @staticmethod
-    def _is_network_failure(exc: Exception) -> bool:
-        return isinstance(
-            exc,
-            (
-                httpx.ConnectError,
-                httpx.ConnectTimeout,
-                httpx.ReadError,
-                httpx.ReadTimeout,
-                httpx.WriteError,
-                httpx.WriteTimeout,
-                httpx.CloseError,
-                httpx.PoolTimeout,
-                httpx.ProxyError,
-                httpx.ProtocolError,
-                requests.exceptions.RequestException,
-            ),
-        )
-
-    def _request_via_requests(self, method: str, url: str, proxy: str, **kwargs: Any) -> httpx.Response:
-        """Use requests/urllib3 for one strict-TLS HTTP CONNECT attempt.
-
-        The rest of the application continues to receive an httpx.Response, so
-        provider adapters do not gain a second response contract.
-        """
-        session = self._requests_session_factory()
-        session.trust_env = False
-        request_kwargs: dict[str, Any] = {
-            "proxies": {"http": proxy, "https": proxy},
-            "timeout": (min(self._timeout_seconds, 3.0), self._timeout_seconds),
-            "allow_redirects": False,
-        }
-        for name in ("params", "headers", "json", "data", "files", "cookies", "auth"):
-            if name in kwargs:
-                request_kwargs[name] = kwargs[name]
-        if "content" in kwargs and "data" not in request_kwargs:
-            request_kwargs["data"] = kwargs["content"]
-        try:
-            result = session.request(method, url, **request_kwargs)
-        finally:
-            session.close()
-
-        response = httpx.Response(
-            int(result.status_code),
-            headers=dict(result.headers),
-            content=result.content,
-            request=httpx.Request(method, url),
-            extensions={"musicark_route": "warp_requests_connect"},
-        )
-        return response
-
-    def request(self, method: str, url: str, *, force_direct: bool = False, **kwargs: Any) -> httpx.Response:
-        host = urlsplit(url).hostname or ""
-        last: Exception | None = None
-        for route, proxy in self._routes(host, force_direct=force_direct):
-            try:
-                if route == "warp_requests_connect":
-                    assert proxy is not None
-                    response = self._request_via_requests(method, url, proxy, **kwargs)
-                else:
-                    with self._factory(
-                        proxy=proxy,
-                        timeout=self._timeout,
-                        trust_env=False,
-                        follow_redirects=False,
-                        http1=True,
-                        # Keep proxied metadata traffic on HTTP/1.1. Direct traffic
-                        # may still negotiate HTTP/2 where supported.
-                        http2=proxy is None,
-                    ) as client:
-                        response = client.request(method, url, **kwargs)
-                    response.extensions["musicark_route"] = route
-                with self._lock:
-                    self._health[host] = _RouteHealth(route, time.monotonic() + self._ttl)
-                return response
-            except Exception as exc:  # noqa: BLE001 - fallback classification is explicit below.
-                last = exc
-                if not self._is_network_failure(exc):
-                    raise
-        if last is not None:
-            raise last
+                raise RuntimeError(
+                    "Custom proxy mode is selected but no proxy has been configured."
+                )
+            return "custom_proxy", self._custom_proxy_url(settings), False
         raise RuntimeError("No network route is configured.")
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        force_direct: bool = False,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        route, proxy, trust_env = self._route(force_direct=force_direct)
+        with self._factory(
+            proxy=proxy,
+            timeout=self._timeout,
+            trust_env=trust_env,
+            follow_redirects=False,
+            http1=True,
+            http2=proxy is None,
+        ) as client:
+            response = client.request(method, url, **kwargs)
+        response.extensions["musicark_route"] = route
+        return response
 
     def get(self, url: str, **kwargs: Any) -> httpx.Response:
         return self.request("GET", url, **kwargs)

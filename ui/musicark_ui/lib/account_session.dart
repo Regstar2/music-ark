@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import 'musicark_bridge.dart';
@@ -64,6 +66,7 @@ class SessionAwareMusicArkBridge implements MusicArkBridgeClient {
 
   final MusicArkBridgeClient _delegate;
   final AccountSessionController _session;
+  final Map<String, Map<String, dynamic>> _preparedPlayback = {};
 
   Future<Map<String, dynamic>> _accountResult(
     Future<Map<String, dynamic>> Function() operation,
@@ -101,10 +104,46 @@ class SessionAwareMusicArkBridge implements MusicArkBridgeClient {
   Future<Map<String, dynamic>> libraryRefresh() =>
       _accountResult(_delegate.libraryRefresh);
   @override
-  Future<Map<String, dynamic>> logout() => _accountResult(_delegate.logout);
+  Future<Map<String, dynamic>> logout() async {
+    final payload = await _accountResult(_delegate.logout);
+    _preparedPlayback.clear();
+    return payload;
+  }
   @override
-  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) =>
-      _delegate.yandexPlaybackPrepare(externalId);
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) async {
+    final identity = externalId.trim();
+    final cached = _preparedPlayback[identity];
+    if (cached != null) {
+      final path = '${cached['path'] ?? ''}'.trim();
+      if (path.isNotEmpty && await File(path).exists()) {
+        final result = Map<String, dynamic>.from(cached);
+        result['cached'] = true;
+        result['preparationState'] = 'memory_cache_hit';
+        final timings = result['timingsMs'] is Map
+            ? Map<String, dynamic>.from(result['timingsMs'] as Map)
+            : <String, dynamic>{};
+        timings['bridgeRoundTrip'] = 0.0;
+        result['timingsMs'] = timings;
+        return result;
+      }
+      _preparedPlayback.remove(identity);
+    }
+
+    final stopwatch = Stopwatch()..start();
+    final payload = Map<String, dynamic>.from(
+      await _delegate.yandexPlaybackPrepare(identity),
+    );
+    stopwatch.stop();
+    final timings = payload['timingsMs'] is Map
+        ? Map<String, dynamic>.from(payload['timingsMs'] as Map)
+        : <String, dynamic>{};
+    timings['bridgeRoundTrip'] = stopwatch.elapsedMicroseconds / 1000.0;
+    payload['timingsMs'] = timings;
+    if ('${payload['path'] ?? ''}'.trim().isNotEmpty) {
+      _preparedPlayback[identity] = Map<String, dynamic>.from(payload);
+    }
+    return payload;
+  }
   @override
   Future<Map<String, dynamic>> localRoots() => _delegate.localRoots();
   @override

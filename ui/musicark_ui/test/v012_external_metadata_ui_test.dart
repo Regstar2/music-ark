@@ -10,8 +10,10 @@ import 'package:musicark_ui/settings_page.dart';
 
 class _MemorySettingsStorage implements AppSettingsStorage {
   Map<String, dynamic> value = {};
+
   @override
   Future<Map<String, dynamic>> read() async => value;
+
   @override
   Future<void> write(Map<String, dynamic> value) async =>
       this.value = Map.of(value);
@@ -19,19 +21,19 @@ class _MemorySettingsStorage implements AppSettingsStorage {
 
 void main() {
   Widget localized(Widget child) => MaterialApp(
-    locale: const Locale('ru'),
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
-    supportedLocales: AppLocalizations.supportedLocales,
-    home: child,
-  );
+        locale: const Locale('ru'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: child,
+      );
 
-  testWidgets('Settings exposes network modes and WARP install state', (
+  testWidgets('Settings exposes only System Direct and Custom proxy modes', (
     tester,
   ) async {
     final settings = AppSettingsController(storage: _MemorySettingsStorage());
     await settings.load();
     final session = AccountSessionController()..finishInitialization();
-    final external = FakeExternalMetadataBridge(warpState: 'not_installed');
+    final external = FakeExternalMetadataBridge(networkMode: 'system');
 
     await tester.pumpWidget(
       localized(
@@ -49,20 +51,22 @@ void main() {
 
     expect(find.byKey(const Key('network-settings-card')), findsOneWidget);
     expect(find.byKey(const Key('network-mode-selector')), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('warp-install')));
-    expect(find.byKey(const Key('warp-install')), findsOneWidget);
+    expect(find.text('Системный'), findsOneWidget);
+    expect(find.text('Прямое'), findsOneWidget);
+    expect(find.text('Прокси'), findsOneWidget);
+    expect(find.text('Cloudflare WARP'), findsNothing);
+    expect(find.byKey(const Key('warp-install')), findsNothing);
+    expect(find.byKey(const Key('warp-status-label')), findsNothing);
+    expect(find.byKey(const Key('external-sources-card')), findsNothing);
   });
 
-  testWidgets('Selected network mode is saved before connectivity test', (
+  testWidgets('Custom proxy is saved before connectivity test', (
     tester,
   ) async {
     final settings = AppSettingsController(storage: _MemorySettingsStorage());
     await settings.load();
     final session = AccountSessionController()..finishInitialization();
-    final external = FakeExternalMetadataBridge(
-      networkMode: 'direct',
-      warpState: 'proxy_ready',
-    );
+    final external = FakeExternalMetadataBridge(networkMode: 'direct');
 
     await tester.pumpWidget(
       localized(
@@ -78,15 +82,47 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('Cloudflare WARP'));
-    await tester.tap(find.text('Cloudflare WARP'));
+    await tester.tap(find.text('Прокси'));
     await tester.pumpAndSettle();
-    expect(external.networkMode, 'warp');
+    expect(external.networkMode, 'custom_proxy');
 
-    await tester.ensureVisible(find.byKey(const Key('network-test')));
+    await tester.enterText(
+      find.byKey(const Key('proxy-host')),
+      '127.0.0.1',
+    );
+    await tester.enterText(find.byKey(const Key('proxy-port')), '1080');
     await tester.tap(find.byKey(const Key('network-test')));
     await tester.pumpAndSettle();
-    expect(external.networkMode, 'warp');
+    expect(external.networkMode, 'custom_proxy');
+  });
+
+  testWidgets('legacy WARP value is presented as System without WARP controls', (
+    tester,
+  ) async {
+    final settings = AppSettingsController(storage: _MemorySettingsStorage());
+    await settings.load();
+    final session = AccountSessionController()..finishInitialization();
+    final external = FakeExternalMetadataBridge(networkMode: 'warp');
+
+    await tester.pumpWidget(
+      localized(
+        SettingsPage(
+          settings: settings,
+          session: session,
+          onOpenYandex: () {},
+          onOpenHelp: () {},
+          onOpenAbout: () {},
+          externalBridge: external,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final selector = tester.widget<SegmentedButton<String>>(
+      find.byKey(const Key('network-mode-selector')),
+    );
+    expect(selector.selected, {'system'});
+    expect(find.text('Cloudflare WARP'), findsNothing);
   });
 
   testWidgets('Metadata Editor shows normalized external candidates', (

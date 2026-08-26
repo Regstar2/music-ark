@@ -34,7 +34,8 @@ class CoveragePage extends StatefulWidget {
 
 class _CoveragePageState extends State<CoveragePage> {
   static const _pageSize = 100;
-  static const _bulkPageSize = 500;
+  static const _bulkPageSize = 2000;
+  static const _bulkActionChunkSize = 1000;
 
   final _searchController = TextEditingController();
   Timer? _searchTimer;
@@ -54,10 +55,18 @@ class _CoveragePageState extends State<CoveragePage> {
   bool _loading = true;
   bool _matching = false;
   bool _analysisExpanded = false;
+  bool _bulkSelectBusy = false;
+  bool _bulkActionBusy = false;
+  int _bulkProcessed = 0;
+  int _bulkTotal = 0;
   String? _error;
   int _requestGeneration = 0;
 
   int get _pageLimit => _pageSize;
+  bool get _bulkBusy => _bulkSelectBusy || _bulkActionBusy;
+  double? get _bulkProgressValue => _bulkTotal <= 0
+      ? null
+      : (_bulkProcessed / _bulkTotal).clamp(0.0, 1.0).toDouble();
 
   void _updateView(VoidCallback update) {
     if (!mounted) return;
@@ -190,7 +199,7 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   void _setStatus(String status) {
-    if (_status == status) return;
+    if (_status == status || _bulkBusy) return;
     setState(() {
       _status = status;
       _offset = 0;
@@ -202,6 +211,7 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   void _setCollection(String? value) {
+    if (_bulkBusy) return;
     final next = value ?? '';
     setState(() {
       _collectionId = next;
@@ -213,6 +223,7 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   void _queueSearch(String _) {
+    if (_bulkBusy) return;
     _searchTimer?.cancel();
     _searchTimer = Timer(const Duration(milliseconds: 250), () {
       if (!mounted) return;
@@ -225,6 +236,7 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   Future<void> _setAction(String externalId, String action) async {
+    if (_bulkBusy) return;
     try {
       await widget.bridge.coverageSetAction(externalId, action);
       await _reloadTracks(clearSelection: true);
@@ -234,20 +246,53 @@ class _CoveragePageState extends State<CoveragePage> {
   }
 
   Future<void> _setBulkAction(String action) async {
-    if (_selected.isEmpty) return;
+    if (_selected.isEmpty || _bulkBusy) return;
     final ids = _selected.toList(growable: false);
+    setState(() {
+      _bulkActionBusy = true;
+      _bulkProcessed = 0;
+      _bulkTotal = ids.length;
+      _error = null;
+    });
     try {
-      await widget.bridge.coverageSetActions(ids, action);
+      for (var start = 0; start < ids.length; start += _bulkActionChunkSize) {
+        final proposedEnd = start + _bulkActionChunkSize;
+        final end = proposedEnd < ids.length ? proposedEnd : ids.length;
+        final chunk = ids.sublist(start, end);
+        await widget.bridge.coverageSetActions(chunk, action);
+        if (!mounted) return;
+        final changed = chunk.toSet();
+        setState(() {
+          _bulkProcessed = end;
+          _items = _items.map((item) {
+            if (!changed.contains('${item['externalId']}')) return item;
+            final copy = Map<String, dynamic>.from(item);
+            copy['userAction'] = action;
+            return copy;
+          }).toList(growable: false);
+        });
+        await Future<void>.delayed(Duration.zero);
+      }
       await _reloadTracks(clearSelection: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _bulkActionBusy = false;
+          _bulkProcessed = 0;
+          _bulkTotal = 0;
+        });
+      }
     }
   }
 
   Future<void> _selectAllFiltered() async {
-    if (_status != 'missing' || _loading || _total <= 0) return;
+    if (_status != 'missing' || _loading || _bulkBusy || _total <= 0) return;
     setState(() {
-      _loading = true;
+      _bulkSelectBusy = true;
+      _bulkProcessed = 0;
+      _bulkTotal = _total;
       _error = null;
     });
     try {
@@ -273,6 +318,12 @@ class _CoveragePageState extends State<CoveragePage> {
           }
         }
         offset += items.length;
+        if (!mounted) return;
+        setState(() {
+          _bulkTotal = total;
+          _bulkProcessed = offset > total ? total : offset;
+        });
+        await Future<void>.delayed(Duration.zero);
         if (items.isEmpty || offset >= total) break;
       }
       if (!mounted) return;
@@ -280,18 +331,22 @@ class _CoveragePageState extends State<CoveragePage> {
         _selected
           ..clear()
           ..addAll(ids);
-        _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _bulkSelectBusy = false;
+          _bulkProcessed = 0;
+          _bulkTotal = 0;
+        });
+      }
     }
   }
 
   void _clearSelection() {
+    if (_bulkBusy) return;
     _updateView(_selected.clear);
   }
 

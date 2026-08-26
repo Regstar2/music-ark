@@ -61,6 +61,33 @@ The baseline worker is sequential (`max concurrency = 1`). This is a deliberate 
 
 The SQLite table also contains historical/reference-acquisition tasks. `musicark.download.bridge` explicitly scopes the Downloads page, worker, recovery, retry/cancel and clear-history actions to v0.7 `provider_download` user tasks. Internal Variant reference-cache history is neither displayed nor executed/deleted by the user Downloads surface.
 
+## v1.0 large-queue worker hardening
+
+Windows acceptance with a ~5k queue exposed that the original Flutter loop started a fresh Python process for every `runTask` call. That also rebuilt `DownloadService` and initialized a new Yandex client for every track. A transient provider/session problem could therefore become thousands of process/client initializations and thousands of failed rows.
+
+The v1.0 acceptance path keeps the persisted SQLite queue and the existing sequential UI loop, but `DownloadBridge.runTask()` now talks to one long-lived JSON-lines process:
+
+```text
+Flutter DownloadPage
+  ↓ runTask(taskId) repeatedly
+DownloadBridge
+  ↓ one persistent Process.start(...)
+musicark.download.worker_bridge
+  ↓ one DownloadService
+ResilientYandexMusicDownloadProvider
+  ↓ one cached yandex_music.Client session
+```
+
+The worker process lives across sequential task requests. Closing the desktop application closes its stdin and terminates the worker; leaving Downloads stops the UI queue loop after the current request, so untouched rows remain `queued`. A later Continue can resume them.
+
+`ResilientYandexMusicDownloadProvider` classifies authentication separately from provider/network failures and retries only transient transport/provider classes with bounded exponential backoff. HTTP 429 and transient 5xx responses receive distinct stable codes. Signed media URLs, OAuth tokens and response bodies never cross the bridge or enter persisted technical details.
+
+The worker circuit breaker pauses execution immediately after an `authentication` failure and after three consecutive systemic provider/network failures. The pausing response terminates the worker process so the next explicit Continue starts a fresh service/client session. Permanent per-track failures such as `track_unavailable`, `no_download_info` and `ugc_unsupported` fail only that row and reset the systemic streak.
+
+User-uploaded Yandex UUID identities are recognized explicitly. The current supported restore path does not claim that those UGC tracks are downloadable; they fail with `ugc_unsupported` rather than the misleading `invalid_track_id` code.
+
+Bulk selected/retry actions remain one bounded Python process per explicit batch. The frozen runtime whitelists both `musicark.download.actions_bridge` and `musicark.download.worker_bridge`, so the same behavior is available from the portable/installed build rather than only from a developer checkout.
+
 ## Credentials and provider URLs
 
 `DownloadService` obtains the Yandex token from `SystemCredentialStore` and passes it directly into `YandexMusicDownloadProvider`. The provider may retain legacy token fallback only for older tooling/reference workflows.
@@ -148,6 +175,6 @@ Playback never delegates to the OS default media application. `MusicArkAudioPlay
 
 ## Bridge/UI boundary
 
-Flutter receives only JSON task metadata and periodically polls while a download worker is active. Binary download chunks never cross the Flutter↔Python boundary. The dedicated bridge exposes summary/list/direct-enqueue/bulk-enqueue/run/retry/cancel/history/settings/target/recovery operations using `Process.run(..., runInShell: false)` from Flutter.
+Flutter receives only JSON task metadata and polls while a download worker is active. Binary download chunks never cross the Flutter↔Python boundary. Ordinary bridge actions continue to use `Process.run(..., runInShell: false)`; sequential `runTask` execution uses the persistent `musicark.download.worker_bridge` child process described above.
 
 The Downloads page polls at 800 ms while queue execution is active and otherwise refreshes on demand. The queue/history page remains available for progress, cancellation, retry and diagnostics, but ordinary single-track download does not require visiting it.

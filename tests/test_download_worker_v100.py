@@ -8,13 +8,16 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+from yandex_music.exceptions import UnauthorizedError
 
 from musicark.download.bridge import _queued_user_task_ids
 from musicark.download.models import DownloadTask
 from musicark.download.provider import DownloadProviderError
 from musicark.download.resilient_yandex import ResilientYandexMusicDownloadProvider
 from musicark.download.worker_bridge import WorkerCircuit, _safe_request
+from musicark.providers.yandex_music_provider import YandexAuthenticationError
 from musicark.runtime_cli import _ENTRY_POINTS
 from musicark.storage.database import initialize_database
 
@@ -46,6 +49,54 @@ class ResilientYandexWorkerTests(unittest.TestCase):
         self.assertIs(second, sentinel)
         client_type.assert_called_once_with("fake-token")
         client_type.return_value.init.assert_called_once_with()
+
+    def test_unauthorized_during_client_init_remains_authentication(self) -> None:
+        provider = ResilientYandexMusicDownloadProvider(token="fake-token")
+        with patch("yandex_music.Client") as client_type:
+            client_type.return_value.init.side_effect = UnauthorizedError("init denied")
+            with self.assertRaises(YandexAuthenticationError):
+                provider._build_client()  # noqa: SLF001
+        self.assertIsNone(provider._client)  # noqa: SLF001
+
+    def test_unauthorized_during_normal_track_lookup_remains_authentication(self) -> None:
+        provider = ResilientYandexMusicDownloadProvider(token="fake-token")
+        client = Mock()
+        client.tracks.side_effect = UnauthorizedError("track lookup denied")
+        provider._client = client  # noqa: SLF001
+
+        with self.assertRaises(YandexAuthenticationError):
+            provider._resolve_track_and_link_once("69420846", "best")  # noqa: SLF001
+        self.assertIsNone(provider._client)  # noqa: SLF001
+
+    def test_download_info_unauthorized_is_per_track_provider_rejection(self) -> None:
+        provider = ResilientYandexMusicDownloadProvider(token="fake-token")
+        client = Mock()
+        track = Mock()
+        client.tracks.return_value = [track]
+        track.get_download_info.side_effect = UnauthorizedError("download info denied")
+        provider._client = client  # noqa: SLF001
+
+        with self.assertRaises(DownloadProviderError) as caught:
+            provider._resolve_track_and_link_once("69420846", "best")  # noqa: SLF001
+
+        self.assertEqual(caught.exception.code, "provider_rejected")
+        self.assertIs(provider._client, client)  # noqa: SLF001
+
+    def test_direct_link_unauthorized_is_per_track_provider_rejection(self) -> None:
+        provider = ResilientYandexMusicDownloadProvider(token="fake-token")
+        client = Mock()
+        track = Mock()
+        info = Mock()
+        client.tracks.return_value = [track]
+        track.get_download_info.return_value = [info]
+        info.get_direct_link.side_effect = UnauthorizedError("direct link denied")
+        provider._client = client  # noqa: SLF001
+        with patch.object(provider, "_select_download_info", return_value=info):
+            with self.assertRaises(DownloadProviderError) as caught:
+                provider._resolve_track_and_link_once("69420846", "best")  # noqa: SLF001
+
+        self.assertEqual(caught.exception.code, "provider_rejected")
+        self.assertIs(provider._client, client)  # noqa: SLF001
 
     def test_transient_failure_retries_with_bounded_exponential_backoff(self) -> None:
         sleeps: list[float] = []
@@ -111,6 +162,8 @@ class ResilientYandexWorkerTests(unittest.TestCase):
         circuit = WorkerCircuit(failure_limit=3)
         self.assertIsNone(circuit.observe({"status": "failed", "errorCode": "provider_network"}))
         self.assertEqual(circuit.systemic_failure_streak, 1)
+        self.assertIsNone(circuit.observe({"status": "failed", "errorCode": "provider_rejected"}))
+        self.assertEqual(circuit.systemic_failure_streak, 0)
         self.assertIsNone(circuit.observe({"status": "failed", "errorCode": "track_unavailable"}))
         self.assertEqual(circuit.systemic_failure_streak, 0)
         self.assertIsNone(circuit.observe({"status": "failed", "errorCode": "ugc_unsupported"}))

@@ -92,7 +92,21 @@ class ResilientYandexMusicDownloadProvider(YandexMusicDownloadProvider):
         except ValueError:
             return None
 
-    def _classified_yandex_error(self, exc: BaseException) -> Exception:
+    def _classified_yandex_error(
+        self,
+        exc: BaseException,
+        *,
+        unauthorized_is_authentication: bool,
+    ) -> Exception:
+        """Normalize yandex-music errors without conflating auth and track authorization.
+
+        ``UnauthorizedError`` is used by yandex-music for both authentication and
+        authorization failures. It is safe to treat it as a global credential failure
+        while initializing the client or fetching the normal track object. Once those
+        authenticated operations succeeded, an Unauthorized response from the
+        download-info/direct-link path is track/download authorization and must not
+        invalidate the saved OAuth token or stop the whole queue.
+        """
         try:
             from yandex_music.exceptions import (  # type: ignore
                 BadRequestError,
@@ -109,8 +123,13 @@ class ResilientYandexMusicDownloadProvider(YandexMusicDownloadProvider):
             )
 
         if isinstance(exc, UnauthorizedError):
-            self._client = None
-            return YandexAuthenticationError("Yandex Music authentication failed.")
+            if unauthorized_is_authentication:
+                self._client = None
+                return YandexAuthenticationError("Yandex Music authentication failed.")
+            return DownloadProviderError(
+                "Yandex Music rejected this track download request.",
+                code="provider_rejected",
+            )
         if isinstance(exc, NotFoundError):
             return DownloadProviderError(
                 "Yandex Music track is unavailable.",
@@ -165,7 +184,10 @@ class ResilientYandexMusicDownloadProvider(YandexMusicDownloadProvider):
         try:
             client = Client(token).init()
         except Exception as exc:  # noqa: BLE001 - normalize provider errors without raw bodies.
-            classified = self._classified_yandex_error(exc)
+            classified = self._classified_yandex_error(
+                exc,
+                unauthorized_is_authentication=True,
+            )
             raise classified from exc
         self._client = client
         return client
@@ -186,37 +208,55 @@ class ResilientYandexMusicDownloadProvider(YandexMusicDownloadProvider):
         client = self._build_client()
         try:
             tracks = client.tracks([track_id]) or []
-            if not tracks:
-                raise DownloadProviderError(
-                    f"Track '{track_id}' is unavailable.",
-                    code="track_unavailable",
-                )
-            track = tracks[0]
-            infos = track.get_download_info() or []
-            if not infos:
-                raise DownloadProviderError(
-                    f"Track '{track_id}' has no download info.",
-                    code="no_download_info",
-                )
-            selected = self._select_download_info(list(infos), quality)
-            get_direct_link = getattr(selected, "get_direct_link", None)
-            if not callable(get_direct_link):
-                raise DownloadProviderError(
-                    f"Track '{track_id}' download info cannot resolve a direct link.",
-                    code="no_download_info",
-                )
-            link = get_direct_link()
-            if not link:
-                raise DownloadProviderError(
-                    f"Track '{track_id}' has no direct link.",
-                    code="no_download_info",
-                )
-            return track, str(link)
-        except (DownloadProviderError, YandexAuthenticationError, YandexTokenMissingError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - normalize provider exceptions.
-            classified = self._classified_yandex_error(exc)
+        except Exception as exc:  # noqa: BLE001 - a normal track lookup is an auth/session check.
+            classified = self._classified_yandex_error(
+                exc,
+                unauthorized_is_authentication=True,
+            )
             raise classified from exc
+
+        if not tracks:
+            raise DownloadProviderError(
+                f"Track '{track_id}' is unavailable.",
+                code="track_unavailable",
+            )
+        track = tracks[0]
+
+        try:
+            infos = track.get_download_info() or []
+        except Exception as exc:  # noqa: BLE001 - normalize track-specific download authorization.
+            classified = self._classified_yandex_error(
+                exc,
+                unauthorized_is_authentication=False,
+            )
+            raise classified from exc
+        if not infos:
+            raise DownloadProviderError(
+                f"Track '{track_id}' has no download info.",
+                code="no_download_info",
+            )
+
+        selected = self._select_download_info(list(infos), quality)
+        get_direct_link = getattr(selected, "get_direct_link", None)
+        if not callable(get_direct_link):
+            raise DownloadProviderError(
+                f"Track '{track_id}' download info cannot resolve a direct link.",
+                code="no_download_info",
+            )
+        try:
+            link = get_direct_link()
+        except Exception as exc:  # noqa: BLE001 - normalize track-specific link authorization.
+            classified = self._classified_yandex_error(
+                exc,
+                unauthorized_is_authentication=False,
+            )
+            raise classified from exc
+        if not link:
+            raise DownloadProviderError(
+                f"Track '{track_id}' has no direct link.",
+                code="no_download_info",
+            )
+        return track, str(link)
 
     def _resolve_track_and_link(self, track_id: str, quality: str = "best") -> tuple[Any, str]:
         return self._retry(lambda: self._resolve_track_and_link_once(track_id, quality))

@@ -187,6 +187,8 @@ void main() {
       expect(restore, findsOneWidget);
       expect(find.textContaining('НЕДОСТУПНЫЕ'), findsNothing);
 
+      await tester.ensureVisible(restore);
+      await tester.pumpAndSettle();
       await tester.tap(restore);
       await tester.pumpAndSettle();
       expect(
@@ -253,9 +255,12 @@ void main() {
       await pumpPage(tester, bridge, managed: managed);
       await tester.tap(find.textContaining('Восстановление ('));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const Key('sync-recovery-restore-unavailable-1')),
+      final restore = find.byKey(
+        const Key('sync-recovery-restore-unavailable-1'),
       );
+      await tester.ensureVisible(restore);
+      await tester.pumpAndSettle();
+      await tester.tap(restore);
       await tester.pumpAndSettle();
 
       await tester.tap(

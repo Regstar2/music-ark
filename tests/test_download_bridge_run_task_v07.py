@@ -61,10 +61,13 @@ class DownloadBridgeRunOneTests(unittest.TestCase):
     def test_run_one_executes_only_selected_task(self) -> None:
         service = _Service()
 
-        # History pruning has its own SQLite-backed coverage. This unit test only
-        # verifies that the bridge executes the selected task and does not drain
-        # unrelated queued work, so keep storage outside this fake-service fixture.
-        with patch.object(bridge, "_prune_user_completed_history", return_value=0):
+        # Provider/session configuration and history pruning have dedicated
+        # coverage. This unit test verifies only that run-one executes the
+        # selected task and never drains unrelated queued work.
+        with (
+            patch.object(bridge, "_configure_user_download_provider", return_value=None),
+            patch.object(bridge, "_prune_user_completed_history", return_value=0),
+        ):
             result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]
 
         self.assertEqual(service.run_calls, ["selected"])

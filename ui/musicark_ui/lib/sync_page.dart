@@ -586,7 +586,8 @@ class _SyncPageState extends State<SyncPage> {
       (context.l10n.v0111CensoredTracks, _int(summary['censoredTracks'])),
       (
         context.l10n.v0111Recoverable,
-        _int(summary['censoredRecoverable']),
+        _int(summary['unavailableRecoverable']) +
+            _int(summary['censoredRecoverable']),
       ),
       (context.l10n.v0111ReadyToUpload, _int(summary['readyToUpload'])),
     ];

@@ -1,0 +1,43 @@
+name: Issue 54 source patch
+
+on:
+  push:
+    branches:
+      - fix/v1.0-remove-unavailable-managed-role
+    paths:
+      - tools/issue54_patch.py
+      - .github/workflows/issue54-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'Regstar2'
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v1.0-remove-unavailable-managed-role
+      - name: Resolve Python and patch source
+        shell: pwsh
+        run: |
+          $version = (& .\scripts\resolve-python.ps1).Trim()
+          & py "-$version" .\tools\issue54_patch.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+      - name: Commit patched Flutter source
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain -- ui/musicark_ui/lib/sync_page.dart)) {
+            throw "Expected sync_page.dart changes were not produced."
+          }
+          git config user.name "Regstar2"
+          git config user.email "carkov195@gmail.com"
+          git add ui/musicark_ui/lib/sync_page.dart
+          git commit -m "fix(ui): make unavailable recovery diagnostic-only"
+          git push origin HEAD:fix/v1.0-remove-unavailable-managed-role

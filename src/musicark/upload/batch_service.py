@@ -99,6 +99,32 @@ class YandexBatchUploadService(_V0111YandexBatchUploadService):
             "items": items,
         }
 
+    def _infer_recovery_source(self, *, local_file_id: int, playlist_kind: str) -> str:
+        """Resolve the legacy Recovery row action without trusting stale UI state.
+
+        The current v0.11.1 UI marks a direct row restore with a ``recovery-*``
+        batch id but did not originally pass the provider external id. Resolve it
+        from the fresh recovery snapshot and fail closed if the local file maps to
+        zero or multiple recoverable provider tracks for the selected managed role.
+        """
+        managed = self._repository.managed_playlists()
+        target_kind = str(playlist_kind).strip()
+        candidates: list[str] = []
+        for item in self._recovery.tracks(include_healthy=False, persist_history=False):
+            role = _RECOVERY_STATES.get(item.state)
+            if role is None or item.local_file_id != int(local_file_id):
+                continue
+            configured = managed.get(role)
+            if str((configured or {}).get("playlistKind") or "").strip() != target_kind:
+                continue
+            candidates.append(item.external_id)
+        candidates = list(dict.fromkeys(candidates))
+        if len(candidates) != 1:
+            raise YandexBatchUploadError(
+                "Recovery source is missing or ambiguous. Refresh Recovery before restoring this track."
+            )
+        return candidates[0]
+
     def _revalidate_recovery(
         self,
         *,
@@ -215,22 +241,30 @@ class YandexBatchUploadService(_V0111YandexBatchUploadService):
 
     def execute(self, **kwargs: Any) -> dict[str, Any]:
         recovery_source = kwargs.pop("recovery_source_external_id", None)
-        recovery_context: tuple[str, str, int, str] | None = None
-        if recovery_source is not None:
-            raw_ids = kwargs.get("local_file_ids")
-            ids = list(
-                dict.fromkeys(
-                    int(value)
-                    for value in (raw_ids if isinstance(raw_ids, list) else [])
-                    if int(value) > 0
-                )
+        raw_ids = kwargs.get("local_file_ids")
+        ids = list(
+            dict.fromkeys(
+                int(value)
+                for value in (raw_ids if isinstance(raw_ids, list) else [])
+                if int(value) > 0
             )
+        )
+        batch_id_hint = str(kwargs.get("batch_id") or "").strip()
+        recovery_requested = recovery_source is not None or batch_id_hint.startswith("recovery-")
+        recovery_context: tuple[str, str, int, str] | None = None
+
+        if recovery_requested:
             if len(ids) != 1:
                 raise YandexBatchUploadError(
                     "Recovery restore accepts exactly one local track at a time."
                 )
             local_file_id = ids[0]
             playlist_kind = str(kwargs.get("playlist_kind") or "").strip()
+            if recovery_source is None:
+                recovery_source = self._infer_recovery_source(
+                    local_file_id=local_file_id,
+                    playlist_kind=playlist_kind,
+                )
             role, identity = self._revalidate_recovery(
                 source_external_id=str(recovery_source),
                 local_file_id=local_file_id,

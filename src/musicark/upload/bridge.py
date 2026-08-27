@@ -84,6 +84,7 @@ def _read_batch_payload() -> dict[str, Any]:
         "rights_confirmed",
         "batch_id",
         "allow_stale_reupload",
+        "recovery_source_external_id",
     }
     _exact(decoded, keys, "Batch upload")
     raw_ids = decoded.get("local_file_ids")
@@ -95,6 +96,13 @@ def _read_batch_payload() -> dict[str, Any]:
     batch_id = decoded.get("batch_id")
     if batch_id is not None:
         batch_id = _string(batch_id, "batch_id", max_length=128)
+    recovery_source_external_id = decoded.get("recovery_source_external_id")
+    if recovery_source_external_id is not None:
+        recovery_source_external_id = _string(
+            recovery_source_external_id,
+            "recovery_source_external_id",
+            max_length=256,
+        )
     return {
         "local_file_ids": ids,
         "playlist_kind": _string(decoded.get("playlist_kind"), "playlist_kind"),
@@ -104,6 +112,7 @@ def _read_batch_payload() -> dict[str, Any]:
         "allow_stale_reupload": _boolean(
             decoded.get("allow_stale_reupload"), "allow_stale_reupload"
         ),
+        "recovery_source_external_id": recovery_source_external_id,
     }
 
 

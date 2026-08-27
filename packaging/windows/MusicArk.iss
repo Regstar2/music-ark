@@ -31,6 +31,7 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=..\..\ui\musicark_ui\windows\runner\resources\app_icon.ico
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}

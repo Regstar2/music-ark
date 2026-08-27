@@ -350,7 +350,7 @@ class FakeSyncBridge implements SyncBridgeClient {
       'censoredNeedsReview': 0,
       'readyToUpload': 0,
       'uploadBlocked': 0,
-      'uploadByRole': {'censored': 0, 'unavailable': 0},
+      'uploadByRole': {'censored': 0},
     },
     'result': {},
     'operations': [

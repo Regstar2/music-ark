@@ -336,9 +336,8 @@ void main() {
     expect(bridge.enqueueSelectedBatches, [
       ['203'],
     ]);
-    expect(bridge.runBatches, [
-      ['selected-203'],
-    ]);
+    expect(bridge.runTaskIds, ['selected-203']);
+    expect(bridge.runBatches, isEmpty);
     expect(
       bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
       'queued',

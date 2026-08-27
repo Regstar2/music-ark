@@ -65,7 +65,11 @@ def _strict_yandex_id_match(provider_id: str, external_id: str, path: str) -> bo
     if provider_id != "yandex_music" or not external_id:
         return False
     name = _path_basename(path)
-    pattern = re.compile(rf"^yandex[_-]{re.escape(external_id)}(?:\.[^.]+)?$", re.IGNORECASE)
+    escaped = re.escape(external_id)
+    pattern = re.compile(
+        rf"^(?:yandex[_-]{escaped}|.+\s*\[yandex[_-]{escaped}\])(?:\.[^.]+)?$",
+        re.IGNORECASE,
+    )
     return bool(pattern.fullmatch(name))
 
 

@@ -432,48 +432,130 @@ class _SyncPageState extends State<SyncPage> {
   Future<void> _restoreRecoveryTrack(Map<String, dynamic> item) async {
     final bridge = widget.managedPlaylistBridge;
     final localFileId = int.tryParse('${item['localFileId']}');
+    final externalId = '${item['externalId'] ?? ''}';
     final state = '${item['recoveryState'] ?? ''}';
-    if (!state.startsWith('censored_')) return;
-    const role = 'censored';
-    final playlistKind = _managedRoleKind(role);
-    if (bridge == null || localFileId == null || playlistKind == null) return;
+    final censoredRecovery = state.startsWith('censored_');
+    final unavailableRecovery = state == 'unavailable_local_available';
+    if (bridge == null ||
+        localFileId == null ||
+        (!censoredRecovery && !unavailableRecovery)) {
+      return;
+    }
+
+    final available = _maps(_managed['availablePlaylists']);
+    String? selectedPlaylistKind;
+    if (censoredRecovery) {
+      selectedPlaylistKind = _managedRoleKind('censored');
+      if (selectedPlaylistKind == null) return;
+    } else {
+      final uploaded = _managedRoleKind('uploaded');
+      if (uploaded != null &&
+          available.any(
+            (playlist) => '${playlist['playlistKind'] ?? ''}' == uploaded,
+          )) {
+        selectedPlaylistKind = uploaded;
+      }
+    }
 
     var rights = false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: Text(dialogContext.l10n.v0111ReadyToRestore),
-          content: CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            value: rights,
-            onChanged: (value) => setDialogState(() => rights = value == true),
-            title: Text(dialogContext.l10n.v0111SyncRights),
-            controlAffinity: ListTileControlAffinity.leading,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(dialogContext.l10n.cancel),
+        builder: (dialogContext, setDialogState) {
+          final dialogL10n = dialogContext.l10n;
+          return AlertDialog(
+            key: Key('sync-recovery-restore-dialog-$externalId'),
+            title: Text(
+              unavailableRecovery
+                  ? dialogL10n.v0111RestoreUnavailableTitle
+                  : dialogL10n.v0111ReadyToRestore,
             ),
-            FilledButton(
-              onPressed: rights
-                  ? () => Navigator.pop(dialogContext, true)
-                  : null,
-              child: Text(dialogContext.l10n.v0111ReadyToRestore),
+            content: SizedBox(
+              width: 540,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (unavailableRecovery) ...[
+                    Text(dialogL10n.v0111RestoreUnavailableHint),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      key: Key('sync-recovery-target-$externalId'),
+                      initialValue: available.any(
+                        (playlist) =>
+                            '${playlist['playlistKind'] ?? ''}' ==
+                            selectedPlaylistKind,
+                      )
+                          ? selectedPlaylistKind
+                          : null,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: dialogL10n.v0111TargetPlaylist,
+                        prefixIcon: const Icon(Icons.queue_music_outlined),
+                        isDense: true,
+                      ),
+                      hint: Text(dialogL10n.v0111Select),
+                      items: [
+                        for (final playlist in available)
+                          DropdownMenuItem(
+                            value: '${playlist['playlistKind']}',
+                            child: Text(
+                              '${playlist['title'] ?? playlist['playlistKind']}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) => setDialogState(
+                        () => selectedPlaylistKind = value,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      available.isEmpty
+                          ? dialogL10n.v0111RestoreNoPlaylists
+                          : dialogL10n.v0111RestorePlaylistHint,
+                      style: Theme.of(dialogContext).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  CheckboxListTile(
+                    key: Key('sync-recovery-rights-$externalId'),
+                    contentPadding: EdgeInsets.zero,
+                    value: rights,
+                    onChanged: (value) =>
+                        setDialogState(() => rights = value == true),
+                    title: Text(dialogL10n.v0111SyncRights),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(dialogL10n.cancel),
+              ),
+              FilledButton(
+                key: Key('sync-recovery-restore-confirm-$externalId'),
+                onPressed: rights && selectedPlaylistKind != null
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                child: Text(dialogL10n.v0111RestoreAction),
+              ),
+            ],
+          );
+        },
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || selectedPlaylistKind == null) return;
     await _run(() async {
       await bridge.uploadBatch(
         localFileIds: [localFileId],
-        playlistKind: playlistKind,
+        playlistKind: selectedPlaylistKind!,
         confirm: true,
         rightsConfirmed: true,
         batchId: 'recovery-${DateTime.now().microsecondsSinceEpoch}',
+        allowStaleReupload: unavailableRecovery,
       );
       await _reloadRecoveryAndManaged();
     });
@@ -743,11 +825,13 @@ class _SyncPageState extends State<SyncPage> {
     final recoveryState = '${item['recoveryState'] ?? ''}';
     final needsReview = recoveryState.contains('needs_review');
     final censoredRecovery = recoveryState.startsWith('censored_');
+    final unavailableRecovery = recoveryState == 'unavailable_local_available';
     final canRestore =
-        censoredRecovery &&
+        widget.managedPlaylistBridge != null &&
         localReady &&
         !needsReview &&
-        _managedRoleKind('censored') != null;
+        ((censoredRecovery && _managedRoleKind('censored') != null) ||
+            unavailableRecovery);
     return Container(
       key: Key('sync-recovery-$externalId'),
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -784,7 +868,7 @@ class _SyncPageState extends State<SyncPage> {
               ],
             ),
           ),
-          if (censoredRecovery) ...[
+          if (censoredRecovery || unavailableRecovery) ...[
             const SizedBox(width: 8),
             OutlinedButton.icon(
               key: Key('sync-recovery-restore-$externalId'),
@@ -792,7 +876,7 @@ class _SyncPageState extends State<SyncPage> {
               icon: const Icon(Icons.cloud_upload_outlined),
               label: Text(
                 localReady
-                    ? context.l10n.v0111ReadyToRestore
+                    ? context.l10n.v0111RestoreAction
                     : context.l10n.v0111NeedsLocalFile,
               ),
             ),

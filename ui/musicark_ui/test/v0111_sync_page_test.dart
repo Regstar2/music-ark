@@ -145,7 +145,7 @@ void main() {
   );
 
   testWidgets(
-    'unavailable Recovery item remains visible but exposes no restore action',
+    'unavailable Recovery restores local copy to configured uploaded playlist',
     (tester) async {
       final bridge = FakeSyncBridge();
       final managed = FakeYandexBatchUploadBridge(
@@ -162,48 +162,118 @@ void main() {
             {
               'role': 'uploaded',
               'defaultTitle': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
-              'configured': false,
-              'playlistKind': null,
-              'title': null,
+              'configured': true,
+              'playlistKind': '7',
+              'title': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
             },
           ],
-          'availablePlaylists': <Map<String, dynamic>>[],
+          'availablePlaylists': [
+            {
+              'playlistKind': '7',
+              'title': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
+              'trackCount': 0,
+            },
+            {'playlistKind': '9', 'title': 'Архив', 'trackCount': 0},
+          ],
         },
       );
       await pumpPage(tester, bridge, managed: managed);
 
       await tester.tap(find.textContaining('Восстановление ('));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.byKey(const Key('sync-recovery-section')),
+      final restore = find.byKey(
+        const Key('sync-recovery-restore-unavailable-1'),
+      );
+      expect(restore, findsOneWidget);
+      expect(find.textContaining('НЕДОСТУПНЫЕ'), findsNothing);
+
+      await tester.tap(restore);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('sync-recovery-restore-dialog-unavailable-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sync-recovery-target-unavailable-1')),
+        findsOneWidget,
+      );
+      final confirm = find.byKey(
+        const Key('sync-recovery-restore-confirm-unavailable-1'),
+      );
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+
+      await tester.tap(
+        find.byKey(const Key('sync-recovery-rights-unavailable-1')),
       );
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('sync-recovery-filter-all')), findsOneWidget);
-      expect(
-        find.byKey(const Key('sync-recovery-filter-recoverable')),
-        findsOneWidget,
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull);
+      await tester.tap(confirm);
+      await tester.pumpAndSettle();
+
+      expect(managed.uploadedBatches, [
+        [77],
+      ]);
+      expect(managed.uploadedTargets, ['7']);
+    },
+  );
+
+  testWidgets(
+    'unavailable Recovery can target another ordinary playlist',
+    (tester) async {
+      final bridge = FakeSyncBridge();
+      final managed = FakeYandexBatchUploadBridge(
+        managedState: const {
+          'canCreatePlaylists': false,
+          'roles': [
+            {
+              'role': 'censored',
+              'defaultTitle': 'ЦЕНЗУРА',
+              'configured': false,
+              'playlistKind': null,
+              'title': null,
+            },
+            {
+              'role': 'uploaded',
+              'defaultTitle': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
+              'configured': true,
+              'playlistKind': '7',
+              'title': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
+            },
+          ],
+          'availablePlaylists': [
+            {
+              'playlistKind': '7',
+              'title': 'ЗАГРУЖЕННЫЕ ТРЕКИ',
+              'trackCount': 0,
+            },
+            {'playlistKind': '9', 'title': 'Архив', 'trackCount': 0},
+          ],
+        },
       );
-      expect(
-        find.byKey(const Key('sync-recovery-filter-missing_local')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('sync-recovery-filter-needs_review')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('sync-recovery-playlist-filter')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('sync-recovery-unavailable-1')),
-        findsOneWidget,
-      );
-      expect(
+      await pumpPage(tester, bridge, managed: managed);
+      await tester.tap(find.textContaining('Восстановление ('));
+      await tester.pumpAndSettle();
+      await tester.tap(
         find.byKey(const Key('sync-recovery-restore-unavailable-1')),
-        findsNothing,
       );
-      expect(find.textContaining('НЕДОСТУПНЫЕ'), findsNothing);
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const Key('sync-recovery-target-unavailable-1')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Архив').last);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('sync-recovery-rights-unavailable-1')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('sync-recovery-restore-confirm-unavailable-1')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(managed.uploadedTargets, ['9']);
     },
   );
 }

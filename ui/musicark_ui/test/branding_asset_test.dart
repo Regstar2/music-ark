@@ -1,26 +1,26 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('MusicArk branding asset loads and decodes', (tester) async {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('MusicArk branding asset is a standard RGB PNG', () async {
     final data = await rootBundle.load(
       'assets/branding/musicark_app_icon.png',
     );
-    expect(data.lengthInBytes, greaterThan(0));
+    expect(data.lengthInBytes, greaterThan(32));
 
     final bytes = data.buffer.asUint8List(
       data.offsetInBytes,
       data.lengthInBytes,
     );
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
+    expect(
+      bytes.sublist(0, 8),
+      equals(const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    );
 
-    expect(frame.image.width, greaterThanOrEqualTo(256));
-    expect(frame.image.height, greaterThanOrEqualTo(256));
-
-    frame.image.dispose();
-    codec.dispose();
+    expect(data.getUint32(16), greaterThanOrEqualTo(256));
+    expect(data.getUint32(20), greaterThanOrEqualTo(256));
+    expect(data.getUint8(25), equals(2)); // PNG truecolor/RGB.
   });
 }

@@ -17,6 +17,7 @@ $buildRoot = Join-Path $root ".build\v015"
 $artifactDir = Join-Path $root "artifacts\v$version"
 $stage = Join-Path $buildRoot "MusicArk"
 $appExeName = "Music Ark.exe"
+$flutterExeName = "musicark_ui.exe"
 $venv = Join-Path $buildRoot "build-venv"
 $venvPython = Join-Path $venv "Scripts\python.exe"
 
@@ -56,14 +57,17 @@ try {
 }
 
 $flutterOutput = Join-Path $root "ui\musicark_ui\build\windows\x64\runner\Release"
-if (-not (Test-Path -LiteralPath (Join-Path $flutterOutput $appExeName) -PathType Leaf)) {
-    throw "Flutter release output was not found at $flutterOutput."
-}
-$legacyAppExe = Join-Path $flutterOutput "musicark_ui.exe"
-if (Test-Path -LiteralPath $legacyAppExe -PathType Leaf) {
-    Remove-Item -LiteralPath $legacyAppExe -Force
+$flutterExe = Join-Path $flutterOutput $flutterExeName
+if (-not (Test-Path -LiteralPath $flutterExe -PathType Leaf)) {
+    throw "Flutter release executable was not found at $flutterExe."
 }
 Copy-Item -Path (Join-Path $flutterOutput "*") -Destination $stage -Recurse -Force
+$stagedFlutterExe = Join-Path $stage $flutterExeName
+$stagedAppExe = Join-Path $stage $appExeName
+if (-not (Test-Path -LiteralPath $stagedFlutterExe -PathType Leaf)) {
+    throw "Staged Flutter executable was not found at $stagedFlutterExe."
+}
+Move-Item -LiteralPath $stagedFlutterExe -Destination $stagedAppExe -Force
 
 $runtimeDist = Join-Path $buildRoot "runtime-dist"
 $runtimeWork = Join-Path $buildRoot "runtime-work"

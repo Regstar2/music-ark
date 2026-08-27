@@ -1,20 +1,14 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-
-import 'musicark_icon_data.dart';
 
 /// Shared MusicArk brand mark used by the desktop shell.
 ///
-/// The Windows executable still uses the tracked ICO resource. The small
-/// in-app mark is decoded from embedded PNG bytes so it cannot break because
-/// of a stale/missing Flutter asset manifest.
+/// The in-app mark and the Windows executable are both derived from the
+/// tracked branding asset/resource rather than maintaining a second embedded
+/// copy of the artwork in Dart source.
 class MusicArkMark extends StatelessWidget {
   const MusicArkMark({super.key, this.size = 32});
 
   final double size;
-
-  static final _iconBytes = base64Decode(musicArkAppIconPngBase64);
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
@@ -22,8 +16,8 @@ class MusicArkMark extends StatelessWidget {
         dimension: size,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(size * .22),
-          child: Image.memory(
-            _iconBytes,
+          child: Image.asset(
+            'assets/branding/musicark_app_icon.png',
             width: size,
             height: size,
             fit: BoxFit.contain,

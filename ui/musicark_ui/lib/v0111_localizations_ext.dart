@@ -33,8 +33,8 @@ extension V0111Localizations on AppLocalizations {
   String get v0111TargetPlaylist =>
       _ru ? 'Целевой плейлист' : 'Target playlist';
   String get v0111BatchRights => _ru
-      ? 'Я подтверждаю, что имею право загружать выбранные аудиофайлы.'
-      : 'I confirm that I have the right to upload the selected audio files.';
+      ? 'Я подтверждаю, что имею право загружать выбранные аудиофайлы в Яндекс Музыку.'
+      : 'I confirm that I have the right to upload the selected audio files to Yandex Music.';
   String v0111BatchProgress(int done, int total) => '$done / $total';
   String get v0111CancelRemaining =>
       _ru ? 'Отменить оставшиеся' : 'Cancel remaining';
@@ -118,8 +118,8 @@ extension V0111Localizations on AppLocalizations {
       : 'Will be uploaded to Yandex Music: $count';
   String v0111ConfirmRole(String role, int count) => '$role: $count';
   String get v0111SyncRights => _ru
-      ? 'Я подтверждаю, что имею право загружать эти локальные аудиофайлы.'
-      : 'I confirm that I have the right to upload these local audio files.';
+      ? 'Локальная копия будет загружена в Яндекс Музыку как пользовательский трек. Я подтверждаю, что имею право загружать этот аудиофайл.'
+      : 'The local copy will be uploaded to Yandex Music as a user-uploaded track. I confirm that I have the right to upload this audio file.';
   String get v0111UploadOnlyFolderHint => _ru
       ? 'Для этого плана локальная папка загрузок не требуется.'
       : 'This plan does not require a local download folder.';

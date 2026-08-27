@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable
 
 from musicark.core.config import load_config
@@ -183,18 +184,66 @@ class YandexLibraryService:
                                    albums=self._album_cache.list_metadata(), albums_source="network",
                                    liked_diff=liked_diff, playlists_diff=playlists_diff, albums_diff=albums_diff)
 
+    def _playback_cache_path(self, identity: str) -> Path:
+        app_root = self._base_dir if self._base_dir is not None else self._database_path.parent.parent
+        return app_root / ".musicark" / "playback" / "yandex" / f"yandex_{identity}.mp3"
+
+    @staticmethod
+    def _valid_playback_cache(path: Path) -> bool:
+        try:
+            if not path.is_file() or path.stat().st_size <= 0:
+                return False
+            from mutagen import File as MutagenFile  # type: ignore
+
+            audio = MutagenFile(str(path), easy=True)
+            return audio is not None and getattr(audio, "info", None) is not None
+        except Exception:  # noqa: BLE001 - invalid cache is treated as a miss.
+            return False
+
     def playback_prepare(self, external_id: str) -> dict[str, Any]:
+        started = perf_counter()
         identity = str(external_id).strip()
         if not identity.isdigit():
             raise ValueError("Yandex Track ID must be numeric.")
+
+        cache_started = perf_counter()
+        cached_path = self._playback_cache_path(identity)
+        cache_valid = self._valid_playback_cache(cached_path)
+        cache_ms = round((perf_counter() - cache_started) * 1000, 2)
+        if cache_valid:
+            return {
+                "providerId": "yandex_music",
+                "externalId": identity,
+                "path": str(cached_path.resolve(strict=False)),
+                "cached": True,
+                "preparationState": "cache_hit",
+                "timingsMs": {
+                    "cacheCheck": cache_ms,
+                    "providerPrepare": 0.0,
+                    "total": round((perf_counter() - started) * 1000, 2),
+                },
+            }
+
         token = self._saved_token()
-        app_root = self._base_dir if self._base_dir is not None else self._database_path.parent.parent
-        playback_root = app_root / ".musicark" / "playback" / "yandex"
+        playback_root = cached_path.parent
         task = DownloadTask(task_type="yandex_playback", source_id=identity, provider_id="yandex_music_download",
                             target_folder=str(playback_root), raw_payload={"track_id": identity, "quality": "best",
-                                                                          "target_filename": f"yandex_{identity}.mp3"})
+                                                                          "target_filename": cached_path.name})
+        provider_started = perf_counter()
         local_audio = YandexMusicDownloadProvider(base_dir=self._base_dir, token=token).execute(task)
-        return {"providerId": "yandex_music", "externalId": identity, "path": local_audio.path, "cached": True}
+        provider_ms = round((perf_counter() - provider_started) * 1000, 2)
+        return {
+            "providerId": "yandex_music",
+            "externalId": identity,
+            "path": local_audio.path,
+            "cached": False,
+            "preparationState": "downloaded",
+            "timingsMs": {
+                "cacheCheck": cache_ms,
+                "providerPrepare": provider_ms,
+                "total": round((perf_counter() - started) * 1000, 2),
+            },
+        }
 
     def cached(self) -> dict[str, Any]:
         return self.bootstrap()

@@ -3,7 +3,11 @@
 Precision of automatic matches is intentionally favored over recall.
 """
 
-MATCHER_VERSION = 1
+# v2 recognizes MusicArk's [yandex_<externalId>] filename provenance and gives
+# unique exact provider identity precedence over metadata-only candidates.
+# Bumping the matcher version intentionally invalidates cached v1 decisions so
+# existing ambiguous results are recalculated under the corrected policy.
+MATCHER_VERSION = 2
 CANDIDATE_LIMIT = 40
 PERSISTED_CONFLICT_CANDIDATES = 5
 

@@ -43,6 +43,9 @@ class _DownloadPageState extends State<DownloadPage> {
   bool _workerActive = false;
   bool _bulkBusy = false;
   bool _stopWorker = false;
+  bool _pollInFlight = false;
+  int _workerProcessed = 0;
+  int _workerTotal = 0;
   String? _error;
   Map<String, dynamic> _summary = const {};
   Map<String, dynamic> _settings = const {};
@@ -66,6 +69,9 @@ class _DownloadPageState extends State<DownloadPage> {
       _stopWorker = true;
       _pollTimer?.cancel();
       _pollTimer = null;
+    } else if (!oldWidget.active && widget.active) {
+      _stopWorker = false;
+      unawaited(_refreshAll(showSpinner: true));
     }
   }
 
@@ -83,7 +89,7 @@ class _DownloadPageState extends State<DownloadPage> {
     } catch (_) {
       // Loading below surfaces persistent bridge errors. Recovery remains best-effort.
     }
-    await _load();
+    await _refreshAll();
   }
 
   Future<void> _load({bool showSpinner = false}) async {
@@ -169,12 +175,17 @@ class _DownloadPageState extends State<DownloadPage> {
     }
   }
 
-  Future<void> _refreshCurrent({bool showSpinner = false}) async {
-    if (_wantedTab) {
-      await _loadWanted(showSpinner: showSpinner);
-    } else {
-      await _load(showSpinner: showSpinner);
+  Future<void> _refreshAll({bool showSpinner = false}) async {
+    if (showSpinner && mounted) {
+      setState(() {
+        _loading = true;
+        _wantedLoading = true;
+      });
     }
+    await Future.wait([
+      _load(showSpinner: showSpinner),
+      _loadWanted(showSpinner: showSpinner),
+    ]);
   }
 
   void _selectTab(bool wanted) {
@@ -264,29 +275,31 @@ class _DownloadPageState extends State<DownloadPage> {
   Future<void> _enqueueWanted() async {
     if (_workerActive || _bulkBusy || !widget.active) return;
     if (!await _ensureTarget()) return;
-    setState(() => _bulkBusy = true);
+    var shouldStartQueue = false;
+    setState(() {
+      _bulkBusy = true;
+      _error = null;
+    });
     try {
-      final before = (await _queuedTaskIds()).toSet();
       final result = await widget.bridge.enqueueWanted();
       final created = (result['created'] as num?)?.toInt() ?? 0;
       final existing = (result['existing'] as num?)?.toInt() ?? 0;
-      final after = await _queuedTaskIds();
-      final newTaskIds = after.where((id) => !before.contains(id)).toList(growable: false);
+      await _refreshAll();
+      final queued = (_summary['queued'] as num?)?.toInt() ?? 0;
+      shouldStartQueue = queued > 0 || created > 0 || existing > 0;
       if (mounted) {
-        final message = newTaskIds.isEmpty && existing > 0
+        final message = created == 0 && existing > 0
             ? context.l10n.downloadsNoNewTasks
-            : context.l10n.downloadsAddedTasks(newTaskIds.length);
+            : context.l10n.downloadsAddedTasks(created);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
-      if (created > 0 && newTaskIds.isNotEmpty) {
-        await widget.bridge.runTasks(newTaskIds);
-      }
-      await _load();
-      if (_wantedTab) await _loadWanted();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _bulkBusy = false);
+    }
+    if (shouldStartQueue && mounted && widget.active) {
+      unawaited(_runQueue());
     }
   }
 
@@ -305,8 +318,7 @@ class _DownloadPageState extends State<DownloadPage> {
       if ((task['status'] ?? '').toString() == 'queued' && taskId.isNotEmpty) {
         await widget.bridge.runTask(taskId);
       }
-      await _load();
-      await _loadWanted();
+      await _refreshAll();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -318,20 +330,18 @@ class _DownloadPageState extends State<DownloadPage> {
     final ids = _selectedWanted.toList(growable: false);
     if (ids.isEmpty || _workerActive || _bulkBusy || !widget.active) return;
     if (!await _ensureTarget()) return;
+    var runnable = <String>[];
     setState(() => _bulkBusy = true);
     try {
       final enqueued = await widget.bridge.enqueueSelected(ids);
-      final runnable = (enqueued['items'] as List? ?? const [])
+      runnable = (enqueued['items'] as List? ?? const [])
           .whereType<Map>()
           .where((item) => '${item['status']}' == 'queued')
           .map((item) => '${item['id']}')
           .where((id) => id.isNotEmpty)
           .toList(growable: false);
-      Map<String, dynamic>? runResult;
-      if (runnable.isNotEmpty) runResult = await widget.bridge.runTasks(runnable);
-      if (mounted) _showBatchResult(runResult ?? enqueued);
-      await _load();
-      await _loadWanted();
+      if (mounted) _showBatchResult(enqueued);
+      await _refreshAll();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -342,49 +352,116 @@ class _DownloadPageState extends State<DownloadPage> {
         });
       }
     }
+    if (runnable.isNotEmpty && mounted && widget.active) {
+      unawaited(_runQueue(taskIds: runnable));
+    }
+  }
+
+  Future<void> _pollWorkerStatus() async {
+    if (_pollInFlight || !widget.active || _stopWorker) return;
+    _pollInFlight = true;
+    try {
+      final results = await Future.wait([
+        widget.bridge.summary(),
+        widget.bridge.tasks(status: 'running', limit: 4),
+      ]);
+      if (!mounted) return;
+      final rawRunning = results[1]['items'];
+      final running = rawRunning is List
+          ? rawRunning.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+          : <Map<String, dynamic>>[];
+      setState(() {
+        _summary = Map<String, dynamic>.from(results[0]['counts'] as Map? ?? const {});
+        _settings = Map<String, dynamic>.from(results[0]['settings'] as Map? ?? const {});
+        for (final current in running) {
+          final id = '${current['id']}';
+          final index = _items.indexWhere((item) => '${item['id']}' == id);
+          if (index >= 0) {
+            final next = List<Map<String, dynamic>>.from(_items);
+            next[index] = current;
+            _items = next;
+          } else {
+            _items = [current, ..._items];
+          }
+        }
+      });
+    } catch (_) {
+      // The final full refresh surfaces persistent bridge errors.
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   Future<void> _runQueue({Iterable<String>? taskIds}) async {
     if (_workerActive || _bulkBusy || !widget.active) return;
     if (!await _ensureTarget()) return;
-    final ids = taskIds == null
+    var pending = taskIds == null
         ? await _queuedTaskIds()
         : taskIds.map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
-    if (ids.isEmpty) {
-      await _load();
+    if (pending.isEmpty) {
+      await _refreshAll();
       return;
     }
+    final drainPersistedQueue = taskIds == null;
+    final seen = <String>{};
     setState(() {
       _workerActive = true;
+      _workerProcessed = 0;
+      _workerTotal = pending.length;
       _stopWorker = false;
       _error = null;
     });
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
-      if (widget.active && !_stopWorker) _load();
+      if (widget.active && !_stopWorker) unawaited(_pollWorkerStatus());
     });
     try {
-      for (final taskId in ids) {
-        if (_stopWorker || !widget.active) break;
-        try {
-          await widget.bridge.runTask(taskId);
-        } on DownloadBridgeException catch (error) {
-          if (error.code == 'invalid_state') continue;
-          if (error.code == 'worker_busy') {
-            if (mounted) setState(() => _error = context.l10n.downloadsWorkerBusy);
-            break;
+      while (pending.isNotEmpty && !_stopWorker && widget.active) {
+        for (final taskId in pending) {
+          if (_stopWorker || !widget.active) break;
+          if (!seen.add(taskId)) continue;
+          try {
+            await widget.bridge.runTask(taskId);
+          } on DownloadBridgeException catch (error) {
+            if (error.code == 'invalid_state') {
+              // Already processed/recovered elsewhere; count it as consumed here.
+            } else if (error.code == 'worker_busy') {
+              if (mounted) setState(() => _error = context.l10n.downloadsWorkerBusy);
+              return;
+            } else {
+              rethrow;
+            }
+          } finally {
+            if (mounted) {
+              setState(() {
+                _workerProcessed++;
+                if (_workerProcessed > _workerTotal) {
+                  _workerTotal = _workerProcessed;
+                }
+              });
+            }
           }
-          rethrow;
         }
+        if (!drainPersistedQueue || _stopWorker || !widget.active) break;
+        final more = await _queuedTaskIds();
+        final fresh = more.where((id) => !seen.contains(id)).toList(growable: false);
+        if (fresh.isEmpty) break;
+        if (mounted) setState(() => _workerTotal += fresh.length);
+        pending = fresh;
       }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       _pollTimer?.cancel();
       _pollTimer = null;
-      if (mounted) setState(() => _workerActive = false);
-      await _load();
-      if (_wantedTab) await _loadWanted();
+      if (mounted) {
+        setState(() {
+          _workerActive = false;
+          _workerProcessed = 0;
+          _workerTotal = 0;
+        });
+      }
+      await _refreshAll();
     }
   }
 
@@ -642,6 +719,31 @@ class _DownloadPageState extends State<DownloadPage> {
     );
   }
 
+  Widget _operationProgress() {
+    if (!_bulkBusy && !_workerActive) return const SizedBox.shrink();
+    final value = _workerActive && _workerTotal > 0
+        ? (_workerProcessed / _workerTotal).clamp(0.0, 1.0).toDouble()
+        : null;
+    return Card(
+      key: const Key('downloads-operation-progress'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(child: LinearProgressIndicator(value: value)),
+            const SizedBox(width: 12),
+            Text(
+              _workerActive
+                  ? '${context.l10n.downloadsTitle}: $_workerProcessed / $_workerTotal'
+                  : context.l10n.downloadsDownloading,
+              key: const Key('downloads-operation-progress-label'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final busy = _wantedTab ? _wantedLoading : _loading;
@@ -652,7 +754,7 @@ class _DownloadPageState extends State<DownloadPage> {
           IconButton(
             key: const Key('downloads-refresh'),
             tooltip: context.l10n.refresh,
-            onPressed: () => _refreshCurrent(showSpinner: true),
+            onPressed: () => _refreshAll(showSpinner: true),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -660,7 +762,7 @@ class _DownloadPageState extends State<DownloadPage> {
       body: busy
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _refreshCurrent,
+              onRefresh: _refreshAll,
               child: CustomScrollView(
                 key: const Key('downloads-page'),
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -739,6 +841,10 @@ class _DownloadPageState extends State<DownloadPage> {
         _summaryCards(),
         const SizedBox(height: 12),
         _targetCard(),
+        if (_bulkBusy || _workerActive) ...[
+          const SizedBox(height: 12),
+          _operationProgress(),
+        ],
         const SizedBox(height: 12),
         _toolbar(),
         const SizedBox(height: 8),
@@ -768,6 +874,7 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   Widget _wantedHeader() {
+    final operationBusy = _workerActive || _bulkBusy;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -785,14 +892,28 @@ class _DownloadPageState extends State<DownloadPage> {
                 Text(context.l10n.downloadsWantedCount(_wantedTotal)),
                 FilledButton.icon(
                   key: const Key('downloads-wanted-download-all'),
-                  onPressed: _workerActive || _bulkBusy || _wantedTotal == 0 ? null : _enqueueWanted,
-                  icon: const Icon(Icons.download_for_offline_outlined),
-                  label: Text(context.l10n.downloadsDownloadAll),
+                  onPressed: operationBusy || _wantedTotal == 0 ? null : _enqueueWanted,
+                  icon: operationBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_for_offline_outlined),
+                  label: Text(
+                    operationBusy
+                        ? context.l10n.downloadsDownloading
+                        : context.l10n.downloadsDownloadAll,
+                  ),
                 ),
               ],
             ),
           ),
         ),
+        if (operationBusy) ...[
+          const SizedBox(height: 12),
+          _operationProgress(),
+        ],
         const SizedBox(height: 12),
         _searchField(),
         const SizedBox(height: 10),
@@ -818,12 +939,18 @@ class _DownloadPageState extends State<DownloadPage> {
                   Text(context.l10n.downloadsSelected(_selectedWanted.length)),
                   FilledButton.icon(
                     key: const Key('downloads-wanted-download-selected'),
-                    onPressed: _bulkBusy ? null : _downloadSelectedWanted,
-                    icon: const Icon(Icons.download_outlined),
+                    onPressed: operationBusy ? null : _downloadSelectedWanted,
+                    icon: operationBusy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_outlined),
                     label: Text(context.l10n.downloadsDownloadSelected(_selectedWanted.length)),
                   ),
                   TextButton(
-                    onPressed: () => setState(_selectedWanted.clear),
+                    onPressed: operationBusy ? null : () => setState(_selectedWanted.clear),
                     child: Text(context.l10n.downloadsClearSelection),
                   ),
                 ],
@@ -928,7 +1055,9 @@ class _DownloadPageState extends State<DownloadPage> {
         FilledButton.icon(
           key: const Key('downloads-enqueue-wanted'),
           onPressed: _workerActive || _bulkBusy || !widget.active ? null : _enqueueWanted,
-          icon: const Icon(Icons.download_for_offline_outlined),
+          icon: _bulkBusy || _workerActive
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.download_for_offline_outlined),
           label: Text(context.l10n.downloadsDownloadWanted),
         ),
         if (queued > 0)
@@ -1032,7 +1161,7 @@ class _DownloadPageState extends State<DownloadPage> {
         Checkbox(
           key: ValueKey(_wantedTab ? 'downloads-wanted-select-all' : 'downloads-select-all'),
           value: allSelected,
-          onChanged: visible.isEmpty
+          onChanged: visible.isEmpty || _bulkBusy || _workerActive
               ? null
               : (value) {
                   final next = Set<String>.from(selected);

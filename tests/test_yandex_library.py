@@ -204,14 +204,39 @@ class YandexLibraryTests(unittest.TestCase):
     def test_playback_prepare_uses_private_cache_without_returning_provider_url(self) -> None:
         self.credentials.token = "secret"
         prepared = self.base_dir / ".musicark" / "playback" / "yandex" / "yandex_123.mp3"
-        with patch("musicark.yandex_library.YandexMusicDownloadProvider.execute", return_value=SimpleNamespace(path=str(prepared))) as execute:
+        with (
+            patch.object(self.service, "_valid_playback_cache", return_value=False),
+            patch("musicark.yandex_library.YandexMusicDownloadProvider.execute", return_value=SimpleNamespace(path=str(prepared))) as execute,
+        ):
             result = self.service.playback_prepare("123")
         task = execute.call_args.args[0]
         self.assertEqual(result["externalId"], "123")
         self.assertEqual(result["path"], str(prepared))
+        self.assertFalse(result["cached"])
+        self.assertEqual(result["preparationState"], "downloaded")
+        self.assertGreaterEqual(result["timingsMs"]["cacheCheck"], 0)
+        self.assertGreaterEqual(result["timingsMs"]["providerPrepare"], 0)
         self.assertNotIn("url", result)
         self.assertNotIn("token", result)
         self.assertEqual(Path(task.target_folder), self.base_dir / ".musicark" / "playback" / "yandex")
+
+    def test_playback_prepare_reuses_valid_disk_cache_before_token_or_provider(self) -> None:
+        prepared = self.base_dir / ".musicark" / "playback" / "yandex" / "yandex_123.mp3"
+        prepared.parent.mkdir(parents=True, exist_ok=True)
+        prepared.write_bytes(b"cached-audio")
+        self.credentials.token = None
+        with (
+            patch.object(self.service, "_valid_playback_cache", return_value=True),
+            patch("musicark.yandex_library.YandexMusicDownloadProvider") as provider,
+        ):
+            result = self.service.playback_prepare("123")
+        self.assertEqual(result["path"], str(prepared.resolve(strict=False)))
+        self.assertTrue(result["cached"])
+        self.assertEqual(result["preparationState"], "cache_hit")
+        self.assertEqual(result["timingsMs"]["providerPrepare"], 0.0)
+        self.assertNotIn("url", result)
+        self.assertNotIn("token", result)
+        provider.assert_not_called()
 
     def test_playback_prepare_rejects_non_numeric_provider_identity(self) -> None:
         self.credentials.token = "secret"

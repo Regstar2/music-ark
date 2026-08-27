@@ -3,15 +3,21 @@ part of 'coverage_page.dart';
 class _BulkBar extends StatelessWidget {
   const _BulkBar({
     required this.count,
+    required this.busy,
+    required this.processed,
+    required this.total,
     required this.onWanted,
     required this.onIgnored,
     required this.onReset,
   });
 
   final int count;
-  final VoidCallback onWanted;
-  final VoidCallback onIgnored;
-  final VoidCallback onReset;
+  final bool busy;
+  final int processed;
+  final int total;
+  final VoidCallback? onWanted;
+  final VoidCallback? onIgnored;
+  final VoidCallback? onReset;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -21,26 +27,38 @@ class _BulkBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
           child: Wrap(
             spacing: 8,
-            runSpacing: 4,
+            runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 context.l10n.coverageBulkSelected(count),
                 style: Theme.of(context).textTheme.labelLarge,
               ),
+              if (busy) ...[
+                SizedBox(
+                  key: const Key('coverage-bulk-progress'),
+                  width: 160,
+                  child: LinearProgressIndicator(
+                    value: total <= 0
+                        ? null
+                        : (processed / total).clamp(0.0, 1.0).toDouble(),
+                  ),
+                ),
+                Text('$processed / $total'),
+              ],
               TextButton(
                 key: const Key('coverage-bulk-wanted'),
-                onPressed: onWanted,
+                onPressed: busy ? null : onWanted,
                 child: Text(context.l10n.coverageBulkWanted),
               ),
               TextButton(
                 key: const Key('coverage-bulk-ignored'),
-                onPressed: onIgnored,
+                onPressed: busy ? null : onIgnored,
                 child: Text(context.l10n.coverageIgnore),
               ),
               TextButton(
                 key: const Key('coverage-bulk-reset'),
-                onPressed: onReset,
+                onPressed: busy ? null : onReset,
                 child: Text(context.l10n.coverageBulkReset),
               ),
             ],
@@ -109,32 +127,35 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title, textAlign: TextAlign.center),
-              if (subtitle != null) ...[
-                const SizedBox(height: 8),
-                Text(subtitle!, textAlign: TextAlign.center),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title, textAlign: TextAlign.center),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 8),
+                  Text(subtitle!, textAlign: TextAlign.center),
+                ],
+                if (actionLabel != null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    key: const Key('coverage-run-matching'),
+                    onPressed: onAction,
+                    child: Text(actionLabel!),
+                  ),
+                ],
+                if (secondaryAction != null) ...[
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: secondaryAction,
+                    child: Text(context.l10n.coverageOpenMatching),
+                  ),
+                ],
               ],
-              if (actionLabel != null) ...[
-                const SizedBox(height: 12),
-                FilledButton(
-                  key: const Key('coverage-run-matching'),
-                  onPressed: onAction,
-                  child: Text(actionLabel!),
-                ),
-              ],
-              if (secondaryAction != null) ...[
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: secondaryAction,
-                  child: Text(context.l10n.coverageOpenMatching),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       );

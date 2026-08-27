@@ -39,7 +39,7 @@ extension _CoveragePageView on _CoveragePageState {
               IconButton(
                 key: const Key('coverage-refresh'),
                 tooltip: l10n.coverageRefresh,
-                onPressed: _loading ? null : () => _load(),
+                onPressed: _loading || _bulkBusy ? null : () => _load(),
                 icon: const Icon(Icons.refresh),
               ),
             ],
@@ -137,7 +137,7 @@ extension _CoveragePageView on _CoveragePageState {
                           ),
                         ),
                       ],
-                      onChanged: _setCollection,
+                      onChanged: _bulkBusy ? null : _setCollection,
                     ),
                   ),
                   SizedBox(
@@ -145,6 +145,7 @@ extension _CoveragePageView on _CoveragePageState {
                     child: TextField(
                       key: const Key('coverage-search'),
                       controller: _searchController,
+                      enabled: !_bulkBusy,
                       onChanged: _queueSearch,
                       decoration: InputDecoration(
                         labelText: l10n.coverageSearchLabel,
@@ -185,14 +186,16 @@ extension _CoveragePageView on _CoveragePageState {
                             child: Text(l10n.coverageDecisionIgnored),
                           ),
                         ],
-                        onChanged: (value) {
-                          _updateView(() {
-                            _userAction = value ?? '';
-                            _offset = 0;
-                            _selected.clear();
-                          });
-                          _reloadTracks(refreshSummary: false);
-                        },
+                        onChanged: _bulkBusy
+                            ? null
+                            : (value) {
+                                _updateView(() {
+                                  _userAction = value ?? '';
+                                  _offset = 0;
+                                  _selected.clear();
+                                });
+                                _reloadTracks(refreshSummary: false);
+                              },
                       ),
                     ),
                   SizedBox(
@@ -236,15 +239,17 @@ extension _CoveragePageView on _CoveragePageState {
                           child: Text(l10n.coverageSortStatus),
                         ),
                       ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        _updateView(() {
-                          _sort = value;
-                          _offset = 0;
-                          _selected.clear();
-                        });
-                        _reloadTracks(refreshSummary: false);
-                      },
+                      onChanged: _bulkBusy
+                          ? null
+                          : (value) {
+                              if (value == null) return;
+                              _updateView(() {
+                                _sort = value;
+                                _offset = 0;
+                                _selected.clear();
+                              });
+                              _reloadTracks(refreshSummary: false);
+                            },
                     ),
                   ),
                   if (_status == 'covered')
@@ -285,14 +290,16 @@ extension _CoveragePageView on _CoveragePageState {
                             child: Text(l10n.matchingVariantNotChecked),
                           ),
                         ],
-                        onChanged: (value) {
-                          _updateView(() {
-                            _variantStatus = value ?? '';
-                            _offset = 0;
-                            _selected.clear();
-                          });
-                          _reloadTracks(refreshSummary: false);
-                        },
+                        onChanged: _bulkBusy
+                            ? null
+                            : (value) {
+                                _updateView(() {
+                                  _variantStatus = value ?? '';
+                                  _offset = 0;
+                                  _selected.clear();
+                                });
+                                _reloadTracks(refreshSummary: false);
+                              },
                       ),
                     ),
                 ],
@@ -309,7 +316,7 @@ extension _CoveragePageView on _CoveragePageState {
                   key: const Key('coverage-select-all'),
                   value: allSelected ? true : partiallySelected ? null : false,
                   tristate: true,
-                  onChanged: _loading
+                  onChanged: _loading || _bulkBusy
                       ? null
                       : (_) {
                           if (_selected.isNotEmpty) {
@@ -320,6 +327,16 @@ extension _CoveragePageView on _CoveragePageState {
                         },
                 ),
                 Text(l10n.coverageTrackCount(_total)),
+                if (_bulkSelectBusy) ...[
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    key: const Key('coverage-select-all-progress'),
+                    width: 160,
+                    child: LinearProgressIndicator(value: _bulkProgressValue),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('$_bulkProcessed / $_bulkTotal'),
+                ],
                 const Spacer(),
                 if (_selected.isEmpty)
                   Text(
@@ -339,6 +356,9 @@ extension _CoveragePageView on _CoveragePageState {
         if (_selected.isNotEmpty)
           _BulkBar(
             count: _selected.length,
+            busy: _bulkActionBusy,
+            processed: _bulkProcessed,
+            total: _bulkTotal,
             onWanted: () => _setBulkAction('wanted'),
             onIgnored: () => _setBulkAction('ignored'),
             onReset: () => _setBulkAction('unreviewed'),
@@ -367,7 +387,7 @@ extension _CoveragePageView on _CoveragePageState {
             offset: _offset,
             limit: _pageLimit,
             total: _total,
-            onPrevious: _offset <= 0 || _loading
+            onPrevious: _offset <= 0 || _loading || _bulkBusy
                 ? null
                 : () {
                     _updateView(
@@ -377,7 +397,7 @@ extension _CoveragePageView on _CoveragePageState {
                     );
                     _reloadTracks(refreshSummary: false);
                   },
-            onNext: _offset + _pageLimit >= _total || _loading
+            onNext: _offset + _pageLimit >= _total || _loading || _bulkBusy
                 ? null
                 : () {
                     _updateView(() => _offset += _pageLimit);
@@ -426,7 +446,7 @@ extension _CoveragePageView on _CoveragePageState {
           key: ValueKey('coverage-row-$id'),
           item: item,
           selected: _selected.contains(id),
-          onSelectionChanged: isMissing
+          onSelectionChanged: isMissing && !_bulkBusy
               ? (value) => _updateView(() {
                   if (value) {
                     _selected.add(id);
@@ -436,9 +456,9 @@ extension _CoveragePageView on _CoveragePageState {
                 })
               : null,
           onOpen: () => _openDetails(item),
-          onWanted: isMissing ? () => _setAction(id, 'wanted') : null,
-          onIgnored: isMissing ? () => _setAction(id, 'ignored') : null,
-          onReset: isMissing ? () => _setAction(id, 'unreviewed') : null,
+          onWanted: isMissing && !_bulkBusy ? () => _setAction(id, 'wanted') : null,
+          onIgnored: isMissing && !_bulkBusy ? () => _setAction(id, 'ignored') : null,
+          onReset: isMissing && !_bulkBusy ? () => _setAction(id, 'unreviewed') : null,
           onDownload: isMissing && widget.downloadBridge != null
               ? () => _enqueueDownload(id)
               : null,

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/services.dart';
 
 import 'app_localizations_ext.dart';
 import 'app_theme.dart';
@@ -13,8 +15,12 @@ import 'musicark_bridge.dart';
 import 'yandex_content_labels.dart';
 
 enum LibrarySort { original, title, artist, unavailable }
+
 enum PlaylistSort { original, title }
+
 enum _PageKind { liked, playlists, albums, playlist, album }
+
+const _oauthTokenInfoUrl = 'https://ym.marshal.dev/token/';
 
 Locale resolveYandexLocale(Locale? locale) {
   final language = locale?.languageCode.toLowerCase();
@@ -37,9 +43,11 @@ class MusicArkDesktopApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final client = bridge ?? MusicArkBridge();
-    final labels = contentLabelBridge ??
+    final labels =
+        contentLabelBridge ??
         (bridge == null ? const ContentLabelBridge() : null);
-    final effectiveLocale = locale ??
+    final effectiveLocale =
+        locale ??
         resolveYandexLocale(WidgetsBinding.instance.platformDispatcher.locale);
     return MaterialApp(
       locale: effectiveLocale,
@@ -125,9 +133,9 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
   List<Map<String, dynamic>> _maps(dynamic value) => value is List
       ? value
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList()
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
       : <Map<String, dynamic>>[];
 
   Map<String, dynamic> _map(dynamic value) =>
@@ -375,10 +383,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     }
   }
 
-  void _applyDetail(
-    Map<String, dynamic> payload, {
-    required _PageKind kind,
-  }) {
+  void _applyDetail(Map<String, dynamic> payload, {required _PageKind kind}) {
     if (!mounted) return;
     final collection = _map(payload['collection']);
     final metadata = _map(
@@ -548,33 +553,37 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
     final filtered = query.isEmpty
         ? source.toList(growable: false)
-        : source.where((track) {
-            return '${track['title'] ?? ''} ${_artists(track)} ${track['album_title'] ?? ''}'
-                .toLowerCase()
-                .contains(query);
-          }).toList(growable: false);
+        : source
+              .where((track) {
+                return '${track['title'] ?? ''} ${_artists(track)} ${track['album_title'] ?? ''}'
+                    .toLowerCase()
+                    .contains(query);
+              })
+              .toList(growable: false);
     final indexed = filtered.asMap().entries.toList();
     switch (_trackSort) {
       case LibrarySort.original:
         break;
       case LibrarySort.title:
         indexed.sort((a, b) {
-          final result = _title(a.value)
-              .toLowerCase()
-              .compareTo(_title(b.value).toLowerCase());
+          final result = _title(
+            a.value,
+          ).toLowerCase().compareTo(_title(b.value).toLowerCase());
           return result == 0 ? a.key.compareTo(b.key) : result;
         });
       case LibrarySort.artist:
         indexed.sort((a, b) {
-          final result = _artists(a.value)
-              .toLowerCase()
-              .compareTo(_artists(b.value).toLowerCase());
+          final result = _artists(
+            a.value,
+          ).toLowerCase().compareTo(_artists(b.value).toLowerCase());
           return result == 0 ? a.key.compareTo(b.key) : result;
         });
       case LibrarySort.unavailable:
         indexed.sort((a, b) {
-          final aUnavailable = '${a.value['availability'] ?? ''}' == 'unavailable';
-          final bUnavailable = '${b.value['availability'] ?? ''}' == 'unavailable';
+          final aUnavailable =
+              '${a.value['availability'] ?? ''}' == 'unavailable';
+          final bUnavailable =
+              '${b.value['availability'] ?? ''}' == 'unavailable';
           if (aUnavailable != bUnavailable) return aUnavailable ? -1 : 1;
           return a.key.compareTo(b.key);
         });
@@ -598,9 +607,9 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
         .toList();
     if (_playlistSort == PlaylistSort.title) {
       values.sort(
-        (a, b) => '${a['title'] ?? ''}'
-            .toLowerCase()
-            .compareTo('${b['title'] ?? ''}'.toLowerCase()),
+        (a, b) => '${a['title'] ?? ''}'.toLowerCase().compareTo(
+          '${b['title'] ?? ''}'.toLowerCase(),
+        ),
       );
     }
     return values;
@@ -621,15 +630,18 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: _initializing
-            ? const Center(child: CircularProgressIndicator())
-            : _hasStoredToken
-                ? _buildSignedIn()
-                : _buildLogin(),
-      );
+    body: _initializing
+        ? const Center(child: CircularProgressIndicator())
+        : _hasStoredToken
+        ? _buildSignedIn()
+        : _buildLogin(),
+  );
 
   Widget _buildLogin() {
     final l10n = context.l10n;
+    final tokenInfoLabel = l10n.localeName == 'en'
+        ? 'OAuth token guide: ym.marshal.dev/token'
+        : 'Как получить OAuth-токен: ym.marshal.dev/token';
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -647,7 +659,17 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                   ),
                   const SizedBox(height: 12),
                   Text(l10n.yandexLoginDescription),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const Key('oauth-token-help-link'),
+                      onPressed: _busy ? null : _openOAuthTokenInfoUrl,
+                      icon: const Icon(Icons.link, size: 18),
+                      label: Text(tokenInfoLabel),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   TextField(
                     key: const Key('token-field'),
                     controller: _tokenController,
@@ -659,8 +681,8 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                         onPressed: _busy
                             ? null
                             : () => setState(
-                                  () => _tokenVisible = !_tokenVisible,
-                                ),
+                                () => _tokenVisible = !_tokenVisible,
+                              ),
                         icon: Icon(
                           _tokenVisible
                               ? Icons.visibility_off
@@ -673,9 +695,7 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                   FilledButton(
                     key: const Key('login-button'),
                     onPressed: _busy ? null : _signIn,
-                    child: Text(
-                      _busy ? l10n.yandexSigningIn : l10n.signIn,
-                    ),
+                    child: Text(_busy ? l10n.yandexSigningIn : l10n.signIn),
                   ),
                   if (_errorMessage != null) ...[
                     const SizedBox(height: 16),
@@ -693,55 +713,86 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     );
   }
 
+  Future<void> _openOAuthTokenInfoUrl() async {
+    try {
+      if (Platform.isWindows) {
+        await Process.start('rundll32', [
+          'url.dll,FileProtocolHandler',
+          _oauthTokenInfoUrl,
+        ], mode: ProcessStartMode.detached);
+        return;
+      }
+      if (Platform.isMacOS) {
+        await Process.start('open', [
+          _oauthTokenInfoUrl,
+        ], mode: ProcessStartMode.detached);
+        return;
+      }
+      if (Platform.isLinux) {
+        await Process.start('xdg-open', [
+          _oauthTokenInfoUrl,
+        ], mode: ProcessStartMode.detached);
+        return;
+      }
+    } on Object {
+      // Fall back to copy below.
+    }
+    await Clipboard.setData(const ClipboardData(text: _oauthTokenInfoUrl));
+    if (!mounted) return;
+    final message = context.l10n.localeName == 'en'
+        ? 'OAuth token guide link copied.'
+        : 'Ссылка на инструкцию по OAuth-токену скопирована.';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Widget _buildSignedIn() => Column(
-        children: [
-          if (_busy) const LinearProgressIndicator(),
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-              child: _ErrorPanel(
-                message: _errorMessage!,
-                details: _errorDetails,
-              ),
-            ),
-          Expanded(
-            child: switch (_page) {
-              _PageKind.liked => _buildTrackCollection(
-                  context.l10n.yandexLikedTitle,
-                  _likedTracks,
-                  _likedSource,
-                  _likedLastUpdated,
-                  _refreshLiked,
-                ),
-              _PageKind.playlists => _buildPlaylistIndex(),
-              _PageKind.albums => _buildAlbumIndex(),
-              _PageKind.playlist => _buildTrackCollection(
-                  '${_selectedPlaylist?['title'] ?? context.l10n.yandexUnknownPlaylist}',
-                  _detailTracks,
-                  _detailSource,
-                  _detailLastUpdated,
-                  _refreshDetail,
-                  back: _showPlaylists,
-                ),
-              _PageKind.album => _buildTrackCollection(
-                  '${_selectedAlbum?['title'] ?? context.l10n.yandexUnknownAlbum}',
-                  _detailTracks,
-                  _detailSource,
-                  _detailLastUpdated,
-                  _refreshDetail,
-                  back: _showAlbums,
-                ),
-            },
+    children: [
+      if (_busy) const LinearProgressIndicator(),
+      if (_errorMessage != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+          child: _ErrorPanel(message: _errorMessage!, details: _errorDetails),
+        ),
+      Expanded(
+        child: switch (_page) {
+          _PageKind.liked => _buildTrackCollection(
+            context.l10n.yandexLikedTitle,
+            _likedTracks,
+            _likedSource,
+            _likedLastUpdated,
+            _refreshLiked,
           ),
-        ],
-      );
+          _PageKind.playlists => _buildPlaylistIndex(),
+          _PageKind.albums => _buildAlbumIndex(),
+          _PageKind.playlist => _buildTrackCollection(
+            '${_selectedPlaylist?['title'] ?? context.l10n.yandexUnknownPlaylist}',
+            _detailTracks,
+            _detailSource,
+            _detailLastUpdated,
+            _refreshDetail,
+            back: _showPlaylists,
+          ),
+          _PageKind.album => _buildTrackCollection(
+            '${_selectedAlbum?['title'] ?? context.l10n.yandexUnknownAlbum}',
+            _detailTracks,
+            _detailSource,
+            _detailLastUpdated,
+            _refreshDetail,
+            back: _showAlbums,
+          ),
+        },
+      ),
+    ],
+  );
 
   Widget _tabs() {
     final selected = _page == _PageKind.liked
         ? _PageKind.liked
         : (_page == _PageKind.albums || _page == _PageKind.album
-            ? _PageKind.albums
-            : _PageKind.playlists);
+              ? _PageKind.albums
+              : _PageKind.playlists);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SegmentedButton<_PageKind>(
@@ -795,77 +846,75 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
     String? updated,
     Future<void> Function() refresh, {
     VoidCallback? back,
-  }) =>
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  }) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.l10n.yandexLibraryTitle,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        if (back != null)
+          TextButton.icon(
+            key: Key(
+              _page == _PageKind.album
+                  ? 'yandex-back-to-albums'
+                  : 'yandex-back-to-playlists',
+            ),
+            onPressed: back,
+            icon: const Icon(Icons.arrow_back),
+            label: Text(
+              _page == _PageKind.album
+                  ? context.l10n.yandexBackToAlbums
+                  : context.l10n.yandexBackToPlaylists,
+            ),
+          ),
+        Row(
           children: [
-            Text(
-              context.l10n.yandexLibraryTitle,
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            if (back != null)
-              TextButton.icon(
-                key: Key(
-                  _page == _PageKind.album
-                      ? 'yandex-back-to-albums'
-                      : 'yandex-back-to-playlists',
-                ),
-                onPressed: back,
-                icon: const Icon(Icons.arrow_back),
-                label: Text(
-                  _page == _PageKind.album
-                      ? context.l10n.yandexBackToAlbums
-                      : context.l10n.yandexBackToPlaylists,
-                ),
-              ),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$count $unit • ${_relativeTime(updated)} • ${_sourceLabel(source)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                IconButton.filledTonal(
-                  key: const Key('refresh-library'),
-                  onPressed: _busy
-                      ? null
-                      : () {
-                          refresh();
-                        },
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    '$count $unit • ${_relativeTime(updated)} • ${_sourceLabel(source)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
-            _tabs(),
+            IconButton.filledTonal(
+              key: const Key('refresh-library'),
+              onPressed: _busy
+                  ? null
+                  : () {
+                      refresh();
+                    },
+              icon: const Icon(Icons.refresh),
+            ),
           ],
         ),
-      );
+        const SizedBox(height: 16),
+        _tabs(),
+      ],
+    ),
+  );
 
   String _sourceLabel(String source) => switch (source) {
-        'network' => context.l10n.yandexSourceNetwork,
-        'cache' => context.l10n.yandexSourceCache,
-        _ => context.l10n.yandexSourceNone,
-      };
+    'network' => context.l10n.yandexSourceNetwork,
+    'cache' => context.l10n.yandexSourceCache,
+    _ => context.l10n.yandexSourceNone,
+  };
 
   String _relativeTime(String? raw) {
     final parsed = raw == null ? null : DateTime.tryParse(raw)?.toLocal();
@@ -923,13 +972,12 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
                                 label: _contentLabels[externalId],
                                 wide: wide,
                                 busy: _playingTrackId == externalId,
-                                labelEnabled:
-                                    widget.contentLabelBridge != null,
+                                labelEnabled: widget.contentLabelBridge != null,
                                 onPlay:
                                     '${track['availability'] ?? ''}' ==
-                                            'unavailable'
-                                        ? null
-                                        : () => _play(track),
+                                        'unavailable'
+                                    ? null
+                                    : () => _play(track),
                                 onLabel: widget.contentLabelBridge == null
                                     ? null
                                     : (value) => _setLabel(track, value),
@@ -947,92 +995,87 @@ class _MusicArkHomePageState extends State<MusicArkHomePage> {
   }
 
   Widget _trackToolbar() => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final search = TextField(
-              key: const Key('track-search'),
-              controller: _searchController,
-              onChanged: _scheduleTrackSearch,
-              onSubmitted: _submitTrackSearch,
-              decoration: InputDecoration(
-                hintText: context.l10n.yandexSearchTracks,
-                prefixIcon: const Icon(Icons.search),
-              ),
-            );
-            final sort = DropdownButtonFormField<LibrarySort>(
-              key: Key('track-sort-${_trackSort.name}'),
-              initialValue: _trackSort,
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: context.l10n.yandexSortLabel,
-              ),
-              items: [
-                DropdownMenuItem(
-                  value: LibrarySort.original,
-                  child: Text(context.l10n.yandexSortOriginal),
-                ),
-                DropdownMenuItem(
-                  value: LibrarySort.title,
-                  child: Text(context.l10n.yandexSortTitle),
-                ),
-                DropdownMenuItem(
-                  value: LibrarySort.artist,
-                  child: Text(context.l10n.yandexSortArtist),
-                ),
-                DropdownMenuItem(
-                  value: LibrarySort.unavailable,
-                  child: Text(context.l10n.yandexSortUnavailable),
-                ),
-              ],
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      if (value != null) {
-                        setState(() {
-                          _trackSort = value;
-                          _invalidateVisibleTracks();
-                        });
-                      }
-                    },
-            );
-            final labels = widget.contentLabelBridge == null
-                ? null
-                : YandexContentLabelsButton(
-                    bridge: widget.bridge,
-                    labelBridge: widget.contentLabelBridge,
-                  );
-            if (constraints.maxWidth >= AppUiTokens.yandexToolbarWide) {
-              return Row(
-                children: [
-                  Expanded(child: search),
-                  const SizedBox(width: 12),
-                  SizedBox(width: 230, child: sort),
-                  if (labels != null) ...[
-                    const SizedBox(width: 8),
-                    labels,
-                  ],
-                ],
+    padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final search = TextField(
+          key: const Key('track-search'),
+          controller: _searchController,
+          onChanged: _scheduleTrackSearch,
+          onSubmitted: _submitTrackSearch,
+          decoration: InputDecoration(
+            hintText: context.l10n.yandexSearchTracks,
+            prefixIcon: const Icon(Icons.search),
+          ),
+        );
+        final sort = DropdownButtonFormField<LibrarySort>(
+          key: Key('track-sort-${_trackSort.name}'),
+          initialValue: _trackSort,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: context.l10n.yandexSortLabel),
+          items: [
+            DropdownMenuItem(
+              value: LibrarySort.original,
+              child: Text(context.l10n.yandexSortOriginal),
+            ),
+            DropdownMenuItem(
+              value: LibrarySort.title,
+              child: Text(context.l10n.yandexSortTitle),
+            ),
+            DropdownMenuItem(
+              value: LibrarySort.artist,
+              child: Text(context.l10n.yandexSortArtist),
+            ),
+            DropdownMenuItem(
+              value: LibrarySort.unavailable,
+              child: Text(context.l10n.yandexSortUnavailable),
+            ),
+          ],
+          onChanged: _busy
+              ? null
+              : (value) {
+                  if (value != null) {
+                    setState(() {
+                      _trackSort = value;
+                      _invalidateVisibleTracks();
+                    });
+                  }
+                },
+        );
+        final labels = widget.contentLabelBridge == null
+            ? null
+            : YandexContentLabelsButton(
+                bridge: widget.bridge,
+                labelBridge: widget.contentLabelBridge,
               );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+        if (constraints.maxWidth >= AppUiTokens.yandexToolbarWide) {
+          return Row(
+            children: [
+              Expanded(child: search),
+              const SizedBox(width: 12),
+              SizedBox(width: 230, child: sort),
+              if (labels != null) ...[const SizedBox(width: 8), labels],
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            search,
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                search,
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    SizedBox(width: 230, child: sort),
-                    if (labels != null) labels,
-                  ],
-                ),
+                SizedBox(width: 230, child: sort),
+                if (labels != null) labels,
               ],
-            );
-          },
-        ),
-      );
+            ),
+          ],
+        );
+      },
+    ),
+  );
 
   Widget _buildPlaylistIndex() {
     final visible = _visiblePlaylists;
@@ -1188,20 +1231,20 @@ class _ErrorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Card(
-        key: const Key('error-panel'),
-        color: Theme.of(context).colorScheme.errorContainer,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              if (details?.isNotEmpty == true)
-                Text(details!, style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ),
-        ),
-      );
+    key: const Key('error-panel'),
+    color: Theme.of(context).colorScheme.errorContainer,
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(message),
+          if (details?.isNotEmpty == true)
+            Text(details!, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AlbumCard extends StatelessWidget {
@@ -1234,9 +1277,9 @@ class _AlbumCard extends StatelessWidget {
                   child: SizedBox.expand(
                     child: artwork.isEmpty
                         ? ColoredBox(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                             child: const Icon(Icons.album_outlined, size: 54),
                           )
                         : Image.network(
@@ -1245,9 +1288,9 @@ class _AlbumCard extends StatelessWidget {
                             cacheWidth: 512,
                             cacheHeight: 512,
                             errorBuilder: (_, _, _) => ColoredBox(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
                               child: const Icon(Icons.album_outlined, size: 54),
                             ),
                           ),
@@ -1259,10 +1302,9 @@ class _AlbumCard extends StatelessWidget {
                 '${album['title'] ?? context.l10n.yandexUnknownAlbum}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               Text(
                 artists.isEmpty ? context.l10n.yandexUnknownArtist : artists,
@@ -1287,27 +1329,18 @@ class _TrackHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 4),
-        child: Row(
-          children: [
-            const SizedBox(width: 60),
-            Expanded(child: Text(context.l10n.yandexTrackColumn)),
-            SizedBox(
-              width: 220,
-              child: Text(context.l10n.yandexAlbumColumn),
-            ),
-            SizedBox(
-              width: 112,
-              child: Text(context.l10n.yandexLabelColumn),
-            ),
-            SizedBox(
-              width: 58,
-              child: Text(context.l10n.yandexTimeColumn),
-            ),
-            const SizedBox(width: 96),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(32, 0, 32, 4),
+    child: Row(
+      children: [
+        const SizedBox(width: 60),
+        Expanded(child: Text(context.l10n.yandexTrackColumn)),
+        SizedBox(width: 220, child: Text(context.l10n.yandexAlbumColumn)),
+        SizedBox(width: 112, child: Text(context.l10n.yandexLabelColumn)),
+        SizedBox(width: 58, child: Text(context.l10n.yandexTimeColumn)),
+        const SizedBox(width: 96),
+      ],
+    ),
+  );
 }
 
 class _TrackRow extends StatelessWidget {
@@ -1345,8 +1378,8 @@ class _TrackRow extends StatelessWidget {
     final album = '${track['album_title'] ?? ''}';
     final unavailable = '${track['availability'] ?? ''}' == 'unavailable';
     final duration = _duration(track['duration_seconds']);
-    final artwork =
-        '${track['artwork_url'] ?? track['artworkUrl'] ?? ''}'.trim();
+    final artwork = '${track['artwork_url'] ?? track['artworkUrl'] ?? ''}'
+        .trim();
     final hasLabel = label?.isNotEmpty == true;
 
     Widget chip() => !hasLabel
@@ -1362,47 +1395,47 @@ class _TrackRow extends StatelessWidget {
           );
 
     Widget actions() => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (labelEnabled && onLabel != null)
-              PopupMenuButton<String>(
-                key: Key('yandex-inline-content-label-menu-$id'),
-                initialValue: hasLabel ? label : null,
-                onSelected: onLabel!,
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    value: 'original',
-                    child: Text(context.l10n.original),
-                  ),
-                  PopupMenuItem(
-                    value: 'censored',
-                    child: Text(context.l10n.censored),
-                  ),
-                  const PopupMenuDivider(),
-                  PopupMenuItem(
-                    value: '',
-                    child: Text(context.l10n.yandexClearLabel),
-                  ),
-                ],
-                icon: const Icon(Icons.sell_outlined),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (labelEnabled && onLabel != null)
+          PopupMenuButton<String>(
+            key: Key('yandex-inline-content-label-menu-$id'),
+            initialValue: hasLabel ? label : null,
+            onSelected: onLabel!,
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'original',
+                child: Text(context.l10n.original),
               ),
-            Tooltip(
-              message: unavailable
-                  ? context.l10n.yandexTrackUnavailable
-                  : context.l10n.play,
-              child: IconButton(
-                key: Key('yandex-play-$id'),
-                onPressed: busy || unavailable ? null : onPlay,
-                icon: busy
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow),
+              PopupMenuItem(
+                value: 'censored',
+                child: Text(context.l10n.censored),
               ),
-            ),
-          ],
-        );
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: '',
+                child: Text(context.l10n.yandexClearLabel),
+              ),
+            ],
+            icon: const Icon(Icons.sell_outlined),
+          ),
+        Tooltip(
+          message: unavailable
+              ? context.l10n.yandexTrackUnavailable
+              : context.l10n.play,
+          child: IconButton(
+            key: Key('yandex-play-$id'),
+            onPressed: busy || unavailable ? null : onPlay,
+            icon: busy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+          ),
+        ),
+      ],
+    );
 
     return Opacity(
       opacity: unavailable ? .58 : 1,
@@ -1421,9 +1454,9 @@ class _TrackRow extends StatelessWidget {
                   height: 48,
                   child: artwork.isEmpty
                       ? ColoredBox(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
                           child: const Icon(Icons.music_note),
                         )
                       : Image.network(
@@ -1432,9 +1465,9 @@ class _TrackRow extends StatelessWidget {
                           cacheWidth: 96,
                           cacheHeight: 96,
                           errorBuilder: (_, _, _) => ColoredBox(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                             child: const Icon(Icons.music_note),
                           ),
                         ),
@@ -1446,11 +1479,7 @@ class _TrackRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
                     Text(
                       wide
                           ? artists

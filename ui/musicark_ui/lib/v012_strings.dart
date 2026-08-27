@@ -7,9 +7,12 @@ class V012Strings {
   factory V012Strings.of(BuildContext context) =>
       V012Strings._(Localizations.localeOf(context).languageCode.toLowerCase() == 'ru');
 
-  String get networkTitle => ru ? 'Сеть и доступ к источникам' : 'Network and source access';
-  String get networkHint => ru ? 'Маршрутизация применяется только к внешним источникам метаданных. Yandex upload остаётся отдельным.' : 'Routing applies only to external metadata sources. Yandex upload remains separate.';
+  String get networkTitle => ru ? 'Сеть и прокси' : 'Network and proxy';
+  String get networkHint => ru
+      ? 'Выберите системный маршрут, прямое подключение или собственный HTTP/SOCKS5-прокси.'
+      : 'Use the system route, a direct connection, or your own HTTP/SOCKS5 proxy.';
   String get connectionMode => ru ? 'Режим подключения' : 'Connection mode';
+  String get system => ru ? 'Системный' : 'System';
   String get automatic => ru ? 'Автоматически' : 'Automatic';
   String get direct => ru ? 'Прямое' : 'Direct';
   String get warp => 'Cloudflare WARP';
@@ -39,6 +42,8 @@ class V012Strings {
   String get host => ru ? 'Хост' : 'Host';
   String get port => ru ? 'Порт' : 'Port';
 
+  // Kept for metadata-editor/developer compatibility. The release Settings page
+  // no longer exposes provider-key controls.
   String get sourcesTitle => ru ? 'Источники метаданных' : 'Metadata sources';
   String get sourcesHint => ru
       ? 'AcoustID, MusicBrainz-backed данные и обложки работают без ручной настройки ключей. Дополнительные сервисы остаются необязательными.'
@@ -51,17 +56,17 @@ class V012Strings {
   String get optionalFallback => ru ? 'Необязательный fallback' : 'Optional fallback';
   String get advancedSources => ru ? 'Дополнительные источники — разработка/тестирование' : 'Optional sources — development/testing';
   String get advancedSourcesHint => ru
-      ? 'AcoustID уже настроен внутри MusicArk. Поле AcoustID ниже — только необязательный developer override. Last.fm/Discogs также не требуются для обычной работы.'
-      : 'AcoustID is already configured by MusicArk. The AcoustID field below is only an optional developer override. Last.fm/Discogs are not required for normal use.';
+      ? 'Дополнительные ключи не требуются для обычной работы.'
+      : 'Optional provider keys are not required for normal use.';
   String get acoustIdApplicationKey => ru ? 'AcoustID key override (необязательно)' : 'AcoustID key override (optional)';
   String get discogsToken => ru ? 'Discogs personal token (необязательно)' : 'Discogs personal token (optional)';
   String get lastFmApiKey => ru ? 'Last.fm API key (необязательно)' : 'Last.fm API key (optional)';
-  String get theAudioDbKey => ru ? 'TheAudioDB key override (необязательно, сейчас используется 123)' : 'TheAudioDB key override (optional, currently uses 123)';
-  String get leaveBlankToKeep => ru ? 'Оставь пустым, чтобы использовать встроенное/текущее значение' : 'Leave blank to use the bundled/current value';
+  String get theAudioDbKey => ru ? 'TheAudioDB key override (необязательно)' : 'TheAudioDB key override (optional)';
+  String get leaveBlankToKeep => ru ? 'Оставьте пустым, чтобы сохранить текущее значение' : 'Leave blank to keep the current value';
   String get saveSourceKeys => ru ? 'Сохранить overrides' : 'Save overrides';
   String get clearLocalSourceKeys => ru ? 'Удалить локальные overrides' : 'Clear local overrides';
-  String get sourceKeysSaved => ru ? 'Локальные overrides сохранены в системном хранилище.' : 'Local overrides saved in the system credential store.';
-  String get sourceKeysCleared => ru ? 'Локальные overrides удалены; встроенные значения снова используются автоматически.' : 'Local overrides cleared; bundled values are used automatically again.';
+  String get sourceKeysSaved => ru ? 'Локальные overrides сохранены.' : 'Local overrides saved.';
+  String get sourceKeysCleared => ru ? 'Локальные overrides удалены.' : 'Local overrides cleared.';
 
   String get automaticIdentify => ru ? 'Автоматически определить' : 'Identify automatically';
   String get moreAlternatives => ru ? 'Показать больше вариантов' : 'Show more alternatives';

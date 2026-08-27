@@ -1,8 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:musicark_ui/content_label_bridge.dart';
 import 'package:musicark_ui/yandex_app.dart' as yandex;
+
+class _DelayedPlaybackBridge extends FakeMusicArkBridge {
+  _DelayedPlaybackBridge() : super(startSignedIn: true);
+
+  final playback = Completer<Map<String, dynamic>>();
+
+  @override
+  Future<Map<String, dynamic>> yandexPlaybackPrepare(String externalId) {
+    yandexPlaybackPrepareCalls++;
+    return playback.future;
+  }
+}
 
 void main() {
   Future<void> desktop(
@@ -53,6 +67,25 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Yandex playback exposes a non-blocking preparation indicator', (tester) async {
+    final bridge = _DelayedPlaybackBridge();
+    final labels = FakeContentLabelBridge();
+
+    await desktop(tester, bridge, labels);
+    await tester.tap(find.byKey(const Key('yandex-play-101')));
+    await tester.pump();
+
+    expect(bridge.yandexPlaybackPrepareCalls, 1);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('yandex-play-101')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('yandex-track-102')), findsOneWidget);
   });
 
   testWidgets('playlist tracks receive the same Yandex controls', (tester) async {

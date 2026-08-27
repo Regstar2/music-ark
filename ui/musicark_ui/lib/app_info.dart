@@ -1,7 +1,7 @@
 class AppInfo {
   const AppInfo._();
 
-  static const name = 'MusicArk';
+  static const name = 'Music Ark';
   static const version = '0.15.0';
   static const backendVersion = '0.15.0';
   static const databaseSchemaVersion = '1.9.0';

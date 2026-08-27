@@ -12,12 +12,16 @@ import os
 from pathlib import Path
 import sys
 from collections.abc import Callable
+from typing import TextIO
 
 from musicark import __version__
 from musicark import mvp_bridge, platform_bridge
 from musicark.content_labels import bridge as content_labels_bridge
+from musicark.download import actions_bridge as download_actions_bridge
 from musicark.download import bridge as download_bridge
+from musicark.download import worker_bridge as download_worker_bridge
 from musicark.external_metadata import bridge as external_metadata_bridge
+from musicark.matching import progress_bridge as matching_progress_bridge
 from musicark.metadata import bridge as metadata_bridge
 from musicark.recovery import bridge as recovery_bridge
 from musicark.sync import bridge as sync_bridge
@@ -30,8 +34,11 @@ _ENTRY_POINTS: dict[str, Callable[[], int]] = {
     "musicark.mvp_bridge": mvp_bridge.main,
     "musicark.platform_bridge": platform_bridge.main,
     "musicark.content_labels.bridge": content_labels_bridge.main,
+    "musicark.download.actions_bridge": download_actions_bridge.main,
     "musicark.download.bridge": download_bridge.main,
+    "musicark.download.worker_bridge": download_worker_bridge.main,
     "musicark.external_metadata.bridge": external_metadata_bridge.main,
+    "musicark.matching.progress_bridge": matching_progress_bridge.main,
     "musicark.metadata.bridge": metadata_bridge.main,
     "musicark.recovery.bridge": recovery_bridge.main,
     "musicark.sync.bridge": sync_bridge.main,
@@ -40,6 +47,25 @@ _ENTRY_POINTS: dict[str, Callable[[], int]] = {
     "musicark.feedback_bridge": feedback_bridge.main,
     "musicark.update.bridge": update_bridge.main,
 }
+
+
+def _configure_utf8_stdio(stdout: TextIO | None = None, stderr: TextIO | None = None) -> None:
+    """Emit bridge JSON as UTF-8 even under non-UTF Windows code pages.
+
+    Flutter decodes backend stdout/stderr as UTF-8. The frozen runtime therefore
+    must not inherit a legacy console encoding such as cp1251, because a single
+    Cyrillic error message can otherwise fail before the bridge returns JSON.
+    """
+    for stream in (stdout or sys.stdout, stderr or sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                # Some redirected or test streams cannot be reconfigured after
+                # I/O. In that case the best available fallback is the
+                # PYTHONIOENCODING environment set by the Flutter bridge.
+                pass
 
 
 def _packaged_data_root() -> Path:
@@ -79,12 +105,16 @@ def _rewrite_packaged_arguments(args: list[str]) -> list[str]:
 
 
 def main() -> int:
+    _configure_utf8_stdio()
     args = sys.argv[1:]
     if args == ["--version"]:
         print(f"MusicArk runtime {__version__}")
         return 0
     if len(args) < 2 or args[0] != "-m":
-        print("MusicArk packaged runtime accepts only --version or -m <approved-module>.", file=sys.stderr)
+        print(
+            "MusicArk packaged runtime accepts only --version or -m <approved-module>.",
+            file=sys.stderr,
+        )
         return 2
     module = args[1]
     entry = _ENTRY_POINTS.get(module)

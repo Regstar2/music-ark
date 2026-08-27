@@ -28,9 +28,13 @@ class _Summary extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final coverageWidth = constraints.maxWidth < 240
+              final compact = constraints.maxWidth < 320;
+              final coverageWidth = compact
                   ? constraints.maxWidth
-                  : 240.0;
+                  : constraints.maxWidth < 240
+                      ? constraints.maxWidth
+                      : 240.0;
+              final metricWidth = compact ? 96.0 : 112.0;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -68,24 +72,28 @@ class _Summary extends StatelessWidget {
                       _SummaryMetric(
                         label: l10n.coverageSummaryTotal,
                         value: _asInt(summary['total']),
+                        width: metricWidth,
                         background: scheme.surfaceContainerHighest,
                         foreground: scheme.onSurface,
                       ),
                       _SummaryMetric(
                         label: l10n.coverageSummaryCovered,
                         value: _asInt(summary['covered']),
+                        width: metricWidth,
                         background: scheme.secondaryContainer,
                         foreground: scheme.onSecondaryContainer,
                       ),
                       _SummaryMetric(
                         label: l10n.coverageSummaryMissing,
                         value: _asInt(summary['missing']),
+                        width: metricWidth,
                         background: scheme.errorContainer,
                         foreground: scheme.onErrorContainer,
                       ),
                       _SummaryMetric(
                         label: l10n.coverageSummaryNotAnalyzed,
                         value: _asInt(summary['notAnalyzed']),
+                        width: metricWidth,
                         background: scheme.tertiaryContainer,
                         foreground: scheme.onTertiaryContainer,
                       ),
@@ -160,18 +168,20 @@ class _SummaryMetric extends StatelessWidget {
   const _SummaryMetric({
     required this.label,
     required this.value,
+    required this.width,
     required this.background,
     required this.foreground,
   });
 
   final String label;
   final int value;
+  final double width;
   final Color background;
   final Color foreground;
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 142,
+        width: width,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: background,

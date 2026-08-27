@@ -135,7 +135,7 @@ class MatchingService:
             local_candidates = generator.generate(provider, excluded_local_ids=rejected)
             scored = sorted(
                 (self._scorer.score(provider, local) for local in local_candidates),
-                key=lambda item: item.confidence,
+                key=lambda item: (self._is_exact_identity(item), item.confidence),
                 reverse=True,
             )
             batch.append(
@@ -190,6 +190,13 @@ class MatchingService:
         return result
 
     @staticmethod
+    def _is_exact_identity(candidate: ScoredCandidate) -> bool:
+        return (
+            candidate.method is MatchMethod.EXACT_ID
+            and float(candidate.breakdown.get("exact_id") or 0.0) >= 1.0
+        )
+
+    @staticmethod
     def _decide(
         provider: dict[str, Any],
         *,
@@ -215,22 +222,34 @@ class MatchingService:
                 "no_candidates",
             )
 
-        best = candidates[0]
-        second = candidates[1] if len(candidates) > 1 else None
-        margin = best.confidence - second.confidence if second else 1.0
-        if best.confidence >= AUTO_MATCH_THRESHOLD and margin >= AMBIGUITY_MARGIN:
+        exact_candidates = [
+            candidate
+            for candidate in candidates
+            if MatchingService._is_exact_identity(candidate)
+        ]
+        best = exact_candidates[0] if exact_candidates else candidates[0]
+        if len(exact_candidates) == 1:
             status = MatchStatus.MATCHED
-            reason = "auto_threshold_and_margin"
-        elif best.confidence >= CONFLICT_THRESHOLD:
+            reason = "exact_provider_identity"
+        elif len(exact_candidates) > 1:
             status = MatchStatus.CONFLICT
-            reason = (
-                "ambiguous_top_candidates"
-                if second and margin < AMBIGUITY_MARGIN
-                else "manual_review_threshold"
-            )
+            reason = "ambiguous_exact_id_candidates"
         else:
-            status = MatchStatus.UNMATCHED
-            reason = "below_conflict_threshold"
+            second = candidates[1] if len(candidates) > 1 else None
+            margin = best.confidence - second.confidence if second else 1.0
+            if best.confidence >= AUTO_MATCH_THRESHOLD and margin >= AMBIGUITY_MARGIN:
+                status = MatchStatus.MATCHED
+                reason = "auto_threshold_and_margin"
+            elif best.confidence >= CONFLICT_THRESHOLD:
+                status = MatchStatus.CONFLICT
+                reason = (
+                    "ambiguous_top_candidates"
+                    if second and margin < AMBIGUITY_MARGIN
+                    else "manual_review_threshold"
+                )
+            else:
+                status = MatchStatus.UNMATCHED
+                reason = "below_conflict_threshold"
 
         return MatchDecision(
             provider_id=provider_id,

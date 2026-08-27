@@ -43,7 +43,13 @@ void main() {
   Finder downloadsScrollable() => find.descendant(
         of: find.byKey(const Key('downloads-page')),
         matching: find.byType(Scrollable),
-      );
+      ).first;
+
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
 
   Future<void> reveal(
     WidgetTester tester,
@@ -134,7 +140,13 @@ void main() {
     await tester.enterText(find.byKey(const Key('downloads-search')), 'Failed Song');
     await tester.pump();
 
-    expect(find.textContaining('Failed Song'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('download-task-failed-1')),
+        matching: find.textContaining('Failed Song'),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('Queued Song'), findsNothing);
     expect(find.textContaining('Running Song'), findsNothing);
   });
@@ -324,9 +336,8 @@ void main() {
     expect(bridge.enqueueSelectedBatches, [
       ['203'],
     ]);
-    expect(bridge.runBatches, [
-      ['selected-203'],
-    ]);
+    expect(bridge.runTaskIds, ['selected-203']);
+    expect(bridge.runBatches, isEmpty);
     expect(
       bridge.items.firstWhere((item) => item['id'] == 'queued-1')['status'],
       'queued',
@@ -414,18 +425,19 @@ void main() {
         downloadBridge: bridge,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     await tester.tap(find.byKey(const Key('nav-downloads')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.byKey(const Key('downloads-run')));
     await tester.pump();
     await bridge.firstStarted.future;
 
-    await tester.tap(find.text('Яндекс Музыка').first);
+    await tester.tap(find.byIcon(Icons.cloud_outlined).first);
     await tester.pump();
     bridge.releaseFirst.complete();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
 
     expect(bridge.runTaskIds, ['queued-1']);
     expect(
@@ -503,11 +515,12 @@ void main() {
         downloadBridge: downloadBridge,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     expect(find.byKey(const Key('nav-downloads')), findsOneWidget);
     await tester.tap(find.byKey(const Key('nav-downloads')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byKey(const Key('downloads-page')), findsOneWidget);
   });
 }

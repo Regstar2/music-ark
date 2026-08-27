@@ -12,9 +12,11 @@ from unittest import mock
 import httpx
 
 from musicark.feedback import feedback_link
-from musicark.runtime_cli import _rewrite_packaged_arguments
+from musicark.runtime_cli import _configure_utf8_stdio, _rewrite_packaged_arguments
 from musicark.update.models import AppVersion, UpdateError, UpdateErrorCode, UpdateManifest
 from musicark.update.service import UpdateService
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Transport:
@@ -162,6 +164,43 @@ class FeedbackAndRuntimeTests(unittest.TestCase):
             expected = str(Path(temp) / "MusicArk")
             self.assertEqual(args[:2], ["--base-dir", expected])
             self.assertTrue(Path(expected).is_dir())
+
+    def test_frozen_runtime_reconfigures_stdio_to_utf8(self) -> None:
+        import io
+
+        stdout_bytes = io.BytesIO()
+        stderr_bytes = io.BytesIO()
+        stdout = io.TextIOWrapper(stdout_bytes, encoding="cp1251")
+        stderr = io.TextIOWrapper(stderr_bytes, encoding="cp1251")
+
+        _configure_utf8_stdio(stdout=stdout, stderr=stderr)
+        print(json.dumps({"message": "кириллица \u04c4"}, ensure_ascii=False), file=stdout)
+        stdout.flush()
+
+        self.assertIn("кириллица \u04c4", stdout_bytes.getvalue().decode("utf-8"))
+
+
+class WindowsPackagingNameTests(unittest.TestCase):
+    def test_flutter_windows_output_exe_is_music_ark(self) -> None:
+        runner_cmake = (ROOT / "ui/musicark_ui/windows/runner/CMakeLists.txt").read_text(encoding="utf-8")
+        package_script = (ROOT / "tools/package_windows.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('OUTPUT_NAME "Music Ark"', runner_cmake)
+        self.assertIn('$appExeName = "Music Ark.exe"', package_script)
+        self.assertIn('Join-Path $flutterOutput $appExeName', package_script)
+        self.assertIn('$legacyAppExe = Join-Path $flutterOutput "musicark_ui.exe"', package_script)
+        self.assertIn("Remove-Item -LiteralPath $legacyAppExe -Force", package_script)
+        self.assertNotIn('$appExeName = "musicark_ui.exe"', package_script)
+
+    def test_installer_launches_music_ark_exe(self) -> None:
+        iss = (ROOT / "packaging/windows/MusicArk.iss").read_text(encoding="utf-8")
+        resources = (ROOT / "ui/musicark_ui/windows/runner/Runner.rc").read_text(encoding="utf-8")
+
+        self.assertIn('#define MyAppName "Music Ark"', iss)
+        self.assertIn('#define MyAppExeName "Music Ark.exe"', iss)
+        self.assertIn('Name: "{autoprograms}\\Music Ark"', iss)
+        self.assertIn('VALUE "OriginalFilename", "Music Ark.exe"', resources)
+        self.assertIn('VALUE "ProductName", "Music Ark"', resources)
 
 
 if __name__ == "__main__":

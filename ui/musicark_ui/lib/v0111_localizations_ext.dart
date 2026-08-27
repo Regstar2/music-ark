@@ -68,7 +68,6 @@ extension V0111Localizations on AppLocalizations {
   String get v0111Ensure => _ru ? 'Проверить плейлисты' : 'Ensure playlists';
   String get v0111RoleCensored => _ru ? 'ЦЕНЗУРА' : 'CENSORED';
   String get v0111RoleUploaded => _ru ? 'ЗАГРУЖЕННЫЕ ТРЕКИ' : 'UPLOADED TRACKS';
-  String get v0111RoleUnavailable => _ru ? 'НЕДОСТУПНЫЕ' : 'UNAVAILABLE';
 
   String get v0111SyncPlanTab => _ru ? 'План синхронизации' : 'Sync plan';
   String get v0111RecoveryTab => _ru ? 'Восстановление' : 'Recovery';
@@ -79,7 +78,7 @@ extension V0111Localizations on AppLocalizations {
       _ru ? 'Недоступные в Яндекс Музыке' : 'Unavailable in Yandex Music';
   String get v0111RecoveryAll => _ru ? 'Все' : 'All';
   String get v0111RecoveryRecoverable =>
-      _ru ? 'Можно восстановить' : 'Recoverable';
+      _ru ? 'Есть локальная копия' : 'Local copy available';
   String get v0111RecoveryMissingLocal =>
       _ru ? 'Нет локального файла' : 'No local file';
   String get v0111RecoveryNeedsReview =>
@@ -94,6 +93,19 @@ extension V0111Localizations on AppLocalizations {
       _ru ? 'Локальная копия: нет' : 'Local copy: missing';
   String get v0111ReadyToRestore =>
       _ru ? 'Готов к восстановлению' : 'Ready to restore';
+  String get v0111RestoreAction => _ru ? 'Восстановить' : 'Restore';
+  String get v0111RestoreUnavailableTitle => _ru
+      ? 'Восстановить недоступный трек'
+      : 'Restore unavailable track';
+  String get v0111RestoreUnavailableHint => _ru
+      ? 'Локальная копия будет загружена в Яндекс Музыку как пользовательский трек и добавлена в выбранный плейлист.'
+      : 'The local copy will be uploaded to Yandex Music as a user track and added to the selected playlist.';
+  String get v0111RestorePlaylistHint => _ru
+      ? 'Рекомендуется плейлист «ЗАГРУЖЕННЫЕ ТРЕКИ». Если его нет, создайте его в Яндекс Музыке, обновите библиотеку и выберите здесь. Можно выбрать любой другой свой плейлист.'
+      : 'The recommended target is “UPLOADED TRACKS”. If it does not exist, create it in Yandex Music, refresh the library, and select it here. You may also choose another playlist you own.';
+  String get v0111RestoreNoPlaylists => _ru
+      ? 'Нет доступных плейлистов. Создайте плейлист в Яндекс Музыке, обновите библиотеку MusicArk и повторите восстановление.'
+      : 'No playlists are available. Create a playlist in Yandex Music, refresh the MusicArk library, and retry restore.';
   String get v0111NeedsLocalFile =>
       _ru ? 'Требуется локальный файл' : 'Local file required';
   String get v0111SourcePlaylists => _ru ? 'Был в' : 'Was in';

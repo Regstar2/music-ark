@@ -17,7 +17,6 @@ from musicark.storage.recovery_storage import RecoveryStorageRepository
 MANAGED_PLAYLIST_TITLES: dict[str, str] = {
     "censored": "ЦЕНЗУРА",
     "uploaded": "ЗАГРУЖЕННЫЕ ТРЕКИ",
-    "unavailable": "НЕДОСТУПНЫЕ",
 }
 
 # This must only become True after tools/yandex_playlist_research.py has produced
@@ -115,7 +114,10 @@ class ManagedPlaylistService:
         )
 
     def configured_kind(self, role: str) -> str | None:
-        item = self._repository.managed_playlists().get(str(role).strip().casefold())
+        clean_role = str(role).strip().casefold()
+        if clean_role not in MANAGED_PLAYLIST_TITLES:
+            return None
+        item = self._repository.managed_playlists().get(clean_role)
         return str(item.get("playlistKind") or "") if item else None
 
     def state(self) -> dict[str, Any]:
@@ -171,6 +173,8 @@ class ManagedPlaylistService:
 
     def validate_role(self, role: str) -> tuple[str, ProviderPlaylist]:
         clean_role = str(role).strip().casefold()
+        if clean_role not in MANAGED_PLAYLIST_TITLES:
+            raise ManagedPlaylistError("Unsupported managed playlist role.")
         kind = self.configured_kind(clean_role)
         if not kind:
             raise ManagedPlaylistError(f"Managed playlist role '{clean_role}' is not configured.")

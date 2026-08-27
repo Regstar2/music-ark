@@ -23,6 +23,19 @@ class _MemorySettingsStorage implements AppSettingsStorage {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 500));
+  }
+
+  Future<void> reveal(WidgetTester tester, Finder finder) async {
+    await tester.ensureVisible(finder);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+
   Future<void> pumpDesktop(
     WidgetTester tester, {
     Size size = const Size(1500, 900),
@@ -38,7 +51,7 @@ void main() {
         settingsStorage: _MemorySettingsStorage(),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
   }
 
   testWidgets('Settings exposes compact utility controls and signed-out provider card', (
@@ -46,7 +59,7 @@ void main() {
   ) async {
     await pumpDesktop(tester);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.byKey(const Key('settings-page')), findsOneWidget);
     expect(find.byKey(const Key('theme-selector')), findsOneWidget);
@@ -62,10 +75,10 @@ void main() {
   testWidgets('Settings provider card renders signed-in session', (tester) async {
     await pumpDesktop(tester, signedIn: true);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
 
     expect(find.text('Tester'), findsWidgets);
-    expect(find.text('Активная сессия'), findsOneWidget);
+    expect(find.text('Выполнен вход в Яндекс Музыку'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -106,7 +119,8 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text(longName), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -115,9 +129,10 @@ void main() {
   testWidgets('Help groups expanded guidance and returns to Settings', (tester) async {
     await pumpDesktop(tester);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await reveal(tester, find.byKey(const Key('settings-help')));
     await tester.tap(find.byKey(const Key('settings-help')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.byKey(const Key('help-page')), findsOneWidget);
     expect(find.text('Библиотека'), findsOneWidget);
@@ -130,16 +145,16 @@ void main() {
     final variant = find.byKey(const Key('help-topic-variant'));
     await tester.ensureVisible(variant);
     await tester.tap(variant);
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(
       find.textContaining('не превращает исходный результат анализа в SAME'),
       findsOneWidget,
     );
 
     final back = find.byKey(const Key('help-back-settings'));
-    await tester.ensureVisible(back);
+    await reveal(tester, back);
     await tester.tap(back);
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byKey(const Key('settings-page')), findsOneWidget);
   });
 
@@ -148,9 +163,10 @@ void main() {
   ) async {
     await pumpDesktop(tester);
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await reveal(tester, find.byKey(const Key('settings-about')));
     await tester.tap(find.byKey(const Key('settings-about')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.byKey(const Key('about-page')), findsOneWidget);
     expect(find.byKey(const Key('about-product-card')), findsOneWidget);
@@ -163,7 +179,7 @@ void main() {
     final back = find.byKey(const Key('about-back-settings'));
     await tester.ensureVisible(back);
     await tester.tap(back);
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byKey(const Key('settings-page')), findsOneWidget);
   });
 
@@ -172,17 +188,19 @@ void main() {
   ) async {
     await pumpDesktop(tester, size: const Size(900, 700));
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(tester.takeException(), isNull);
 
+    await reveal(tester, find.byKey(const Key('settings-help')));
     await tester.tap(find.byKey(const Key('settings-help')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const Key('nav-settings')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await reveal(tester, find.byKey(const Key('settings-about')));
     await tester.tap(find.byKey(const Key('settings-about')));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(tester.takeException(), isNull);
   });
 }

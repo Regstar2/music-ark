@@ -27,7 +27,7 @@ $pythonArg = "-$pythonVersion"
 Write-Host "Trusted CI Python: $pythonVersion"
 
 Write-Host 'Installing MusicArk test dependencies...'
-& py $pythonArg -m pip install --disable-pip-version-check -e . -r requirements-yandex.txt
+& py $pythonArg -m pip install --disable-pip-version-check --no-cache-dir -e . -r requirements-yandex.txt
 Assert-LastExitCode 'Python dependency installation'
 
 # CI is always offline/fail-closed for provider mutations. A real-account/live

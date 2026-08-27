@@ -24,6 +24,12 @@ class _NoLabels implements ContentLabelBridgeClient {
 }
 
 void main() {
+  Future<void> pumpShellReady(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
   testWidgets('Yandex workspace resizes without layout exceptions', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1920, 1080));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -33,7 +39,7 @@ void main() {
         contentLabelBridge: _NoLabels(),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpShellReady(tester);
     expect(tester.takeException(), isNull);
 
     for (final size in const [
@@ -42,7 +48,8 @@ void main() {
       Size(900, 700),
     ]) {
       await tester.binding.setSurfaceSize(size);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       expect(
         tester.takeException(),
         isNull,

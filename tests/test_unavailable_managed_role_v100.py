@@ -36,7 +36,7 @@ class UnavailableManagedRoleV100Tests(unittest.TestCase):
             state=RecoveryState.UNAVAILABLE_LOCAL_AVAILABLE,
         )
 
-    def test_planner_keeps_unavailable_local_copy_informational_only(self) -> None:
+    def test_planner_keeps_unavailable_local_copy_out_of_managed_sync_uploads(self) -> None:
         recovery = self._unavailable_track()
         data = _PlanInput(
             scope_type=SyncScopeType.ALL,
@@ -80,7 +80,7 @@ class UnavailableManagedRoleV100Tests(unittest.TestCase):
         self.assertEqual(plan.summary["uploadBlocked"], 0)
         self.assertEqual(plan.summary["uploadByRole"], {"censored": 0})
 
-    def test_flutter_recovery_hides_unavailable_upload_action(self) -> None:
+    def test_flutter_recovery_restores_unavailable_copy_via_ordinary_playlist(self) -> None:
         root = Path(__file__).resolve().parents[1]
         source = (root / "ui" / "musicark_ui" / "lib" / "sync_page.dart").read_text(
             encoding="utf-8"
@@ -88,8 +88,20 @@ class UnavailableManagedRoleV100Tests(unittest.TestCase):
 
         self.assertNotIn("v0111RoleUnavailable", source)
         self.assertNotIn("? 'censored'\n        : 'unavailable'", source)
-        self.assertIn("if (censoredRecovery) ...[", source)
-        self.assertIn("if (!state.startsWith('censored_')) return;", source)
+        self.assertIn(
+            "final unavailableRecovery = state == 'unavailable_local_available';",
+            source,
+        )
+        self.assertIn(
+            "final uploaded = _managedRoleKind('uploaded');",
+            source,
+        )
+        self.assertIn(
+            "if (censoredRecovery || unavailableRecovery) ...[",
+            source,
+        )
+        self.assertIn("allowStaleReupload: unavailableRecovery", source)
+        self.assertNotIn("_managedRoleKind('unavailable')", source)
 
 
 if __name__ == "__main__":

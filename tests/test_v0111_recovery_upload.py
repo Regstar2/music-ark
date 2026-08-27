@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from musicark.providers.models import ProviderPlaylist, ProviderTrack
-from musicark.recovery.managed_playlists import ManagedPlaylistService
+from musicark.recovery.managed_playlists import ManagedPlaylistError, ManagedPlaylistService
 from musicark.recovery.models import ProviderAvailability, RecoveryState, RecoveryTrack
 from musicark.recovery.service import RecoveryService
 from musicark.storage.database import CURRENT_SCHEMA_VERSION, initialize_database
@@ -405,39 +405,33 @@ class RecoveryAndBatchV0111Tests(unittest.TestCase):
         self.assertEqual(uploaded["state"], "adopted")
         self.assertEqual(service.configured_kind("uploaded"), "101")
 
-        two = ProviderPlaylist(
+        # Existing databases may still contain the retired role. Keep the row
+        # non-destructively, but never expose, validate or use it again.
+        repo = RecoveryStorageRepository(self.db)
+        repo.set_managed_playlist("unavailable", "102", "НЕДОСТУПНЫЕ")
+        legacy = ProviderPlaylist(
             provider_id="yandex_music",
             external_id="102",
             title="НЕДОСТУПНЫЕ",
             track_external_ids=(),
             raw_data={"owner": {"uid": "owner"}},
         )
-        three = ProviderPlaylist(
-            provider_id="yandex_music",
-            external_id="103",
-            title="НЕДОСТУПНЫЕ",
-            track_external_ids=(),
-            raw_data={"owner": {"uid": "owner"}},
-        )
-        provider.playlists.update({"102": two, "103": three})
+        provider.playlists["102"] = legacy
         service = ManagedPlaylistService(
             self.db,
-            repository=RecoveryStorageRepository(self.db),
-            cache=_Cache(
-                [
-                    {"externalId": "102", "title": "НЕДОСТУПНЫЕ"},
-                    {"externalId": "103", "title": "НЕДОСТУПНЫЕ"},
-                ]
-            ),  # type: ignore[arg-type]
+            repository=repo,
+            cache=_Cache([{"externalId": "102", "title": "НЕДОСТУПНЫЕ"}]),  # type: ignore[arg-type]
             credential_store=_Credentials(),  # type: ignore[arg-type]
             provider=provider,  # type: ignore[arg-type]
             audit_repository=_Audit(),  # type: ignore[arg-type]
             creation_enabled=False,
         )
-        result = service.ensure()
-        unavailable = next(value for value in result["outcomes"] if value["role"] == "unavailable")
-        self.assertEqual(unavailable["state"], "ambiguous")
+        state = service.state()
+        self.assertEqual({item["role"] for item in state["roles"]}, {"censored", "uploaded"})
         self.assertIsNone(service.configured_kind("unavailable"))
+        with self.assertRaises(ManagedPlaylistError):
+            service.validate_role("unavailable")
+        self.assertIn("unavailable", repo.managed_playlists())
 
     def test_playlist_creation_is_private_only_when_capability_explicitly_enabled(self) -> None:
         provider = _ManagedProvider({})
@@ -451,7 +445,7 @@ class RecoveryAndBatchV0111Tests(unittest.TestCase):
             creation_enabled=True,
         )
         result = service.ensure(confirm_create=True)
-        self.assertEqual(len(provider.created), 3)
+        self.assertEqual(len(provider.created), 2)
         self.assertTrue(all(visibility == "private" for _, visibility in provider.created))
         self.assertTrue(all(item["state"] == "created" for item in result["outcomes"]))
 

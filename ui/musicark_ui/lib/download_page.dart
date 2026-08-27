@@ -188,14 +188,6 @@ class _DownloadPageState extends State<DownloadPage> {
     ]);
   }
 
-  Future<void> _refreshCurrent({bool showSpinner = false}) async {
-    if (_wantedTab) {
-      await _loadWanted(showSpinner: showSpinner);
-    } else {
-      await _load(showSpinner: showSpinner);
-    }
-  }
-
   void _selectTab(bool wanted) {
     if (_wantedTab == wanted) return;
     setState(() {

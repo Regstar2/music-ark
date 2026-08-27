@@ -68,7 +68,6 @@ extension V0111Localizations on AppLocalizations {
   String get v0111Ensure => _ru ? 'Проверить плейлисты' : 'Ensure playlists';
   String get v0111RoleCensored => _ru ? 'ЦЕНЗУРА' : 'CENSORED';
   String get v0111RoleUploaded => _ru ? 'ЗАГРУЖЕННЫЕ ТРЕКИ' : 'UPLOADED TRACKS';
-  String get v0111RoleUnavailable => _ru ? 'НЕДОСТУПНЫЕ' : 'UNAVAILABLE';
 
   String get v0111SyncPlanTab => _ru ? 'План синхронизации' : 'Sync plan';
   String get v0111RecoveryTab => _ru ? 'Восстановление' : 'Recovery';
@@ -79,7 +78,7 @@ extension V0111Localizations on AppLocalizations {
       _ru ? 'Недоступные в Яндекс Музыке' : 'Unavailable in Yandex Music';
   String get v0111RecoveryAll => _ru ? 'Все' : 'All';
   String get v0111RecoveryRecoverable =>
-      _ru ? 'Можно восстановить' : 'Recoverable';
+      _ru ? 'Есть локальная копия' : 'Local copy available';
   String get v0111RecoveryMissingLocal =>
       _ru ? 'Нет локального файла' : 'No local file';
   String get v0111RecoveryNeedsReview =>

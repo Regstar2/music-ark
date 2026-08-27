@@ -18,25 +18,91 @@ text = replace_once(
     "from musicark.recovery.managed_playlists import ManagedPlaylistError, ManagedPlaylistService\n",
     "import ManagedPlaylistError",
 )
-old_block = '''        two = ProviderPlaylist(\n            provider_id="yandex_music",\n            external_id="102",\n            title="НЕДОСТУПНЫЕ",\n            track_external_ids=(),\n            raw_data={"owner": {"uid": "owner"}},\n        )\n        three = ProviderPlaylist(\n            provider_id="yandex_music",\n            external_id="103",\n            title="НЕДОСТУПНЫЕ",\n            track_external_ids=(),\n            raw_data={"owner": {"uid": "owner"}},\n        )\n        provider.playlists.update({"102": two, "103": three})\n        service = ManagedPlaylistService(\n            self.db,\n            repository=RecoveryStorageRepository(self.db),\n            cache=_Cache(\n                [\n                    {"externalId": "102", "title": "НЕДОСТУПНЫЕ"},\n                    {"externalId": "103", "title": "НЕДОСТУПНЫЕ"},\n                ]\n            ),  # type: ignore[arg-type]\n            credential_store=_Credentials(),  # type: ignore[arg-type]\n            provider=provider,  # type: ignore[arg-type]\n            audit_repository=_Audit(),  # type: ignore[arg-type]\n            creation_enabled=False,\n        )\n        result = service.ensure()\n        unavailable = next(value for value in result["outcomes"] if value["role"] == "unavailable")\n        self.assertEqual(unavailable["state"], "ambiguous")\n        self.assertIsNone(service.configured_kind("unavailable"))\n'''
-new_block = '''        # Existing databases may still contain the retired role. Keep the row\n        # non-destructively, but never expose, validate or use it again.\n        repo = RecoveryStorageRepository(self.db)\n        repo.set_managed_playlist("unavailable", "102", "НЕДОСТУПНЫЕ")\n        legacy = ProviderPlaylist(\n            provider_id="yandex_music",\n            external_id="102",\n            title="НЕДОСТУПНЫЕ",\n            track_external_ids=(),\n            raw_data={"owner": {"uid": "owner"}},\n        )\n        provider.playlists["102"] = legacy\n        service = ManagedPlaylistService(\n            self.db,\n            repository=repo,\n            cache=_Cache([{"externalId": "102", "title": "НЕДОСТУПНЫЕ"}]),  # type: ignore[arg-type]\n            credential_store=_Credentials(),  # type: ignore[arg-type]\n            provider=provider,  # type: ignore[arg-type]\n            audit_repository=_Audit(),  # type: ignore[arg-type]\n            creation_enabled=False,\n        )\n        state = service.state()\n        self.assertEqual({item["role"] for item in state["roles"]}, {"censored", "uploaded"})\n        self.assertIsNone(service.configured_kind("unavailable"))\n        with self.assertRaises(ManagedPlaylistError):\n            service.validate_role("unavailable")\n        self.assertIn("unavailable", repo.managed_playlists())\n'''
+old_block = """        two = ProviderPlaylist(
+            provider_id="yandex_music",
+            external_id="102",
+            title="НЕДОСТУПНЫЕ",
+            track_external_ids=(),
+            raw_data={"owner": {"uid": "owner"}},
+        )
+        three = ProviderPlaylist(
+            provider_id="yandex_music",
+            external_id="103",
+            title="НЕДОСТУПНЫЕ",
+            track_external_ids=(),
+            raw_data={"owner": {"uid": "owner"}},
+        )
+        provider.playlists.update({"102": two, "103": three})
+        service = ManagedPlaylistService(
+            self.db,
+            repository=RecoveryStorageRepository(self.db),
+            cache=_Cache(
+                [
+                    {"externalId": "102", "title": "НЕДОСТУПНЫЕ"},
+                    {"externalId": "103", "title": "НЕДОСТУПНЫЕ"},
+                ]
+            ),  # type: ignore[arg-type]
+            credential_store=_Credentials(),  # type: ignore[arg-type]
+            provider=provider,  # type: ignore[arg-type]
+            audit_repository=_Audit(),  # type: ignore[arg-type]
+            creation_enabled=False,
+        )
+        result = service.ensure()
+        unavailable = next(value for value in result["outcomes"] if value["role"] == "unavailable")
+        self.assertEqual(unavailable["state"], "ambiguous")
+        self.assertIsNone(service.configured_kind("unavailable"))
+"""
+new_block = """        # Existing databases may still contain the retired role. Keep the row
+        # non-destructively, but never expose, validate or use it again.
+        repo = RecoveryStorageRepository(self.db)
+        repo.set_managed_playlist("unavailable", "102", "НЕДОСТУПНЫЕ")
+        legacy = ProviderPlaylist(
+            provider_id="yandex_music",
+            external_id="102",
+            title="НЕДОСТУПНЫЕ",
+            track_external_ids=(),
+            raw_data={"owner": {"uid": "owner"}},
+        )
+        provider.playlists["102"] = legacy
+        service = ManagedPlaylistService(
+            self.db,
+            repository=repo,
+            cache=_Cache([{"externalId": "102", "title": "НЕДОСТУПНЫЕ"}]),  # type: ignore[arg-type]
+            credential_store=_Credentials(),  # type: ignore[arg-type]
+            provider=provider,  # type: ignore[arg-type]
+            audit_repository=_Audit(),  # type: ignore[arg-type]
+            creation_enabled=False,
+        )
+        state = service.state()
+        self.assertEqual({item["role"] for item in state["roles"]}, {"censored", "uploaded"})
+        self.assertIsNone(service.configured_kind("unavailable"))
+        with self.assertRaises(ManagedPlaylistError):
+            service.validate_role("unavailable")
+        self.assertIn("unavailable", repo.managed_playlists())
+"""
 text = replace_once(text, old_block, new_block, "replace unavailable managed-role test")
 text = replace_once(
     text,
-    '        self.assertEqual(len(provider.created), 3)\n',
-    '        self.assertEqual(len(provider.created), 2)\n',
+    "        self.assertEqual(len(provider.created), 3)\n",
+    "        self.assertEqual(len(provider.created), 2)\n",
     "managed role creation count",
 )
 recovery_test.write_text(text, encoding="utf-8")
 
-# The release branch inherited a #51 unit fixture that predates the resilient\n# provider setup. Keep this test scoped to its intended run-one selection contract.\ndownload_test = Path("tests/test_download_bridge_run_task_v07.py")
+# Keep this old unit fixture scoped to run-one selection; provider setup is
+# covered separately by the persistent worker regression suite.
+download_test = Path("tests/test_download_bridge_run_task_v07.py")
 text = download_test.read_text(encoding="utf-8")
-text = replace_once(
-    text,
-    '''        with patch.object(bridge, "_prune_user_completed_history", return_value=0):\n            result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]\n''',
-    '''        with (\n            patch.object(bridge, "_prune_user_completed_history", return_value=0),\n            patch.object(bridge, "_configure_user_download_provider", return_value=None),\n        ):\n            result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]\n''',
-    "isolate run-one provider fixture",
-)
+old_run_one = """        with patch.object(bridge, "_prune_user_completed_history", return_value=0):
+            result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]
+"""
+new_run_one = """        with (
+            patch.object(bridge, "_prune_user_completed_history", return_value=0),
+            patch.object(bridge, "_configure_user_download_provider", return_value=None),
+        ):
+            result = bridge._user_run_one(service, "selected")  # type: ignore[arg-type]
+"""
+text = replace_once(text, old_run_one, new_run_one, "isolate run-one provider fixture")
 download_test.write_text(text, encoding="utf-8")
 
 print("Patched issue #54 regression fixtures")

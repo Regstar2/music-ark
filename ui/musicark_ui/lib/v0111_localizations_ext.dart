@@ -118,8 +118,8 @@ extension V0111Localizations on AppLocalizations {
       : 'Will be uploaded to Yandex Music: $count';
   String v0111ConfirmRole(String role, int count) => '$role: $count';
   String get v0111SyncRights => _ru
-      ? 'Локальная копия будет загружена в Яндекс Музыку как пользовательский трек. Я подтверждаю, что имею право загружать этот аудиофайл.'
-      : 'The local copy will be uploaded to Yandex Music as a user-uploaded track. I confirm that I have the right to upload this audio file.';
+      ? 'Локальные аудиофайлы будут загружены в Яндекс Музыку как пользовательские треки. Я подтверждаю, что имею право их загружать.'
+      : 'Local audio files will be uploaded to Yandex Music as user-uploaded tracks. I confirm that I have the right to upload them.';
   String get v0111UploadOnlyFolderHint => _ru
       ? 'Для этого плана локальная папка загрузок не требуется.'
       : 'This plan does not require a local download folder.';

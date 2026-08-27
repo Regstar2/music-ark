@@ -1,0 +1,43 @@
+name: Issue 54 regression patch
+
+on:
+  push:
+    branches:
+      - fix/v1.0-remove-unavailable-managed-role
+    paths:
+      - tools/issue54_test_patch.py
+      - .github/workflows/issue54-tests-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'Regstar2'
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v1.0-remove-unavailable-managed-role
+      - name: Apply guarded regression patch
+        shell: pwsh
+        run: |
+          $version = (& .\scripts\resolve-python.ps1).Trim()
+          & py "-$version" .\tools\issue54_test_patch.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+      - name: Commit regression updates
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain -- tests/test_v0111_recovery_upload.py tests/test_download_bridge_run_task_v07.py)) {
+            throw "Expected regression changes were not produced."
+          }
+          git config user.name "Regstar2"
+          git config user.email "carkov195@gmail.com"
+          git add tests/test_v0111_recovery_upload.py tests/test_download_bridge_run_task_v07.py
+          git commit -m "test: cover retired unavailable managed role"
+          git push origin HEAD:fix/v1.0-remove-unavailable-managed-role

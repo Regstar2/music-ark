@@ -17,6 +17,7 @@ abstract interface class YandexBatchUploadBridgeClient {
     required bool rightsConfirmed,
     required String batchId,
     bool allowStaleReupload = false,
+    String? recoverySourceExternalId,
   });
   Future<Map<String, dynamic>> batchStatus(String batchId);
   Future<Map<String, dynamic>> cancelBatch(String batchId);
@@ -57,6 +58,7 @@ class YandexBatchUploadBridge implements YandexBatchUploadBridgeClient {
     required bool rightsConfirmed,
     required String batchId,
     bool allowStaleReupload = false,
+    String? recoverySourceExternalId,
   }) => _run(
     'yandex_upload_batch',
     payload: {
@@ -66,6 +68,7 @@ class YandexBatchUploadBridge implements YandexBatchUploadBridgeClient {
       'rights_confirmed': rightsConfirmed,
       'batch_id': batchId,
       'allow_stale_reupload': allowStaleReupload,
+      'recovery_source_external_id': recoverySourceExternalId,
     },
   );
 
@@ -239,6 +242,7 @@ class FakeYandexBatchUploadBridge implements YandexBatchUploadBridgeClient {
   Map<String, dynamic> Function(List<int> ids, String playlistKind)? resultFactory;
   final List<List<int>> uploadedBatches = [];
   final List<String> uploadedTargets = [];
+  final List<String?> recoverySources = [];
   final List<String> cancelled = [];
   int statusCalls = 0;
 
@@ -278,9 +282,11 @@ class FakeYandexBatchUploadBridge implements YandexBatchUploadBridgeClient {
     required bool rightsConfirmed,
     required String batchId,
     bool allowStaleReupload = false,
+    String? recoverySourceExternalId,
   }) async {
     uploadedBatches.add(List<int>.from(localFileIds));
     uploadedTargets.add(playlistKind);
+    recoverySources.add(recoverySourceExternalId);
     if (resultFactory != null) return resultFactory!(localFileIds, playlistKind);
     return {
       'batchId': batchId,
@@ -300,7 +306,12 @@ class FakeYandexBatchUploadBridge implements YandexBatchUploadBridgeClient {
       },
       'items': [
         for (final id in localFileIds)
-          {'localFileId': id, 'status': 'verified', 'result': {'state': 'verified'}},
+          {
+            'position': localFileIds.indexOf(id),
+            'localFileId': id,
+            'status': 'verified',
+            'result': {'state': 'verified', 'trackId': 'ugc-$id'},
+          },
       ],
       'retryableLocalFileIds': <int>[],
       'manualCheckLocalFileIds': <int>[],

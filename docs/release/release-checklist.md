@@ -1,28 +1,29 @@
 # Release Checklist — v1.0.0 Release Freeze
 
-This checklist is the acceptance gate for the first public MusicArk Windows release. v0.15.0 is the merged distribution baseline; merge history alone is not release evidence.
+This checklist is the acceptance gate for the first public MusicArk Windows release. v0.15.0 is the distribution baseline and the later Windows acceptance fixes are merged; source history alone is not final release evidence.
 
-Every item must end as `PASS`, `FAIL`, `NOT VERIFIED`, or justified `N/A` against the final release source/artifact.
+Every gate against the final source/artifact must end as `PASS`, `FAIL`, `NOT VERIFIED`, or justified `N/A`.
 
-## Process / source
+## Source / release freeze
 
-- [ ] Issues #32–#35 are triaged in the shared Development Project.
-- [ ] v1.0.0 feature freeze is respected; no new product scope is added.
-- [ ] final source is reviewed through PR and trusted CI.
-- [ ] `VERSION`, Python and Flutter versions agree.
-- [ ] final release tag is exactly `v1.0.0` and points to accepted source.
+- [x] v1.0.0 feature freeze is respected; this finalization branch adds release blockers/docs only.
+- [x] canonical source version is `1.0.0` in `VERSION`, Python and Flutter release metadata.
+- [x] release-facing README RU/EN describes the v1.0 scope instead of an older development milestone.
+- [x] v1.0.0 release notes exist at `docs/versions/v1.0.0.md`.
+- [x] stable updater default points to the public MusicArk GitHub Release manifest path.
+- [ ] final source is reviewed through PR and trusted CI is green on the accepted PR head.
+- [ ] final tag is exactly `v1.0.0` and points to the accepted source.
 - [ ] no tag is moved after publication.
 
 ## Trusted GitHub automation
 
-- [ ] `.github/workflows/trusted-ci.yml` is active from `main`.
-- [ ] external/fork PR does not receive the self-hosted runner.
+- [ ] `.github/workflows/trusted-ci.yml` is green on the final accepted source.
+- [ ] external/fork PRs do not receive the self-hosted runner.
 - [ ] owner same-repository PR runs `scripts/ci.ps1`.
-- [ ] `.github/workflows/project-sync.yml` adds owner Issues to Project #2.
-- [ ] `.github/workflows/release.yml` works only from an existing trusted tag.
-- [ ] legacy unrestricted self-hosted PR workflows are removed after bootstrap.
+- [ ] `.github/workflows/release.yml` starts from an existing trusted tag.
+- [ ] release workflow reruns source CI against the exact tag before publishing.
 
-## Automated release regression
+## Automated regression
 
 Run from repository root:
 
@@ -32,23 +33,21 @@ Run from repository root:
 
 - [ ] version consistency PASS.
 - [ ] full Python suite PASS.
-- [ ] v0.12 external metadata/network regressions PASS.
-- [ ] v0.13 multi-format/conversion regressions PASS.
-- [ ] v0.14 performance/database regressions PASS.
-- [ ] v0.15 update/feedback/distribution regressions PASS.
-- [ ] v0.11.x upload/recovery compatibility remains green through the full suite.
+- [ ] external metadata/network regressions PASS.
+- [ ] multi-format/conversion regressions PASS.
+- [ ] large-library/performance/database regressions PASS.
+- [ ] update/feedback/distribution regressions PASS.
+- [ ] upload/recovery compatibility remains green through the full suite.
 - [ ] `flutter analyze --no-fatal-infos` PASS.
 - [ ] full `flutter test` PASS.
-- [ ] `flutter build windows` PASS.
-- [ ] deterministic performance and SQLite audit reports are retained.
-- [ ] portable standalone package smoke PASS.
+- [ ] Windows build/package smoke PASS.
 - [ ] normal CI performs no live Yandex mutation.
 
 Detailed mapping: `docs/testing/release-regression-matrix.md`.
 
 ## Final Windows artifacts
 
-Run from the exact release source/tag through `scripts/release.ps1` / release workflow.
+Run from the exact accepted source/tag through `scripts/release.ps1 -Version v1.0.0` or the trusted release workflow.
 
 Required `dist/` files:
 
@@ -57,67 +56,56 @@ Required `dist/` files:
 - [ ] `SHA256SUMS.txt`.
 - [ ] `update-manifest.json`.
 - [ ] installer and ZIP come from the same tagged source.
-- [ ] SHA-256 values are computed from actual final artifacts.
-- [ ] update manifest references the exact final installer size/hash.
+- [ ] SHA-256 values are computed from the actual final artifacts.
+- [ ] update manifest references the exact final installer URL, byte size and SHA-256.
 
-## Manual Windows acceptance
+Do not copy hashes from an older RC into release notes.
 
-Tracked by Issue #34.
+## Windows acceptance
 
-- [ ] clean install under a fresh Windows user profile.
-- [ ] installed app launches without system Python and without source checkout.
-- [ ] portable ZIP launches independently of development checkout.
-- [ ] reinstall same version preserves `%LOCALAPPDATA%\MusicArk`.
-- [ ] upgrade from previous accepted build preserves DB/config/credentials.
-- [ ] uninstall removes program files but preserves MusicArk user data.
-- [ ] uninstall does not silently remove Cloudflare WARP or other external software.
-- [ ] unavailable update endpoint does not block app startup or Settings.
-- [ ] prepared installer cannot launch without explicit confirmation.
-- [ ] Yandex / Local / Matching / Missing / Downloads / Sync / Metadata Editor open after packaging.
-- [ ] RU/EN smoke PASS.
-- [ ] Light/Dark/System and normal/narrow desktop smoke PASS.
+Issue #34 records that the owner already exercised installer/portable launch, packaged runtime without a development checkout, reinstall/uninstall data behavior, UI smoke and the distribution flow on the release candidate. That is valid acceptance evidence for the distribution design, but it does **not** replace a final artifact/link smoke after publication.
 
-## Update safety
+- [x] release-candidate Windows distribution acceptance recorded in #34.
+- [ ] final `v1.0.0` installer launches after publication.
+- [ ] final `v1.0.0` portable ZIP launches independently of a development checkout.
+- [ ] final install/uninstall smoke preserves `%LOCALAPPDATA%\MusicArk` as designed.
+- [ ] final RU/EN and core pages open from the published package.
 
-- [ ] manifest schema/channel/version validation remains strict.
-- [ ] update/redirect URLs remain approved HTTPS GitHub/GitHubusercontent hosts.
-- [ ] redirect count is bounded and every target is revalidated.
-- [ ] installer file name is a plain `.exe` name.
-- [ ] installer size and SHA-256 are checked exactly.
-- [ ] failed/hash-mismatched downloads are never promoted.
-- [ ] `check` is read-only.
-- [ ] `prepare` downloads/verifies but does not launch.
-- [ ] `apply` requires explicit user confirmation and re-verifies.
-- [ ] update failure does not prevent normal application use.
-- [ ] update traffic sends no Yandex/provider/proxy credentials.
+## Update safety / public channel
 
-## Feedback / privacy / security
+- [x] default stable manifest location is `https://github.com/Regstar2/music-ark/releases/latest/download/update-manifest.json`.
+- [x] endpoint remains overrideable with `MUSICARK_UPDATE_MANIFEST_URL` for testing/deployment.
+- [x] manifest schema/channel/version validation remains strict.
+- [x] update/redirect URLs are restricted to approved HTTPS GitHub/GitHubusercontent hosts.
+- [x] redirects are bounded and each target is revalidated.
+- [x] installer size and SHA-256 are checked exactly before prepare succeeds.
+- [x] `check` is read-only; `prepare` does not launch; `apply` requires confirmation and re-verification.
+- [ ] after repository publication, `releases/latest/download/update-manifest.json` is reachable without authentication.
+- [ ] published manifest downloads the exact final installer and passes verification.
 
-- [ ] Bug and Feature actions work against the intended public tracker.
-- [ ] Issue Forms are available after repository publication.
-- [ ] diagnostics contain no tokens/cookies/signed URLs/account identifiers/proxy secrets/music paths/library contents.
-- [ ] repository history/current tree review finds no committed credentials or private user data.
-- [ ] generated artifacts/logs do not expose secrets.
-- [ ] Project PAT remains only in GitHub Actions secret `ADD_TO_PROJECT_PAT`.
+## Feedback / privacy / repository hygiene
 
-## README / legal / publication
+- [ ] repository is switched from private to public only after all blocking source gates are resolved.
+- [ ] Bug and Feature Issue Forms are reachable by an external/public user.
+- [ ] tracked tree/history review finds no committed credentials, private user data, machine-specific secrets or packaged debug artifacts.
+- [ ] final artifacts/logs contain no credentials or protected provider URLs.
+- [ ] Project PAT or other automation credentials remain GitHub Actions secrets only.
 
-Tracked by Issue #35.
+## Legal / third-party / signing
 
-- [ ] README.md and README_EN.md match actual v1.0 scope and limitations.
-- [ ] install/update/feedback instructions match final public URLs.
-- [ ] LICENSE exists and is correct for the intended public release.
-- [ ] third-party notices/licenses are reviewed where required.
-- [ ] changelog/release notes describe merged facts only.
-- [ ] signing state is stated factually: verified signed artifacts or `UNSIGNED`.
-- [ ] no claim of PASS is based only on historical CI from an older head.
+- [ ] owner has selected the intended project license and a correct root `LICENSE` exists.
+- [ ] third-party notices/licenses for redistributed runtime components have been reviewed and included where required.
+- [ ] installer signing state is stated factually in release notes: verified certificate/signature or `UNSIGNED`.
+
+No project license is inferred automatically from dependency licenses, another repository, or a template. This is an owner decision and remains a release blocker until explicit.
 
 ## Publication
 
-- [ ] exact `v1.0.0` tag created only after acceptance.
-- [ ] release workflow reruns CI on the exact tag.
-- [ ] release workflow creates GitHub Release without overwriting an existing release.
-- [ ] only final files from `dist/` are attached.
-- [ ] release page/download/update/feedback links are checked after repository publication.
+- [ ] accepted source is merged to `main`.
+- [ ] exact annotated/release tag `v1.0.0` is created after acceptance.
+- [ ] release workflow builds from that tag and creates a GitHub Release without overwriting an existing release.
+- [ ] only final `dist/` files are attached.
+- [ ] repository/release/download/update/feedback links are checked after public visibility is enabled.
+- [ ] final post-publication Windows smoke is recorded.
 
-If a blocking item is `FAIL` or `NOT VERIFIED`, do not publish a stable v1.0.0 release until the owner explicitly resolves or accepts the blocker.
+If a blocking item is `FAIL` or `NOT VERIFIED`, do not publish stable v1.0.0 until the owner explicitly resolves or accepts that blocker.

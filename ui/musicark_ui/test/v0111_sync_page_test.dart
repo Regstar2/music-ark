@@ -151,7 +151,7 @@ void main() {
   );
 
   testWidgets(
-    'recovery filters are present and recoverable item exposes restore action',
+    'recovery filters are present and row restore explicitly confirms Yandex upload',
     (tester) async {
       final bridge = FakeSyncBridge();
       final managed = FakeYandexBatchUploadBridge(
@@ -196,10 +196,35 @@ void main() {
         find.byKey(const Key('sync-recovery-playlist-filter')),
         findsOneWidget,
       );
+
+      final restore = find.byKey(
+        const Key('sync-recovery-restore-unavailable-1'),
+      );
+      expect(restore, findsOneWidget);
+      await tester.ensureVisible(restore);
+      await tester.tap(restore);
+      await tester.pumpAndSettle();
+
       expect(
-        find.byKey(const Key('sync-recovery-restore-unavailable-1')),
+        find.textContaining('Локальная копия будет загружена в Яндекс Музыку'),
         findsOneWidget,
       );
+      final confirmation = find.widgetWithText(
+        FilledButton,
+        'Готов к восстановлению',
+      );
+      expect(tester.widget<FilledButton>(confirmation).onPressed, isNull);
+
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(confirmation).onPressed, isNotNull);
+      await tester.tap(confirmation);
+      await tester.pumpAndSettle();
+
+      expect(managed.uploadedBatches, [
+        [77],
+      ]);
+      expect(managed.uploadedTargets, ['9']);
     },
   );
 }

@@ -251,12 +251,6 @@ class _SyncPageState extends State<SyncPage> {
                         _int(uploadByRole['censored']),
                       ),
                     ),
-                    Text(
-                      dialogL10n.v0111ConfirmRole(
-                        dialogL10n.v0111RoleUnavailable,
-                        _int(uploadByRole['unavailable']),
-                      ),
-                    ),
                   ],
                   const SizedBox(height: 12),
                   ScopeContextBar(
@@ -439,7 +433,8 @@ class _SyncPageState extends State<SyncPage> {
     final bridge = widget.managedPlaylistBridge;
     final localFileId = int.tryParse('${item['localFileId']}');
     final state = '${item['recoveryState'] ?? ''}';
-    final role = state.startsWith('censored_') ? 'censored' : 'unavailable';
+    if (!state.startsWith('censored_')) return;
+    const role = 'censored';
     final playlistKind = _managedRoleKind(role);
     if (bridge == null || localFileId == null || playlistKind == null) return;
 
@@ -509,8 +504,7 @@ class _SyncPageState extends State<SyncPage> {
       (context.l10n.v0111CensoredTracks, _int(summary['censoredTracks'])),
       (
         context.l10n.v0111Recoverable,
-        _int(summary['unavailableRecoverable']) +
-            _int(summary['censoredRecoverable']),
+        _int(summary['censoredRecoverable']),
       ),
       (context.l10n.v0111ReadyToUpload, _int(summary['readyToUpload'])),
     ];
@@ -746,14 +740,14 @@ class _SyncPageState extends State<SyncPage> {
         .where((value) => value.isNotEmpty)
         .join(', ');
     final localReady = item['localMp3Ready'] == true;
-    final needsReview = '${item['recoveryState'] ?? ''}'.contains(
-      'needs_review',
-    );
-    final role = '${item['recoveryState'] ?? ''}'.startsWith('censored_')
-        ? 'censored'
-        : 'unavailable';
+    final recoveryState = '${item['recoveryState'] ?? ''}';
+    final needsReview = recoveryState.contains('needs_review');
+    final censoredRecovery = recoveryState.startsWith('censored_');
     final canRestore =
-        localReady && !needsReview && _managedRoleKind(role) != null;
+        censoredRecovery &&
+        localReady &&
+        !needsReview &&
+        _managedRoleKind('censored') != null;
     return Container(
       key: Key('sync-recovery-$externalId'),
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -790,17 +784,19 @@ class _SyncPageState extends State<SyncPage> {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            key: Key('sync-recovery-restore-$externalId'),
-            onPressed: canRestore ? () => _restoreRecoveryTrack(item) : null,
-            icon: const Icon(Icons.cloud_upload_outlined),
-            label: Text(
-              localReady
-                  ? context.l10n.v0111ReadyToRestore
-                  : context.l10n.v0111NeedsLocalFile,
+          if (censoredRecovery) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: Key('sync-recovery-restore-$externalId'),
+              onPressed: canRestore ? () => _restoreRecoveryTrack(item) : null,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: Text(
+                localReady
+                    ? context.l10n.v0111ReadyToRestore
+                    : context.l10n.v0111NeedsLocalFile,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

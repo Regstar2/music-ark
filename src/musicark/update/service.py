@@ -15,7 +15,7 @@ from musicark.external_metadata.network import ExternalNetworkTransport, Network
 
 from .models import AppVersion, InstallerAsset, UpdateChannel, UpdateError, UpdateErrorCode, UpdateManifest
 
-_DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/Regstar2/music-ark-releases/main/stable.json"
+_DEFAULT_MANIFEST_URL = "https://github.com/Regstar2/music-ark/releases/latest/download/update-manifest.json"
 _ALLOWED_EXACT_HOSTS = {"github.com"}
 _ALLOWED_HOST_SUFFIXES = (
     ".github.com",

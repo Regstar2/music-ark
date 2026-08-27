@@ -31,7 +31,7 @@ Colors are not duplicated in this file. Widgets obtain semantic colors from `The
 
 ## Global sidebar
 
-The global shell is the only permanent sidebar. It contains primary music destinations and keeps Settings/Account in the utility area at the bottom. A small theme-aware MusicArk mark is painted in Flutter, avoiding a dependency or asset pipeline solely for one icon.
+The global shell is the only permanent sidebar. It contains primary music destinations and keeps Settings/Account in the utility area at the bottom. The small MusicArk mark is rendered from the tracked `assets/branding/musicark_app_icon.png` branding asset, which stays aligned with the Windows runner icon resource used by packaging.
 
 ## Utility pages — v0.9.7
 

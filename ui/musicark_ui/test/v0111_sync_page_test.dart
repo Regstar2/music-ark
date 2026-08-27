@@ -206,7 +206,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.textContaining('Локальная копия будет загружена в Яндекс Музыку'),
+        find.textContaining('Локальные аудиофайлы будут загружены в Яндекс Музыку'),
         findsOneWidget,
       );
       final confirmation = find.widgetWithText(

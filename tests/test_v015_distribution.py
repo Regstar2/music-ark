@@ -181,15 +181,15 @@ class FeedbackAndRuntimeTests(unittest.TestCase):
 
 
 class WindowsPackagingNameTests(unittest.TestCase):
-    def test_flutter_windows_output_exe_is_music_ark(self) -> None:
+    def test_flutter_runner_name_is_preserved_until_release_staging(self) -> None:
         runner_cmake = (ROOT / "ui/musicark_ui/windows/runner/CMakeLists.txt").read_text(encoding="utf-8")
         package_script = (ROOT / "tools/package_windows.ps1").read_text(encoding="utf-8")
 
-        self.assertIn('OUTPUT_NAME "Music Ark"', runner_cmake)
+        self.assertNotIn('OUTPUT_NAME "Music Ark"', runner_cmake)
         self.assertIn('$appExeName = "Music Ark.exe"', package_script)
-        self.assertIn('Join-Path $flutterOutput $appExeName', package_script)
-        self.assertIn('$legacyAppExe = Join-Path $flutterOutput "musicark_ui.exe"', package_script)
-        self.assertIn("Remove-Item -LiteralPath $legacyAppExe -Force", package_script)
+        self.assertIn('$flutterExeName = "musicark_ui.exe"', package_script)
+        self.assertIn('$flutterExe = Join-Path $flutterOutput $flutterExeName', package_script)
+        self.assertIn('Move-Item -LiteralPath $stagedFlutterExe -Destination $stagedAppExe -Force', package_script)
         self.assertNotIn('$appExeName = "musicark_ui.exe"', package_script)
 
     def test_installer_launches_music_ark_exe(self) -> None:

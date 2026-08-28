@@ -1,8 +1,20 @@
-# Windows Acceptance Evidence — v1.0.0 Release Freeze
+# Windows Acceptance Evidence — v1.0.0 Release Freeze Historical RC
 
 Issue: [#34](https://github.com/Regstar2/music-ark/issues/34)
 
-This file records factual Windows distribution evidence for the first public MusicArk release candidate. `PASS` means the check was actually executed against the recorded source/artifact. If the current environment cannot prove a manual condition, the result stays `NOT VERIFIED`.
+This file records factual Windows distribution evidence for the first public
+MusicArk release candidate before the final `v1.0.0` publication pass. `PASS`
+means the check was actually executed against the recorded source/artifact. If
+the environment that produced this historical evidence could not prove a manual
+condition, the result stayed `NOT VERIFIED`.
+
+Current publication gates for the final `v1.0.0` source/tag/artifacts are
+tracked in `docs/release/release-checklist.md` and
+[#35](https://github.com/Regstar2/music-ark/issues/35). Issue #34 was closed by
+the owner on 2026-08-27 after the Windows distribution acceptance matrix had
+been exercised against the release candidate. That owner acceptance does not
+replace the final post-publication smoke of files downloaded from the published
+GitHub Release.
 
 ## Source
 
@@ -84,11 +96,19 @@ These are release-candidate evidence artifacts only. They are not final v1.0.0 a
 
 ## Release Blockers
 
-- Project #2 linkage is `NOT VERIFIED` because the available GitHub token lacks project scopes.
-- Manual Windows acceptance remains `NOT VERIFIED`; do not close Issue #34 or mark Windows acceptance PASS from automated CI alone.
-- Security / privacy audit remains `NOT VERIFIED` until the owner performs or records the dedicated audit steps.
+These were historical blockers for the environment that produced this file.
+They are not the current final-publication blocker list.
+
+- Project #2 linkage was `NOT VERIFIED` here because the available GitHub token
+  lacked project scopes.
+- Manual Windows acceptance was later confirmed by the owner in issue #34 and
+  #34 is closed.
+- Final security/privacy, public visibility, tag, GitHub Release and
+  post-publication smoke gates remain tracked in
+  `docs/release/release-checklist.md` and issue #35.
 
 ## Owner Actions Required
 
-- Confirm or repair Project #2 linkage for Issues #34 and #35 if GitHub automation has not added them.
-- Perform any manual Windows checks that cannot be executed in the current Codex environment; use the matrix above and record exact evidence.
+- Use issue #35 for the remaining final-publication gates.
+- Perform the owner GUI smoke of the published downloaded artifacts after the
+  GitHub Release is available.

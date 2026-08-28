@@ -122,7 +122,7 @@ Suggested Windows run:
 
 ```powershell
 python .\tools\yandex_upload_binding_probe.py `
-  "C:\Users\Царь\AppData\Local\Programs\YandexMusic\resources\app.asar" `
+  "<YandexMusic install dir>\resources\app.asar" `
   --offset 10176266 `
   --output .\.musicark\research\yandex-upload-binding-v6.json
 ```

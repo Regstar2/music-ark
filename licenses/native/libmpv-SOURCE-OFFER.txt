@@ -1,0 +1,37 @@
+libmpv binary source information for MusicArk v1.0.0
+====================================================
+
+MusicArk v1.0.0 redistributes this native playback library through
+media_kit_libs_windows_audio 1.0.9:
+
+  libmpv-2.dll
+
+The redistributed DLL reports:
+
+  ProductVersion: v0.36.0-403-g652a1dd907
+  Company: mpv
+
+The media_kit_libs_windows_audio 1.0.9 package changelog identifies the
+corresponding mpv source commit as:
+
+  mpv-player/mpv@652a1dd90711839acdccc08004056d25514ef2d8
+
+MusicArk does not modify libmpv, mpv, or the media-kit native library builds.
+
+Upstream/source locations checked for this release:
+
+  https://github.com/mpv-player/mpv/commit/652a1dd90711839acdccc08004056d25514ef2d8
+  https://github.com/media-kit/libmpv-win32-audio-build
+  https://github.com/media-kit/libmpv-win32-audio-cmake
+  https://github.com/media-kit/media-kit
+
+The GNU LGPL v2.1 text is included at:
+
+  licenses/LGPL-2.1.txt
+
+If the upstream build/source links become unavailable, open an issue at:
+
+  https://github.com/Regstar2/music-ark/issues
+
+and request the corresponding source information for the libmpv binary
+redistributed with MusicArk v1.0.0.

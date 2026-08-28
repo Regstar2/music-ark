@@ -109,7 +109,7 @@ class YandexUploadProtocolProbeTests(unittest.TestCase):
         self.assertEqual(entry["response"]["json_shape"]["token"], "<redacted-field>")
 
     def test_binary_scan_omits_source_context_and_finds_endpoint_shape(self) -> None:
-        secret = "abcdefghijklmnopqrstuvwxyz0123456789"
+        secret = "fake-redacted-bearer-token"
         source = (
             f'const x="Authorization: Bearer {secret}";'
             'this.httpClient.post("/playlist/123/upload", {body:new FormData()});'

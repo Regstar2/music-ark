@@ -6,6 +6,9 @@ venv/
 dist/
 build/
 *.egg-info/
+/.build/
+/artifacts/
+/.tools/
 
 .musicark/
 *.db

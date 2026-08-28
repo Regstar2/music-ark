@@ -55,7 +55,7 @@ jobs:
 
       - name: Run release-source CI
         shell: pwsh
-        run: .\scripts\ci.ps1 -SkipPackageSmoke
+        run: .\scripts\ci.ps1
 
       - name: Prepare release output
         shell: pwsh
@@ -86,9 +86,14 @@ jobs:
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) { throw "GitHub Release '$env:RELEASE_TAG' already exists." }
 
+          $notesFile = Join-Path '.\docs\releases' "$env:RELEASE_TAG-github.md"
+          if (-not (Test-Path -LiteralPath $notesFile -PathType Leaf)) {
+            throw "Prepared GitHub release notes file is missing: $notesFile"
+          }
+
           $files = @(Get-ChildItem '.\dist' -File | Select-Object -ExpandProperty FullName)
           $arguments = @('release', 'create', $env:RELEASE_TAG)
           $arguments += $files
-          $arguments += @('--title', "MusicArk $env:RELEASE_TAG", '--generate-notes')
+          $arguments += @('--title', "MusicArk $env:RELEASE_TAG", '--notes-file', $notesFile)
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw "Failed to create GitHub Release '$env:RELEASE_TAG'." }

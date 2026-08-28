@@ -20,8 +20,8 @@
 | v0.12.0 | External Metadata & Resilient Network Access | complete |
 | v0.13.0 | Multi-Format Audio & Safe Yandex Conversion | complete |
 | v0.14.0 | Large Library Performance & Release Hardening | complete |
-| v0.15.0 | Installer, Auto-Update, Feedback & Packaging | implementation |
-| v1.0.0 | Release Freeze & Public Release | planned |
+| v0.15.0 | Installer, Auto-Update, Feedback & Packaging | complete |
+| v1.0.0 | Release Freeze & Public Release | publication readiness |
 
 ## Version notes
 
@@ -34,7 +34,7 @@ Historical version notes are stored under `docs/versions/`. The current release-
 
 A standalone `docs/versions/v0.13.0.md` was not present in the repository when v0.14 work began; v0.15 does not fabricate historical validation results for that merged version. The current source and regression suites remain authoritative for its multi-format/conversion behavior.
 
-Current application/backend version target is `0.15.0`, Flutter is `0.15.0+1`, and the core SQLite schema target remains `1.9.0` because v0.15 introduces no music-database schema migration.
+Current application/backend version target is `1.0.0`, Flutter is `1.0.0+1`, and the core SQLite schema target remains `1.9.0` because v1.0.0 publication readiness introduces no music-database schema migration.
 
 ## Release line
 
@@ -46,3 +46,5 @@ v1.0.0  — Release Freeze & Public Release
 ```
 
 v0.15 introduces distribution code and packaging evidence only. No status in this index by itself implies that a tag, GitHub Release, public installer or stable update manifest has been published.
+
+v1.0.0 publication readiness adds the MIT project `LICENSE`, third-party notices/license texts, public release notes and packaging requirements for legal files. Tag, GitHub Release, public repository visibility and post-publication smoke remain factual publication gates, not source-only assumptions.

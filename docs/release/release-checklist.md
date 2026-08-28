@@ -10,7 +10,10 @@ Every gate against the final source/artifact must end as `PASS`, `FAIL`, `NOT VE
 - [x] canonical source version is `1.0.0` in `VERSION`, Python and Flutter release metadata.
 - [x] release-facing README RU/EN describes the v1.0 scope instead of an older development milestone.
 - [x] v1.0.0 release notes exist at `docs/versions/v1.0.0.md`.
+- [x] full RU/EN publication release notes exist at `docs/releases/v1.0.0.md` and `docs/releases/v1.0.0_EN.md`.
 - [x] stable updater default points to the public MusicArk GitHub Release manifest path.
+- [x] project `LICENSE` exists and identifies MusicArk's own code as MIT.
+- [x] `THIRD_PARTY_NOTICES.md` and `licenses/` exist for redistributed runtime components.
 - [ ] final source is reviewed through PR and trusted CI is green on the accepted PR head.
 - [ ] final tag is exactly `v1.0.0` and points to the accepted source.
 - [ ] no tag is moved after publication.
@@ -21,7 +24,9 @@ Every gate against the final source/artifact must end as `PASS`, `FAIL`, `NOT VE
 - [ ] external/fork PRs do not receive the self-hosted runner.
 - [ ] owner same-repository PR runs `scripts/ci.ps1`.
 - [ ] `.github/workflows/release.yml` starts from an existing trusted tag.
-- [ ] release workflow reruns source CI against the exact tag before publishing.
+- [x] `.github/workflows/release.yml` is configured to run full `scripts/ci.ps1` against the exact tag before publishing.
+- [x] `.github/workflows/release.yml` is configured to use prepared `docs/releases/v1.0.0-github.md` notes instead of fully generated notes.
+- [ ] release workflow actually reruns source CI against the exact tag before publishing.
 
 ## Automated regression
 
@@ -55,6 +60,8 @@ Required `dist/` files:
 - [ ] `MusicArk-Setup-1.0.0-x64.exe`.
 - [ ] `SHA256SUMS.txt`.
 - [ ] `update-manifest.json`.
+- [ ] `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/` are present in the portable ZIP.
+- [ ] `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/` are present in the installer installation directory.
 - [ ] installer and ZIP come from the same tagged source.
 - [ ] SHA-256 values are computed from the actual final artifacts.
 - [ ] update manifest references the exact final installer URL, byte size and SHA-256.
@@ -93,11 +100,13 @@ Issue #34 records that the owner already exercised installer/portable launch, pa
 
 ## Legal / third-party / signing
 
-- [ ] owner has selected the intended project license and a correct root `LICENSE` exists.
-- [ ] third-party notices/licenses for redistributed runtime components have been reviewed and included where required.
-- [ ] installer signing state is stated factually in release notes: verified certificate/signature or `UNSIGNED`.
+- [x] owner has selected the intended project license and a correct root `LICENSE` exists: MIT, Copyright (c) 2026 Regstar2.
+- [x] third-party notices/licenses for redistributed runtime components have been reviewed and included in source where required.
+- [x] code-signing environment was checked locally: Windows SDK `signtool.exe` is present, but no suitable Authenticode certificate with private key was found.
+- [x] installer signing state is stated factually in release notes as `UNSIGNED` for the checked environment.
+- [ ] final unsigned/signed state is verified against the final published PE artifacts.
 
-No project license is inferred automatically from dependency licenses, another repository, or a template. This is an owner decision and remains a release blocker until explicit.
+No project license is inferred automatically from dependency licenses, another repository, or a template. MusicArk's own-code license is now explicit; third-party components keep their own licenses.
 
 ## Publication
 

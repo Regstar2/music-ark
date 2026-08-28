@@ -134,7 +134,25 @@ An unavailable update endpoint must not prevent normal MusicArk startup.
 - automatic `ORIGINAL / CENSORED` analysis is not treated as absolute truth; uncertain cases require review;
 - MusicArk is not a bidirectional filesystem mirror and must not automatically delete/rename existing local tracks;
 - update/install actions do not proceed without an explicit user step;
-- code-signing status must be stated factually in release notes: only a verified signed artifact is called signed; otherwise the installer is `UNSIGNED`.
+- v1.0.0 is published as `UNSIGNED`: no suitable Authenticode code-signing certificate with a private key was found in the checked environment.
+
+## License and third-party components
+
+MusicArk's own code is distributed under the MIT License:
+
+- [LICENSE](LICENSE)
+
+Third-party components keep their own licenses. Windows artifacts include
+Flutter, the CPython/PyInstaller runtime, Python packages, Dart packages,
+FFmpeg, libmpv and other runtime libraries. Their notices/source obligations
+are documented here:
+
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+- [licenses/](licenses/)
+
+Yandex Music integration uses an unofficial API through the third-party
+`yandex-music` library. MusicArk is not an official Yandex product and is not
+affiliated with Yandex.
 
 ## Windows development run
 
@@ -164,11 +182,13 @@ It must be run only from source where canonical `VERSION` is already `1.0.0`.
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — project history;
+- [docs/releases/v1.0.0_EN.md](docs/releases/v1.0.0_EN.md) — public release notes;
 - [docs/versions/v1.0.0.md](docs/versions/v1.0.0.md) — first-public-release boundary;
 - [docs/release/release-checklist.md](docs/release/release-checklist.md) — final release gate;
 - [docs/testing/release-regression-matrix.md](docs/testing/release-regression-matrix.md) — regression mapping;
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — third-party components and licenses;
 - [GitHub Issues](https://github.com/Regstar2/music-ark/issues) — bugs and feature requests.
 
 ## Public release gate
 
-Before stable `v1.0.0` publication, the project must still have evidence for final CI/tag/artifacts, public feedback/update reachability, factual installer-signing state, and an owner-selected project license (`LICENSE`) with the required third-party notices/license review. These gates are not satisfied merely because the release code exists in `main`.
+Before stable `v1.0.0` publication, the project must still have evidence for final CI/tag/artifacts, public feedback/update reachability, legal files included in the final ZIP/installer, and factual installer-signing state (`UNSIGNED` for the currently checked environment). These gates are not satisfied merely because the release code exists in `main`.

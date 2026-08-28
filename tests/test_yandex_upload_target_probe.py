@@ -62,7 +62,7 @@ class YandexUploadTargetProbeTests(unittest.TestCase):
         )
 
     def test_report_keeps_protocol_structure_and_omits_secret_source_values(self) -> None:
-        secret = "very-private-session-cookie-value"
+        secret = "fake-redacted-session-cookie-value"
         content = (
             f'const auth="Authorization: Bearer {secret}";'
             'async function getUploadUrl() {'

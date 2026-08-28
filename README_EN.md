@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/logo.png" width="128" alt="MusicArk">
+
 # MusicArk
 
 A Windows application for managing a local music collection and matching it against a Yandex Music library. It helps identify missing tracks, review recording variants, repair metadata, and perform controlled synchronization.
@@ -13,7 +15,7 @@ A Windows application for managing a local music collection and matching it agai
 [Quick start](#quick-start) ·
 [Documentation](#documentation) ·
 [Releases](../../releases) ·
-[Feedback](#feedback)
+[Feedback](../../issues)
 
 </div>
 

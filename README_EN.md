@@ -4,7 +4,9 @@
 
 A Windows application for managing a local music collection and matching it against a Yandex Music library. It helps identify missing tracks, review recording variants, repair metadata, and perform controlled synchronization.
 
+[![Release](https://img.shields.io/github/v/release/Regstar2/music-ark?display_name=tag&sort=semver&style=for-the-badge&logo=github&label=release)](../../releases)
 [![Platform](https://img.shields.io/badge/platform-Windows_x64-0A7EA4?style=for-the-badge)](#requirements)
+[![License](https://img.shields.io/github/license/Regstar2/music-ark?style=for-the-badge&label=license)](LICENSE)
 
 [Русский](README.md) · **English**
 
@@ -38,12 +40,12 @@ Download / Metadata / confirmed Sync or Upload actions
 ## Project status
 
 - stage: **Stable**;
-- current release: **v1.0.0**;
+- current public release: **v1.0.0**;
 - release platform: **Windows x64**;
 - SQLite schema: **1.9.0**;
 - Authenticode: **UNSIGNED**.
 
-`v1.0.0` is published as the first stable release. The installer and executable are not Authenticode-signed, so Windows SmartScreen may display a warning on first launch.
+`v1.0.0` is published as the first stable public release. The installer and executable are not Authenticode-signed, so Windows SmartScreen may display a warning on first launch.
 
 ## Features
 
@@ -201,7 +203,7 @@ The repository also contains `Trusted CI` for trusted owner PR/workflow-dispatch
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — project history;
-- [v1.0.0 release notes](docs/releases/v1.0.0_EN.md) — details of the first stable release;
+- [v1.0.0 release notes](docs/releases/v1.0.0_EN.md) — details of the first public release;
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — redistributed components, licenses, and source obligations.
 
 ## Feedback

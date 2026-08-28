@@ -202,6 +202,54 @@ class WindowsPackagingNameTests(unittest.TestCase):
         self.assertIn('VALUE "OriginalFilename", "Music Ark.exe"', resources)
         self.assertIn('VALUE "ProductName", "Music Ark"', resources)
 
+    def test_windows_package_stages_release_legal_files(self) -> None:
+        package_script = (ROOT / "tools/package_windows.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$legalFiles = @("LICENSE", "THIRD_PARTY_NOTICES.md")', package_script)
+        self.assertIn('Required release legal file is missing', package_script)
+        self.assertIn('$licensesSource = Join-Path $root "licenses"', package_script)
+        self.assertIn('Required release license directory is missing', package_script)
+        self.assertIn('Required release license directory is empty', package_script)
+        self.assertIn('Copy-Item -Path (Join-Path $licensesSource "*") -Destination $licensesTarget -Recurse -Force', package_script)
+
+    def test_third_party_notices_cover_bundled_hls_asset(self) -> None:
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        hls_license = ROOT / "licenses/flutter-packages/hls.js-1.4.10/LICENSE"
+
+        self.assertIn("data/flutter_assets/packages/media_kit/assets/web/hls1.4.10.js", notices)
+        self.assertIn("hls.js asset bundled by media_kit", notices)
+        self.assertIn("Apache-2.0", notices)
+        self.assertTrue(hls_license.is_file())
+        self.assertIn("Copyright (c) 2017 Dailymotion", hls_license.read_text(encoding="utf-8"))
+
+    def test_third_party_notices_cover_setuptools_vendored_runtime_subset(self) -> None:
+        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        vendor_dir = ROOT / "licenses/python-packages/setuptools-84.0.0/vendor"
+        expected = [
+            "importlib_metadata-8.7.1-LICENSE.txt",
+            "jaraco.text-4.0.0-LICENSE.txt",
+            "packaging-26.0-LICENSE.txt",
+            "packaging-26.0-LICENSE.APACHE.txt",
+            "packaging-26.0-LICENSE.BSD.txt",
+            "tomli-2.4.0-LICENSE.txt",
+            "wheel-0.46.3-LICENSE.txt",
+            "zipp-3.23.0-LICENSE.txt",
+        ]
+
+        self.assertIn("setuptools._vendor", notices)
+        for name in expected:
+            self.assertIn(name, notices)
+            self.assertGreater((vendor_dir / name).stat().st_size, 0)
+
+    def test_release_workflow_uses_full_ci_and_prepared_notes(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+        self.assertIn(r"run: .\scripts\ci.ps1", workflow)
+        self.assertNotIn("-SkipPackageSmoke", workflow)
+        self.assertIn("$notesFile = Join-Path '.\\docs\\releases' \"$env:RELEASE_TAG-github.md\"", workflow)
+        self.assertIn("--notes-file", workflow)
+        self.assertNotIn("--generate-notes", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

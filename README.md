@@ -134,7 +134,24 @@ apply   → после явного подтверждения повторно 
 - автоматическое определение `ORIGINAL / CENSORED` не считается абсолютной истиной: сомнительные случаи требуют проверки;
 - MusicArk не является двунаправленным filesystem mirror и не должен автоматически удалять/переименовывать существующие локальные треки;
 - update/install действия не выполняются без явного пользовательского шага;
-- код-сайнинг должен указываться в release notes фактически: подписан только реально проверенный подписанный artifact; иначе installer считается `UNSIGNED`.
+- v1.0.0 публикуется как `UNSIGNED`: подходящий Authenticode code-signing certificate с private key не найден в проверенном окружении.
+
+## Лицензия и сторонние компоненты
+
+Собственный код MusicArk распространяется под MIT License:
+
+- [LICENSE](LICENSE)
+
+Сторонние компоненты сохраняют собственные лицензии. Windows artifacts включают
+Flutter, CPython/PyInstaller runtime, Python packages, Dart packages, FFmpeg,
+libmpv и другие runtime libraries. Их notices/source obligations описаны здесь:
+
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+- [licenses/](licenses/)
+
+Интеграция с Яндекс Музыкой использует неофициальный API через стороннюю
+библиотеку `yandex-music`. MusicArk не является официальным продуктом Яндекса и
+не аффилирован с Яндексом.
 
 ## Запуск для разработки
 
@@ -164,11 +181,13 @@ flutter run -d windows
 ## Документация
 
 - [CHANGELOG.md](CHANGELOG.md) — история изменений;
+- [docs/releases/v1.0.0.md](docs/releases/v1.0.0.md) — публичное описание релиза;
 - [docs/versions/v1.0.0.md](docs/versions/v1.0.0.md) — границы первого публичного релиза;
 - [docs/release/release-checklist.md](docs/release/release-checklist.md) — финальный release gate;
 - [docs/testing/release-regression-matrix.md](docs/testing/release-regression-matrix.md) — regression mapping;
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — сторонние компоненты и лицензии;
 - [GitHub Issues](https://github.com/Regstar2/music-ark/issues) — ошибки и предложения.
 
 ## Public release gate
 
-До публикации стабильного `v1.0.0` должны быть подтверждены финальный CI/tag/artifacts, публичная доступность feedback/update links, фактическое состояние подписи installer и выбранная владельцем проекта лицензия (`LICENSE`) с необходимой проверкой third-party notices. Эти пункты не считаются выполненными только потому, что release-код уже присутствует в `main`.
+До публикации стабильного `v1.0.0` должны быть подтверждены финальный CI/tag/artifacts, публичная доступность feedback/update links, наличие legal files в финальном ZIP/installer и фактическое состояние подписи installer (`UNSIGNED` для текущего проверенного окружения). Эти пункты не считаются выполненными только потому, что release-код уже присутствует в `main`.

@@ -120,6 +120,29 @@ foreach ($relative in $sentinels) {
     Set-Content -LiteralPath $path -Value "# packaged runtime sentinel" -Encoding utf8
 }
 
+$legalFiles = @("LICENSE", "THIRD_PARTY_NOTICES.md")
+foreach ($relative in $legalFiles) {
+    $source = Join-Path $root $relative
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Required release legal file is missing: $relative"
+    }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $stage $relative) -Force
+}
+
+$licensesSource = Join-Path $root "licenses"
+if (-not (Test-Path -LiteralPath $licensesSource -PathType Container)) {
+    throw "Required release license directory is missing: licenses"
+}
+if (-not (Get-ChildItem -LiteralPath $licensesSource -Recurse -File -ErrorAction SilentlyContinue)) {
+    throw "Required release license directory is empty: licenses"
+}
+$licensesTarget = Join-Path $stage "licenses"
+if (Test-Path -LiteralPath $licensesTarget) {
+    Remove-Item -LiteralPath $licensesTarget -Recurse -Force
+}
+New-Item -ItemType Directory -Path $licensesTarget -Force | Out-Null
+Copy-Item -Path (Join-Path $licensesSource "*") -Destination $licensesTarget -Recurse -Force
+
 & $runtimeExe --version
 if ($LASTEXITCODE -ne 0) { throw "Packaged backend runtime --version smoke failed." }
 $feedbackSmoke = (& $runtimeExe -m musicark.feedback_bridge link --kind bug | Out-String).Trim()

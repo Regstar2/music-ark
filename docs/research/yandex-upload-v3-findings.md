@@ -110,7 +110,7 @@ Suggested Windows run:
 
 ```powershell
 python .\tools\yandex_upload_callsite_probe.py `
-  "C:\Users\Царь\AppData\Local\Programs\YandexMusic\resources\app.asar" `
+  "<YandexMusic install dir>\resources\app.asar" `
   --offset 10176266 `
   --offset 16146222 `
   --radius 1800 `

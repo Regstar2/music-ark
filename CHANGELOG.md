@@ -4,6 +4,25 @@ All notable project changes are recorded here. Entries describe the current code
 
 ## Unreleased — release hardening
 
+### v1.0.0 — Public release readiness
+
+#### Added
+
+- MIT `LICENSE` for MusicArk's own source code;
+- `THIRD_PARTY_NOTICES.md` plus `licenses/` with license texts/source-offer notes for redistributed Windows runtime components, including the frozen `setuptools` vendored subset;
+- full RU/EN `v1.0.0` release notes and a short prepared GitHub Release body.
+
+#### Changed
+
+- Windows packaging now requires and stages `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/` into portable and installer artifacts;
+- release workflow runs full `scripts/ci.ps1` against the exact tag and uses prepared release notes instead of fully generated notes;
+- README RU/EN and release checklist state the MIT own-code license, third-party license boundary, unofficial Yandex Music API boundary and `UNSIGNED` signing status for the checked environment.
+
+#### Safety / boundaries
+
+- no product functionality, provider behavior, Matching/Coverage/Sync/Metadata semantics or UI workflow is expanded by v1.0.0 publication readiness;
+- ZIP artifacts are not described as Authenticode-signed; PE signing status remains factual and is currently `UNSIGNED`.
+
 ### v0.15.0 — Installer, Auto-Update, Feedback & Packaging
 
 #### Added

@@ -158,8 +158,28 @@ v0.9.7 Help documents these boundaries but does not create new domain behavior. 
 
 v0.15 Windows packaging produces the release-facing executable `Music Ark.exe`. The internal Flutter/CMake target name can stay technical, but installer shortcuts, package validation and Windows resource metadata must use the display name.
 
+v1.0.0 publication readiness adds the legal distribution boundary for Windows
+artifacts:
+
+```text
+LICENSE
+THIRD_PARTY_NOTICES.md
+licenses/
+docs/releases/v1.0.0.md
+docs/releases/v1.0.0_EN.md
+docs/releases/v1.0.0-github.md
+```
+
+`LICENSE` applies to MusicArk's own code only. Third-party runtime components keep
+their own licenses and are documented in `THIRD_PARTY_NOTICES.md`. Packaging must
+copy all legal files into the portable ZIP and the Inno Setup installation
+directory. MusicArk uses an unofficial Yandex Music API wrapper and is not an
+official Yandex product or Yandex affiliate.
+
 ## Documentation entry points
 
+- `docs/releases/v1.0.0.md` and `docs/releases/v1.0.0_EN.md` — public v1.0.0 release notes;
+- `THIRD_PARTY_NOTICES.md` — redistributed Windows runtime component license/source inventory;
 - `docs/versions/v0.9.7.md` — current Settings / Help / About UI Draft milestone and verification gate;
 - `docs/versions/v0.9.6.md` — Controlled Sync presentation and safety boundaries;
 - `docs/versions/v0.9.5.md` — Downloads safe deletion / bulk-action semantics;

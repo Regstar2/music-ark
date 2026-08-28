@@ -8,7 +8,7 @@ Windows-приложение для управления локальной му
 
 [![Release](https://img.shields.io/github/v/release/Regstar2/music-ark?display_name=tag&sort=semver&style=for-the-badge&logo=github&label=release)](../../releases)
 [![Platform](https://img.shields.io/badge/platform-Windows_x64-0A7EA4?style=for-the-badge)](#требования)
-[![License](https://img.shields.io/github/license/Regstar2/music-ark?style=for-the-badge&label=license)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-yellow?style=for-the-badge)](LICENSE)
 
 **Русский** · [English](README_EN.md)
 

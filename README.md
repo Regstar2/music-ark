@@ -1,38 +1,34 @@
+<div align="center">
+
 # MusicArk
+
+Windows-приложение для управления локальной музыкальной коллекцией и сопоставления её с библиотекой Яндекс Музыки. Помогает находить отсутствующие треки, проверять версии записей, восстанавливать метаданные и выполнять контролируемую синхронизацию.
+
+[![Release](https://img.shields.io/github/v/release/Regstar2/music-ark?display_name=tag&sort=semver&style=for-the-badge&logo=github&label=release)](../../releases)
+[![Platform](https://img.shields.io/badge/platform-Windows_x64-0A7EA4?style=for-the-badge)](#требования)
+[![License](https://img.shields.io/github/license/Regstar2/music-ark?style=for-the-badge&label=license)](LICENSE)
 
 **Русский** · [English](README_EN.md)
 
-**Версия кода: 1.0.0**  
-**SQLite schema: 1.9.0**  
-**Платформа: Windows x64**
+[Быстрый старт](#быстрый-старт) ·
+[Документация](#документация) ·
+[Релизы](../../releases) ·
+[Обратная связь](#обратная-связь)
 
-MusicArk — desktop-приложение для управления локальной музыкальной коллекцией и её сопоставления с библиотекой Яндекс Музыки. Основная задача проекта — помочь сохранить целостность коллекции: найти отсутствующие локально треки, обнаружить требующие проверки версии, восстановить метаданные и выполнять только явно подтверждённые действия.
+</div>
 
-> `v1.0.0` — release-freeze версия первого публичного релиза. Исходники могут содержать финальные release-правки до появления тега и GitHub Release; наличие версии `1.0.0` в коде само по себе не означает, что релиз уже опубликован.
+---
 
-## Что умеет MusicArk
+## О проекте
 
-- вход в Яндекс Музыку через пользовательский токен без хранения токена в репозитории;
-- cache-first просмотр любимых треков, плейлистов и понравившихся альбомов;
-- индексирование нескольких локальных папок без изменения исходных файлов во время обычного Scan;
-- Identity Matching между треками Яндекс Музыки и локальными файлами;
-- отдельный Variant-анализ записи/версии и пользовательские метки `ORIGINAL / CENSORED`;
-- Coverage / Missing для поиска отсутствующих и требующих проверки треков;
-- очередь загрузок с Wanted, retry/cancel/remove и массовыми действиями;
-- встроенное воспроизведение локальных и подготовленных Yandex-треков;
-- Metadata Editor для безопасной записи MP3/ID3, artwork и подтверждённого связывания с Yandex identity;
-- ручная загрузка собственных/разрешённых MP3 в Яндекс Музыку и recovery workflows;
-- Controlled Sync с явным планом и подтверждением перед применением;
-- System / Direct / Custom proxy network modes;
-- RU/EN интерфейс, System/Light/Dark theme;
-- portable Windows package, per-user Inno Setup installer, SHA-256 и проверяемый update manifest.
+MusicArk предназначен для пользователей, которые хотят хранить локальную копию музыкальной коллекции и сверять её с библиотекой Яндекс Музыки. Приложение разделяет идентичность трека, метаданные, вариант записи и покрытие коллекции: высокая похожесть названий сама по себе не считается подтверждённым совпадением.
 
-## Основной цикл
+Основной сценарий:
 
 ```text
-Yandex Library = желаемая коллекция
+Яндекс Музыка = желаемая коллекция
         ↓
-Local Library = фактические локальные файлы
+Локальная библиотека = фактические файлы
         ↓
 Identity Matching + Variant + Coverage
         ↓
@@ -41,36 +37,85 @@ Missing / Wanted
 Download / Metadata / подтверждённые Sync или Upload действия
 ```
 
-MusicArk специально разделяет **identity**, **metadata**, **variant** и **coverage**. Высокая похожесть названий сама по себе не превращается в подтверждённое совпадение.
+## Статус проекта
 
-## Безопасность локальной коллекции
+- стадия: **Stable**;
+- текущий публичный релиз: **v1.0.0**;
+- платформа релиза: **Windows x64**;
+- SQLite schema: **1.9.0**;
+- Authenticode: **UNSIGNED**.
+
+`v1.0.0` опубликован как первый стабильный публичный релиз. Установщик и executable не подписаны Authenticode, поэтому Windows SmartScreen может показать предупреждение при первом запуске.
+
+## Возможности
+
+- вход в Яндекс Музыку через пользовательский токен;
+- cache-first просмотр любимых треков, плейлистов и понравившихся альбомов;
+- индексирование нескольких локальных папок без изменения файлов во время обычного Scan;
+- Identity Matching между треками Яндекс Музыки и локальными файлами;
+- Variant-анализ и пользовательские метки `ORIGINAL / CENSORED`;
+- Coverage / Missing для поиска отсутствующих и требующих проверки треков;
+- очередь загрузок с Wanted, retry, cancel, remove и массовыми действиями;
+- встроенное воспроизведение локальных и подготовленных Yandex-треков;
+- Metadata Editor для безопасной записи MP3/ID3, artwork и подтверждённого связывания с Yandex identity;
+- ручная загрузка собственных или разрешённых MP3 в Яндекс Музыку и recovery workflows;
+- Controlled Sync с предварительным планом и подтверждением перед применением;
+- System / Direct / Custom proxy modes;
+- интерфейс RU/EN и темы System / Light / Dark;
+- portable package, per-user installer и проверяемый механизм обновления.
+
+Для библиотек в несколько тысяч треков используются cache-first загрузка, bounded batches, сохранённые очереди и последовательные workers для тяжёлых операций.
+
+## Быстрый старт
+
+1. Откройте [последний GitHub Release](../../releases/latest).
+2. Скачайте `MusicArk-Setup-1.0.0-x64.exe` для обычной установки или `MusicArk-1.0.0-win-x64.zip` для portable-запуска.
+3. Запустите MusicArk.
+4. При необходимости войдите в Яндекс Музыку с пользовательским токеном.
+5. Добавьте папки локальной библиотеки и запустите Scan.
+6. Используйте Matching, Coverage и Downloads для проверки состояния коллекции.
+
+Отдельно устанавливать Python или клонировать репозиторий для готовой Windows-сборки не требуется.
+
+## Требования
+
+- 64-битная Windows;
+- доступ к интернету для функций Яндекс Музыки, обновлений и внешних источников;
+- пользовательский токен Яндекс Музыки для функций, требующих авторизации.
+
+Для локального просмотра и работы с уже сохранёнными данными доступность внешних сервисов не должна быть обязательной.
+
+## Установка
+
+### Installer
+
+`MusicArk-Setup-1.0.0-x64.exe` устанавливает приложение для текущего пользователя в:
+
+```text
+%LOCALAPPDATA%\Programs\Music Ark
+```
+
+### Portable
+
+`MusicArk-1.0.0-win-x64.zip` можно распаковать в любой доступный пользователю каталог и запустить `Music Ark.exe`.
+
+Пользовательские данные хранятся отдельно:
+
+```text
+%LOCALAPPDATA%\MusicArk
+```
+
+Обычный uninstall не должен удалять базу данных, кеши и настройки пользователя.
+
+## Использование
 
 Обычные Scan, Matching, Variant, Coverage и просмотр Sync-плана не изменяют пользовательские аудиофайлы.
 
-Существующий MP3 меняется только после явного действия в Metadata Editor. Запись выполняется через временную копию в том же каталоге, проверку MPEG/metadata и атомарную замену. Неизвестные/custom ID3 frames сохраняются, если пользователь явно их не редактирует.
+Существующий MP3 изменяется только после явного действия в Metadata Editor. Запись выполняется через временную копию, проверку MPEG/metadata и атомарную замену. Неизвестные и custom ID3 frames сохраняются, если пользователь явно их не редактирует.
 
 Удаление failed/needs-review задачи загрузки удаляет запись очереди, а не готовый аудиофайл.
 
-## Форматы
-
-Чтение локальной библиотеки использует format adapters. Полноценная безопасная запись метаданных реализована для **MP3/ID3**; остальные поддерживаемые форматы остаются read-only в Metadata Editor, если для них нет отдельного безопасного writer path.
-
-Yandex upload использует только явно выбранные пользователем файлы и требует подтверждения прав. Пользователь отвечает за законность загрузки и использования контента.
-
-## Большие библиотеки
-
-Release-кандидат прошёл отдельный цикл оптимизации для коллекций в несколько тысяч треков:
-
-- Local Library открывается cache-first и не запускает recursive scan при обычной навигации;
-- страницы и массовые операции ограничены bounded chunks;
-- Matching сохраняет batches через активное соединение без второго SQLite writer в hot loop;
-- Select All / массовые решения показывают processed/total progress;
-- Downloads обновляет Wanted/queue state при открытии и возврате на страницу;
-- Download All сначала создаёт видимую persisted queue, затем выполняет её последовательным worker;
-- Yandex download worker переиспользует одну service/client session и имеет bounded retry/circuit-breaker для системных ошибок;
-- повторное Yandex playback использует cache short-circuit до дорогой provider preparation.
-
-## Сеть
+## Сеть и прокси
 
 MusicArk поддерживает три режима:
 
@@ -82,78 +127,38 @@ Custom  — пользовательский proxy
 
 Встроенное управление Cloudflare WARP удалено из release runtime. MusicArk не устанавливает и не удаляет WARP автоматически.
 
-Сетевые ошибки внешних metadata/download источников должны деградировать локально и не блокировать работу с уже сохранённой библиотекой.
+Сетевые ошибки внешних metadata/download источников должны локализоваться в соответствующей функции и не блокировать работу с локальной библиотекой и кешированными данными.
 
-## Windows distribution
+## Безопасность
 
-Финальный release pipeline создаёт:
+- Scan, Matching, Variant и Coverage не должны изменять локальные аудиофайлы;
+- запись MP3 выполняется только после явного действия пользователя;
+- upload и sync требуют явного выбора или подтверждения;
+- updater проверяет размер и SHA-256 installer перед запуском;
+- release package включает `LICENSE`, `THIRD_PARTY_NOTICES.md` и тексты лицензий сторонних компонентов.
 
-```text
-MusicArk-1.0.0-win-x64.zip
-MusicArk-Setup-1.0.0-x64.exe
-SHA256SUMS.txt
-update-manifest.json
-```
-
-Portable и installer включают Flutter desktop и frozen MusicArk backend runtime. Отдельно установленный Python или developer checkout пользователю не требуется.
-
-Установщик per-user размещает приложение в `%LOCALAPPDATA%\Programs\Music Ark`. Пользовательские данные хранятся отдельно в `%LOCALAPPDATA%\MusicArk` и не должны удаляться обычным uninstall.
-
-### Обновления
-
-Stable updater использует:
-
-```text
-https://github.com/Regstar2/music-ark/releases/latest/download/update-manifest.json
-```
-
-`MUSICARK_UPDATE_MANIFEST_URL` может переопределить endpoint для тестирования/развёртывания.
-
-Update flow разделён:
-
-```text
-check   → только получить и проверить manifest
-prepare → скачать installer и проверить размер + SHA-256
-apply   → после явного подтверждения повторно проверить и запустить installer
-```
-
-Ошибка update endpoint не должна мешать обычному запуску MusicArk.
-
-## Данные и приватность
+## Приватность
 
 - токены, cookies, signed media URLs и proxy passwords не должны попадать в Git;
-- Flutter не получает Yandex token или защищённые provider media URLs для playback/download;
+- Flutter UI не получает Yandex token или защищённые provider media URLs для playback/download;
 - автоматические diagnostics для feedback ограничены версией MusicArk, ОС и архитектурой и не включают музыкальную библиотеку, локальные пути или credentials;
-- mutable state установленной версии хранится в пользовательском каталоге, а не рядом с program files.
+- изменяемые данные установленной версии хранятся в пользовательском каталоге, а не рядом с program files.
 
-## Ограничения v1.0.0
+## Обновление
 
-- Windows x64 — единственная release-платформа;
-- полноценная запись metadata — MP3/ID3;
-- часть provider-функций зависит от внешних API и доступности сервисов;
-- автоматическое определение `ORIGINAL / CENSORED` не считается абсолютной истиной: сомнительные случаи требуют проверки;
-- MusicArk не является двунаправленным filesystem mirror и не должен автоматически удалять/переименовывать существующие локальные треки;
-- update/install действия не выполняются без явного пользовательского шага;
-- v1.0.0 публикуется как `UNSIGNED`: подходящий Authenticode code-signing certificate с private key не найден в проверенном окружении.
+Stable updater использует `update-manifest.json` из последнего GitHub Release.
 
-## Лицензия и сторонние компоненты
+```text
+check   → получить и проверить manifest
+prepare → скачать installer и проверить размер + SHA-256
+apply   → после подтверждения повторно проверить и запустить installer
+```
 
-Собственный код MusicArk распространяется под MIT License:
+Ошибка update endpoint не должна мешать обычному запуску MusicArk. Установка обновления выполняется только после явного подтверждения пользователя.
 
-- [LICENSE](LICENSE)
+## Разработка
 
-Сторонние компоненты сохраняют собственные лицензии. Windows artifacts включают
-Flutter, CPython/PyInstaller runtime, Python packages, Dart packages, FFmpeg,
-libmpv и другие runtime libraries. Их notices/source obligations описаны здесь:
-
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- [licenses/](licenses/)
-
-Интеграция с Яндекс Музыкой использует неофициальный API через стороннюю
-библиотеку `yandex-music`. MusicArk не является официальным продуктом Яндекса и
-не аффилирован с Яндексом.
-
-## Запуск для разработки
+Для локального запуска из исходников нужны Python, Flutter и Windows toolchain, соответствующий текущему проекту.
 
 ```powershell
 py -3 -m venv .venv
@@ -162,32 +167,65 @@ python -m pip install -U pip
 python -m pip install -e .
 python -m pip install -r requirements-yandex.txt
 
-.\scripts\ci.ps1
-
 $env:MUSICARK_PYTHON = (Resolve-Path ".\.venv\Scripts\python.exe").Path
 $env:MUSICARK_REPO_ROOT = (Get-Location).Path
 Set-Location .\ui\musicark_ui
 flutter run -d windows
 ```
 
-Финальная Windows-упаковка:
+## Сборка
+
+Финальная Windows-упаковка выполняется из source state, где `VERSION` уже соответствует версии релиза:
 
 ```powershell
 .\scripts\release.ps1 -Version v1.0.0
 ```
 
-Она должна запускаться только из source state, где `VERSION` уже равен `1.0.0`.
+Для `v1.0.0` pipeline формирует:
+
+```text
+MusicArk-1.0.0-win-x64.zip
+MusicArk-Setup-1.0.0-x64.exe
+SHA256SUMS.txt
+update-manifest.json
+```
+
+## Тестирование
+
+Основной локальный regression entry point:
+
+```powershell
+.\scripts\ci.ps1
+```
+
+Репозиторий также содержит `Trusted CI` для доверенных owner PR/workflow-dispatch запусков на self-hosted Windows x64 runner. Внешние или недоверенные fork PR не должны выполняться на persistent self-hosted runner владельца.
 
 ## Документация
 
 - [CHANGELOG.md](CHANGELOG.md) — история изменений;
-- [docs/releases/v1.0.0.md](docs/releases/v1.0.0.md) — публичное описание релиза;
-- [docs/versions/v1.0.0.md](docs/versions/v1.0.0.md) — границы первого публичного релиза;
-- [docs/release/release-checklist.md](docs/release/release-checklist.md) — финальный release gate;
-- [docs/testing/release-regression-matrix.md](docs/testing/release-regression-matrix.md) — regression mapping;
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — сторонние компоненты и лицензии;
-- [GitHub Issues](https://github.com/Regstar2/music-ark/issues) — ошибки и предложения.
+- [Release notes v1.0.0](docs/releases/v1.0.0.md) — подробности первого публичного релиза;
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — сторонние компоненты, лицензии и source obligations.
 
-## Public release gate
+## Обратная связь
 
-До публикации стабильного `v1.0.0` должны быть подтверждены финальный CI/tag/artifacts, публичная доступность feedback/update links, наличие legal files в финальном ZIP/installer и фактическое состояние подписи installer (`UNSIGNED` для текущего проверенного окружения). Эти пункты не считаются выполненными только потому, что release-код уже присутствует в `main`.
+Ошибки и предложения принимаются через [GitHub Issues](../../issues).
+
+При сообщении об ошибке не публикуйте токены, cookies, proxy passwords, signed URLs и другие credentials.
+
+## Ограничения
+
+- Windows x64 — единственная release-платформа;
+- полноценная безопасная запись metadata реализована для MP3/ID3; другие поддерживаемые форматы могут оставаться read-only в Metadata Editor;
+- часть provider-функций зависит от внешних API и доступности сервисов;
+- автоматическое определение `ORIGINAL / CENSORED` не считается абсолютной истиной и сомнительные случаи требуют проверки;
+- MusicArk не является двунаправленным filesystem mirror и не должен автоматически удалять, переименовывать или перезаписывать существующие локальные треки;
+- update/install действия не выполняются без явного пользовательского шага;
+- v1.0.0 распространяется без Authenticode-подписи.
+
+## Лицензия
+
+Собственный код MusicArk распространяется под [MIT License](LICENSE).
+
+Сторонние компоненты сохраняют собственные лицензии. Их notices и source obligations описаны в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) и каталоге [`licenses/`](licenses/).
+
+Интеграция с Яндекс Музыкой использует неофициальный API через стороннюю библиотеку `yandex-music`. MusicArk не является официальным продуктом Яндекса и не аффилирован с Яндексом.

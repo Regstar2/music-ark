@@ -1,38 +1,34 @@
+<div align="center">
+
 # MusicArk
+
+A Windows application for managing a local music collection and matching it against a Yandex Music library. It helps identify missing tracks, review recording variants, repair metadata, and perform controlled synchronization.
+
+[![Release](https://img.shields.io/github/v/release/Regstar2/music-ark?display_name=tag&sort=semver&style=for-the-badge&logo=github&label=release)](../../releases)
+[![Platform](https://img.shields.io/badge/platform-Windows_x64-0A7EA4?style=for-the-badge)](#requirements)
+[![License](https://img.shields.io/github/license/Regstar2/music-ark?style=for-the-badge&label=license)](LICENSE)
 
 [Русский](README.md) · **English**
 
-**Code version: 1.0.0**  
-**SQLite schema: 1.9.0**  
-**Platform: Windows x64**
+[Quick start](#quick-start) ·
+[Documentation](#documentation) ·
+[Releases](../../releases) ·
+[Feedback](#feedback)
 
-MusicArk is a Windows desktop application for managing a local music collection and matching it against a Yandex Music library. Its main purpose is collection integrity: identify tracks that are missing locally, surface recordings that need review, repair metadata, and perform only explicitly confirmed recovery actions.
+</div>
 
-> `v1.0.0` is the release-freeze version for the first public release. Source may contain final release fixes before the tag and GitHub Release exist; seeing `1.0.0` in source does not by itself mean the release has been published.
+---
 
-## What MusicArk does
+## About
 
-- Yandex Music sign-in with a user-provided token without storing that token in the repository;
-- cache-first browsing of liked tracks, playlists and explicitly liked albums;
-- indexing of multiple local folders without modifying source audio during ordinary Scan;
-- Identity Matching between Yandex Music tracks and local files;
-- separate Variant analysis plus user `ORIGINAL / CENSORED` labels;
-- Coverage / Missing workflows for absent or review-required tracks;
-- Downloads queue with Wanted, retry/cancel/remove and bulk actions;
-- built-in playback for local and prepared Yandex tracks;
-- Metadata Editor for safe MP3/ID3 writes, artwork and user-confirmed Yandex identity binding;
-- manual upload/recovery workflows for MP3 files the user is allowed to upload;
-- Controlled Sync with an explicit plan and confirmation before apply;
-- System / Direct / Custom proxy network modes;
-- RU/EN UI with System/Light/Dark themes;
-- portable Windows package, per-user Inno Setup installer, SHA-256 checksums and a verified update manifest.
+MusicArk is intended for users who want to keep a local copy of their music collection and compare it with their Yandex Music library. The application treats track identity, metadata, recording variant, and collection coverage as separate concepts: high title similarity alone is not considered a confirmed match.
 
-## Product loop
+Core workflow:
 
 ```text
-Yandex Library = desired collection
+Yandex Music = desired collection
         ↓
-Local Library = actual local files
+Local Library = actual files
         ↓
 Identity Matching + Variant + Coverage
         ↓
@@ -41,38 +37,87 @@ Missing / Wanted
 Download / Metadata / confirmed Sync or Upload actions
 ```
 
-MusicArk intentionally keeps **identity**, **metadata**, **variant**, and **coverage** separate. High title similarity alone never becomes a confirmed identity.
+## Project status
 
-## Local-library safety
+- stage: **Stable**;
+- current public release: **v1.0.0**;
+- release platform: **Windows x64**;
+- SQLite schema: **1.9.0**;
+- Authenticode: **UNSIGNED**.
 
-Normal Scan, Matching, Variant, Coverage and Sync-plan inspection do not modify user audio files.
+`v1.0.0` is published as the first stable public release. The installer and executable are not Authenticode-signed, so Windows SmartScreen may display a warning on first launch.
 
-An existing MP3 changes only after an explicit Metadata Editor action. Writes use a temporary copy in the same directory, MPEG/metadata validation and atomic replacement. Unknown/custom ID3 frames are preserved unless the user explicitly edits them.
+## Features
 
-Removing a failed/needs-review download task removes the queue record, not the completed audio file.
+- Yandex Music sign-in with a user-provided token;
+- cache-first browsing of liked tracks, playlists, and liked albums;
+- indexing of multiple local folders without modifying files during an ordinary Scan;
+- Identity Matching between Yandex Music tracks and local files;
+- Variant analysis and user `ORIGINAL / CENSORED` labels;
+- Coverage / Missing workflows for absent or review-required tracks;
+- Downloads queue with Wanted, retry, cancel, remove, and bulk actions;
+- built-in playback for local and prepared Yandex tracks;
+- Metadata Editor for safe MP3/ID3 writes, artwork, and confirmed Yandex identity binding;
+- manual upload of owned or otherwise permitted MP3 files to Yandex Music and recovery workflows;
+- Controlled Sync with an explicit plan and confirmation before apply;
+- System / Direct / Custom proxy modes;
+- RU/EN interface with System / Light / Dark themes;
+- portable package, per-user installer, and a verifiable update mechanism.
 
-## Formats
+For libraries containing several thousand tracks, MusicArk uses cache-first loading, bounded batches, persisted queues, and sequential workers for expensive operations.
 
-Local-library reads use format adapters. Full safe metadata writing is implemented for **MP3/ID3**; other supported formats remain read-only in Metadata Editor unless a dedicated safe writer path exists.
+## Quick start
 
-Yandex upload uses only explicitly selected files and requires rights confirmation. The user is responsible for having the right to upload and use the content.
+1. Open the [latest GitHub Release](../../releases/latest).
+2. Download `MusicArk-Setup-1.0.0-x64.exe` for a regular installation or `MusicArk-1.0.0-win-x64.zip` for portable use.
+3. Start MusicArk.
+4. If needed, sign in to Yandex Music with a user-provided token.
+5. Add local-library folders and run Scan.
+6. Use Matching, Coverage, and Downloads to review collection state.
 
-## Large libraries
+The packaged Windows build does not require a separately installed Python interpreter or a cloned source checkout.
 
-The release candidate received a dedicated stabilization pass for collections containing several thousand tracks:
+## Requirements
 
-- Local Library opens cache-first and does not start recursive scanning during normal navigation;
-- pages and bulk actions use bounded chunks;
-- Matching persists batches through the active connection instead of opening a second SQLite writer in the hot loop;
-- Select All / bulk decisions show processed/total progress;
-- Downloads refreshes Wanted/queue state on initial load and page reactivation;
-- Download All creates a visible persisted queue first, then drains it through a sequential worker;
-- the Yandex download worker reuses one service/client session and has bounded retry/circuit-breaker behavior for systemic failures;
-- repeated Yandex playback checks cache before expensive provider preparation.
+- 64-bit Windows;
+- internet access for Yandex Music features, updates, and external providers;
+- a Yandex Music user token for features that require authentication.
 
-## Network modes
+External service availability should not be required for local browsing and work with already cached data.
 
-MusicArk supports:
+## Installation
+
+### Installer
+
+`MusicArk-Setup-1.0.0-x64.exe` installs the application for the current user under:
+
+```text
+%LOCALAPPDATA%\Programs\Music Ark
+```
+
+### Portable
+
+`MusicArk-1.0.0-win-x64.zip` can be extracted to any user-writable directory and started through `Music Ark.exe`.
+
+Mutable user data is stored separately under:
+
+```text
+%LOCALAPPDATA%\MusicArk
+```
+
+A normal uninstall is not intended to remove the database, caches, or user settings.
+
+## Usage
+
+Ordinary Scan, Matching, Variant, Coverage, and Sync-plan inspection do not modify user audio files.
+
+An existing MP3 changes only after an explicit Metadata Editor action. Writes use a temporary copy, MPEG/metadata validation, and atomic replacement. Unknown and custom ID3 frames are preserved unless the user explicitly edits them.
+
+Removing a failed/needs-review download task removes the queue record, not a completed audio file.
+
+## Network and proxy
+
+MusicArk supports three modes:
 
 ```text
 System  — operating-system network settings
@@ -82,79 +127,38 @@ Custom  — user-provided proxy
 
 Built-in Cloudflare WARP management has been removed from the release runtime. MusicArk does not install or uninstall WARP automatically.
 
-Failures in external metadata/download providers should degrade locally and must not prevent work with already cached/local library data.
+Failures in external metadata/download providers should remain local to the affected function and must not block work with the local library and cached data.
 
-## Windows distribution
+## Security
 
-The final release pipeline produces:
+- Scan, Matching, Variant, and Coverage are not intended to modify local audio files;
+- MP3 writes happen only after an explicit user action;
+- upload and sync require explicit selection or confirmation;
+- the updater verifies installer size and SHA-256 before launch;
+- release packages include `LICENSE`, `THIRD_PARTY_NOTICES.md`, and third-party license texts.
 
-```text
-MusicArk-1.0.0-win-x64.zip
-MusicArk-Setup-1.0.0-x64.exe
-SHA256SUMS.txt
-update-manifest.json
-```
+## Privacy
 
-Portable and installed builds include the Flutter desktop app and frozen MusicArk backend runtime. Users do not need a separately installed Python interpreter or developer checkout.
+- tokens, cookies, signed media URLs, and proxy passwords must not be committed to Git;
+- the Flutter UI does not receive the Yandex token or protected provider media URLs for playback/download;
+- automatic feedback diagnostics are limited to MusicArk version, OS, and architecture and exclude the music library, local paths, and credentials;
+- mutable installed state is stored in a per-user data directory instead of beside program files.
 
-The per-user installer defaults to `%LOCALAPPDATA%\Programs\Music Ark`. Mutable user data is kept separately under `%LOCALAPPDATA%\MusicArk` and is not intended to be removed by ordinary uninstall.
+## Updating
 
-### Updates
-
-The stable updater uses:
-
-```text
-https://github.com/Regstar2/music-ark/releases/latest/download/update-manifest.json
-```
-
-`MUSICARK_UPDATE_MANIFEST_URL` can override the endpoint for testing/deployment.
-
-The update flow is deliberately separated:
+The stable updater consumes `update-manifest.json` from the latest GitHub Release.
 
 ```text
-check   → fetch and validate manifest only
-prepare → download installer and verify exact size + SHA-256
-apply   → after explicit confirmation, re-verify and launch installer
+check   → fetch and validate manifest
+prepare → download installer and verify size + SHA-256
+apply   → after confirmation, re-verify and launch installer
 ```
 
-An unavailable update endpoint must not prevent normal MusicArk startup.
+An unavailable update endpoint must not prevent normal MusicArk startup. Installing an update requires an explicit user confirmation.
 
-## Data and privacy
+## Development
 
-- tokens, cookies, signed media URLs and proxy passwords must not be committed to Git;
-- Flutter does not receive the Yandex token or protected provider media URLs for playback/download;
-- automatic feedback diagnostics are limited to MusicArk version, OS and architecture and exclude the music library, local paths and credentials;
-- installed mutable state lives in a per-user data directory rather than beside program files.
-
-## v1.0.0 limitations
-
-- Windows x64 is the only release platform;
-- full metadata writing is MP3/ID3-only;
-- some provider functionality depends on external APIs and service availability;
-- automatic `ORIGINAL / CENSORED` analysis is not treated as absolute truth; uncertain cases require review;
-- MusicArk is not a bidirectional filesystem mirror and must not automatically delete/rename existing local tracks;
-- update/install actions do not proceed without an explicit user step;
-- v1.0.0 is published as `UNSIGNED`: no suitable Authenticode code-signing certificate with a private key was found in the checked environment.
-
-## License and third-party components
-
-MusicArk's own code is distributed under the MIT License:
-
-- [LICENSE](LICENSE)
-
-Third-party components keep their own licenses. Windows artifacts include
-Flutter, the CPython/PyInstaller runtime, Python packages, Dart packages,
-FFmpeg, libmpv and other runtime libraries. Their notices/source obligations
-are documented here:
-
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- [licenses/](licenses/)
-
-Yandex Music integration uses an unofficial API through the third-party
-`yandex-music` library. MusicArk is not an official Yandex product and is not
-affiliated with Yandex.
-
-## Windows development run
+Running from source requires Python, Flutter, and the Windows toolchain expected by the current project.
 
 ```powershell
 py -3 -m venv .venv
@@ -163,32 +167,65 @@ python -m pip install -U pip
 python -m pip install -e .
 python -m pip install -r requirements-yandex.txt
 
-.\scripts\ci.ps1
-
 $env:MUSICARK_PYTHON = (Resolve-Path ".\.venv\Scripts\python.exe").Path
 $env:MUSICARK_REPO_ROOT = (Get-Location).Path
 Set-Location .\ui\musicark_ui
 flutter run -d windows
 ```
 
-Final Windows packaging:
+## Build
+
+Final Windows packaging runs from source state where `VERSION` already matches the release version:
 
 ```powershell
 .\scripts\release.ps1 -Version v1.0.0
 ```
 
-It must be run only from source where canonical `VERSION` is already `1.0.0`.
+For `v1.0.0`, the pipeline produces:
+
+```text
+MusicArk-1.0.0-win-x64.zip
+MusicArk-Setup-1.0.0-x64.exe
+SHA256SUMS.txt
+update-manifest.json
+```
+
+## Testing
+
+The main local regression entry point is:
+
+```powershell
+.\scripts\ci.ps1
+```
+
+The repository also contains `Trusted CI` for trusted owner PR/workflow-dispatch runs on a self-hosted Windows x64 runner. External or otherwise untrusted fork PRs must not execute on the owner's persistent self-hosted runner.
 
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md) — project history;
-- [docs/releases/v1.0.0_EN.md](docs/releases/v1.0.0_EN.md) — public release notes;
-- [docs/versions/v1.0.0.md](docs/versions/v1.0.0.md) — first-public-release boundary;
-- [docs/release/release-checklist.md](docs/release/release-checklist.md) — final release gate;
-- [docs/testing/release-regression-matrix.md](docs/testing/release-regression-matrix.md) — regression mapping;
-- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — third-party components and licenses;
-- [GitHub Issues](https://github.com/Regstar2/music-ark/issues) — bugs and feature requests.
+- [v1.0.0 release notes](docs/releases/v1.0.0_EN.md) — details of the first public release;
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — redistributed components, licenses, and source obligations.
 
-## Public release gate
+## Feedback
 
-Before stable `v1.0.0` publication, the project must still have evidence for final CI/tag/artifacts, public feedback/update reachability, legal files included in the final ZIP/installer, and factual installer-signing state (`UNSIGNED` for the currently checked environment). These gates are not satisfied merely because the release code exists in `main`.
+Bugs and feature requests are accepted through [GitHub Issues](../../issues).
+
+Do not publish tokens, cookies, proxy passwords, signed URLs, or other credentials in issue reports.
+
+## Limitations
+
+- Windows x64 is the only release platform;
+- full safe metadata writing is implemented for MP3/ID3; other supported formats may remain read-only in Metadata Editor;
+- some provider functionality depends on external APIs and service availability;
+- automatic `ORIGINAL / CENSORED` analysis is not treated as absolute truth and uncertain cases require review;
+- MusicArk is not a bidirectional filesystem mirror and must not automatically delete, rename, or overwrite existing local tracks;
+- update/install actions do not proceed without an explicit user step;
+- v1.0.0 is distributed without an Authenticode signature.
+
+## License
+
+MusicArk's own code is distributed under the [MIT License](LICENSE).
+
+Third-party components keep their own licenses. Their notices and source obligations are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the [`licenses/`](licenses/) directory.
+
+Yandex Music integration uses an unofficial API through the third-party `yandex-music` library. MusicArk is not an official Yandex product and is not affiliated with Yandex.

@@ -4,7 +4,9 @@
 
 Windows-приложение для управления локальной музыкальной коллекцией и сопоставления её с библиотекой Яндекс Музыки. Помогает находить отсутствующие треки, проверять версии записей, восстанавливать метаданные и выполнять контролируемую синхронизацию.
 
+[![Release](https://img.shields.io/github/v/release/Regstar2/music-ark?display_name=tag&sort=semver&style=for-the-badge&logo=github&label=release)](../../releases)
 [![Platform](https://img.shields.io/badge/platform-Windows_x64-0A7EA4?style=for-the-badge)](#требования)
+[![License](https://img.shields.io/github/license/Regstar2/music-ark?style=for-the-badge&label=license)](LICENSE)
 
 **Русский** · [English](README_EN.md)
 
@@ -38,12 +40,12 @@ Download / Metadata / подтверждённые Sync или Upload дейст
 ## Статус проекта
 
 - стадия: **Stable**;
-- текущий релиз: **v1.0.0**;
+- текущий публичный релиз: **v1.0.0**;
 - платформа релиза: **Windows x64**;
 - SQLite schema: **1.9.0**;
 - Authenticode: **UNSIGNED**.
 
-`v1.0.0` опубликован как первый стабильный релиз. Установщик и executable не подписаны Authenticode, поэтому Windows SmartScreen может показать предупреждение при первом запуске.
+`v1.0.0` опубликован как первый стабильный публичный релиз. Установщик и executable не подписаны Authenticode, поэтому Windows SmartScreen может показать предупреждение при первом запуске.
 
 ## Возможности
 
@@ -201,7 +203,7 @@ update-manifest.json
 ## Документация
 
 - [CHANGELOG.md](CHANGELOG.md) — история изменений;
-- [Release notes v1.0.0](docs/releases/v1.0.0.md) — подробности первого стабильного релиза;
+- [Release notes v1.0.0](docs/releases/v1.0.0.md) — подробности первого публичного релиза;
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — сторонние компоненты, лицензии и source obligations.
 
 ## Обратная связь

@@ -51,6 +51,16 @@ Download / Metadata / подтверждённые Sync или Upload дейст
 
 `v1.0.0` опубликован как первый стабильный публичный релиз. Установщик и executable не подписаны Authenticode, поэтому Windows SmartScreen может показать предупреждение при первом запуске.
 
+## Скриншоты
+
+Актуальный интерфейс MusicArk `v1.0.0`:
+
+<table>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162034.png" alt="MusicArk — экран 1" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162113.png" alt="MusicArk — экран 2" width="100%"></td></tr>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162320.png" alt="MusicArk — экран 3" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162347.png" alt="MusicArk — экран 4" width="100%"></td></tr>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162416.png" alt="MusicArk — экран 5" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162516.png" alt="MusicArk — экран 6" width="100%"></td></tr>
+</table>
+
 ## Возможности
 
 - вход в Яндекс Музыку через пользовательский токен;

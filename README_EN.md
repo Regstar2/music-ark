@@ -51,6 +51,16 @@ Download / Metadata / confirmed Sync or Upload actions
 
 `v1.0.0` is published as the first stable public release. The installer and executable are not Authenticode-signed, so Windows SmartScreen may display a warning on first launch.
 
+## Screenshots
+
+Current MusicArk `v1.0.0` interface:
+
+<table>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162034.png" alt="MusicArk — screen 1" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162113.png" alt="MusicArk — screen 2" width="100%"></td></tr>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162320.png" alt="MusicArk — screen 3" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162347.png" alt="MusicArk — screen 4" width="100%"></td></tr>
+<tr><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162416.png" alt="MusicArk — screen 5" width="100%"></td><td><img src="docs/assets/Снимок%20экрана%202026-09-06%20162516.png" alt="MusicArk — screen 6" width="100%"></td></tr>
+</table>
+
 ## Features
 
 - Yandex Music sign-in with a user-provided token;

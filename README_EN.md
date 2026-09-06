@@ -12,6 +12,8 @@ A Windows application for managing a local music collection and matching it agai
 
 [Русский](README.md) · **English**
 
+[🌐 Project website](https://regstar2.github.io/projects/music-ark/) · [Русская версия сайта](https://regstar2.github.io/projects/music-ark/ru/)
+
 [Quick start](#quick-start) ·
 [Documentation](#documentation) ·
 [Releases](../../releases) ·

@@ -12,6 +12,8 @@ Windows-приложение для управления локальной му
 
 **Русский** · [English](README_EN.md)
 
+[🌐 Страница проекта](https://regstar2.github.io/projects/music-ark/ru/) · [English website](https://regstar2.github.io/projects/music-ark/)
+
 [Быстрый старт](#быстрый-старт) ·
 [Документация](#документация) ·
 [Релизы](../../releases) ·
